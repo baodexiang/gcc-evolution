@@ -40,11 +40,14 @@ from .constraints import Constraint, ConstraintStore
 from .skill_registry import SkillRegistry, SkillResult
 from .selfcheck import run_self_check, generate_status_md
 from .human_anchor import HumanAnchor, HumanAnchorStore, AnchorPauseSignal, NLQParser
-from .backtest_store import (
-    DomainEvent, BacktestStore,
-    CounterfactualEngine, CounterfactualResult,
-    DrawdownAnalyzer, DrawdownAttribution, PatternStats,
-)
+try:
+    from .backtest_store import (
+        DomainEvent, BacktestStore,
+        CounterfactualEngine, CounterfactualResult,
+        DrawdownAnalyzer, DrawdownAttribution, PatternStats,
+    )
+except (ImportError, AttributeError):
+    pass  # backtest_store 部分符号缺失时降级跳过
 
 __all__ = [
     "CardStatus",
