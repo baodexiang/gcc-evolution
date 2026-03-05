@@ -12,7 +12,7 @@
 
 每次修改代码后，**自动**将更新点追加到 `.GCC/skill/evolution-log.md`，无需询问。
 
-每次产出/更新交接内容（handoff）时，**必须严格同步更新** `\.GCC\handoff.md`，不得只写在对话或其他文档中。
+Handoff 统一由 `gcc-evo ho create` 写入 `.gcc/branches/{branch}/handoff.md`，无需手动同步其他位置。
 
 记录格式：
 ```markdown
