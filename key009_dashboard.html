@@ -84,6 +84,24 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <a href="/key009/reject" id="reject-btn" style="float:right;color:#cf222e;font-weight:700;text-decoration:none;display:none">[REJECT]</a>
 </div>
 
+<!-- System Evolution Score Bar (GCC-0202) -->
+<div id="evo-score-bar" style="background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:12px 16px;margin-bottom:12px;display:none">
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <div style="text-align:center;min-width:70px">
+      <div style="font-size:0.7em;color:#656d76;text-transform:uppercase">System Score</div>
+      <div id="evo-total-score" style="font-size:2em;font-weight:700">-</div>
+      <div id="evo-trend" style="font-size:0.8em"></div>
+    </div>
+    <div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;min-width:300px">
+      <div class="evo-dim" id="evo-dim-win"><div class="evo-dim-label">Win Rate</div><div class="evo-dim-bar"></div><div class="evo-dim-val"></div></div>
+      <div class="evo-dim" id="evo-dim-err"><div class="evo-dim-label">Errors</div><div class="evo-dim-bar"></div><div class="evo-dim-val"></div></div>
+      <div class="evo-dim" id="evo-dim-exec"><div class="evo-dim-label">Exec Eff</div><div class="evo-dim-bar"></div><div class="evo-dim-val"></div></div>
+      <div class="evo-dim" id="evo-dim-stab"><div class="evo-dim-label">Stability</div><div class="evo-dim-bar"></div><div class="evo-dim-val"></div></div>
+    </div>
+    <div id="evo-collab-badge" style="display:none;background:#cf222e;color:#fff;border-radius:12px;padding:2px 10px;font-size:0.8em;font-weight:600"></div>
+  </div>
+</div>
+
 <!-- Summary -->
 <div class="summary" id="summary"></div>
 
@@ -102,6 +120,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div class="tab" data-tab="sigacc">信号准确率</div>
 <div class="tab" data-tab="baseline">仓位控制</div>
 <div class="tab" data-tab="broker">券商对账</div>
+<div class="tab" data-tab="evolution">进化</div>
 </div>
 
 <!-- Tab: 策略排行 -->
@@ -279,6 +298,18 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 </div>
 <div></div>
 </div>
+</div>
+
+<!-- Tab: 进化 (GCC-0202) -->
+<div class="tab-content" id="tab-evolution">
+<h2>系统评分基准</h2>
+<table><thead><tr><th>维度</th><th>当前值</th><th>基准值</th><th>状态</th></tr></thead><tbody id="evo-baselines-body"></tbody></table>
+<h2>协作问题</h2>
+<div id="evo-collab-list" style="margin-bottom:16px"></div>
+<h2>GCC记忆历史 (最近10条)</h2>
+<div id="evo-memory-list" style="margin-bottom:16px"></div>
+<h2>评分趋势</h2>
+<div id="evo-trend-info" style="font-size:0.9em;color:#656d76;margin-bottom:16px"></div>
 </div>
 
 <footer>Auto-refresh 5 min | <span id="footer-time"></span></footer>
@@ -1370,6 +1401,90 @@ function _doRender() {
     } else {
         brSourceBody.innerHTML = '<tr><td colspan="4" style="color:#656d76">无已验证拦截</td></tr>';
     }
+
+    // ── GCC-0202: 系统进化 Score Bar + Tab ──
+    const evo = DATA.system_evo || {};
+    const evoBar = $('evo-score-bar');
+    if (evo.score !== undefined) {
+        evoBar.style.display = 'block';
+        const sc = evo.score || 0;
+        const scColor = sc >= 70 ? '#1a7f37' : sc >= 50 ? '#9a6700' : '#cf222e';
+        $('evo-total-score').textContent = sc.toFixed(0);
+        $('evo-total-score').style.color = scColor;
+        // Trend arrow
+        const trendMap = {'IMPROVING':'\u2191 Improving','STABLE':'\u2192 Stable','DECLINING':'\u2193 Declining'};
+        const trendColor = {'IMPROVING':'#1a7f37','STABLE':'#656d76','DECLINING':'#cf222e'};
+        const tEl = $('evo-trend');
+        tEl.textContent = trendMap[evo.trend] || evo.trend || '';
+        tEl.style.color = trendColor[evo.trend] || '#656d76';
+        // 4 dimensions
+        const dims = [
+            ['evo-dim-win', 'Win Rate', evo.win_rate, evo.baselines?.win_rate],
+            ['evo-dim-err', 'Errors', evo.errors, evo.baselines?.errors],
+            ['evo-dim-exec', 'Exec Eff', evo.exec_eff, evo.baselines?.exec_eff],
+            ['evo-dim-stab', 'Stability', evo.stability, evo.baselines?.stability],
+        ];
+        dims.forEach(([id, label, val, bl]) => {
+            const el = $(id);
+            if (!el) return;
+            const v = val || 0;
+            const met = bl ? bl.met : false;
+            const barColor = met ? '#1a7f37' : v >= 50 ? '#9a6700' : '#cf222e';
+            el.innerHTML = `<div style="font-size:0.65em;color:#656d76">${label}</div>
+                <div style="background:#eaeef2;border-radius:3px;height:8px;margin:2px 0">
+                    <div style="background:${barColor};width:${Math.min(v,100)}%;height:100%;border-radius:3px"></div>
+                </div>
+                <div style="font-size:0.75em;font-weight:600;color:${barColor}">${v.toFixed(0)} ${met?'\u2713':'\u2715'}</div>`;
+        });
+        // Collab badge
+        const badge = $('evo-collab-badge');
+        if (evo.collab_count > 0) {
+            badge.style.display = 'inline-block';
+            badge.textContent = evo.collab_count + ' issues';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+
+    // Evolution tab content
+    const blBody = $('evo-baselines-body');
+    if (evo.baselines) {
+        const dimNames = {win_rate:'Win Rate',errors:'Error Score',exec_eff:'Exec Efficiency',stability:'Stability'};
+        blBody.innerHTML = Object.entries(evo.baselines).map(([k, bl]) => {
+            const met = bl.met;
+            const icon = met ? '<span style="color:#1a7f37;font-weight:700">\u2713</span>' : '<span style="color:#cf222e;font-weight:700">\u2715</span>';
+            const valColor = met ? '#1a7f37' : '#cf222e';
+            return `<tr><td>${dimNames[k]||k}</td><td style="color:${valColor};font-weight:600">${(bl.value||0).toFixed(1)}</td><td>${bl.threshold}</td><td>${icon}</td></tr>`;
+        }).join('');
+    }
+    // Collab issues list
+    const collabList = $('evo-collab-list');
+    const collabs = evo.collab_issues || [];
+    if (collabs.length) {
+        collabList.innerHTML = collabs.map(c => {
+            const sevColor = c.severity === 'CRITICAL' ? '#cf222e' : c.severity === 'HIGH' ? '#bc4c00' : '#9a6700';
+            return `<div class="issue-item"><span class="issue-tag" style="color:${sevColor}">[${c.severity}]</span><span class="badge badge-risk">${c.type}</span> ${c.detail}</div>`;
+        }).join('');
+    } else {
+        collabList.innerHTML = '<div style="color:#1a7f37;font-size:0.85em">No collaboration issues detected</div>';
+    }
+    // Memory history
+    const memList = $('evo-memory-list');
+    const mems = evo.memory_history || [];
+    if (mems.length) {
+        memList.innerHTML = mems.map(m => {
+            const fields = m.fields || {};
+            const fieldHtml = Object.entries(fields).map(([k,v]) => `<div style="font-size:0.8em;color:#656d76;margin-left:12px"><strong>${k}</strong>: ${v}</div>`).join('');
+            return `<details style="margin:4px 0;border:1px solid #eaeef2;border-radius:6px;padding:6px 10px">
+                <summary style="cursor:pointer;font-weight:600;font-size:0.85em"><span class="badge badge-ok">${m.priority}</span> ${m.date} ${m.title}</summary>
+                ${fieldHtml}
+            </details>`;
+        }).join('');
+    } else {
+        memList.innerHTML = '<div style="color:#656d76;font-size:0.85em">No evolution memory entries</div>';
+    }
+    // Trend info
+    $('evo-trend-info').textContent = `Current trend: ${evo.trend || 'STABLE'} | Score: ${(evo.score||0).toFixed(1)}/100`;
 }
 
 loadData();

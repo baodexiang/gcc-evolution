@@ -891,6 +891,12 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
     # ── KEY-009 券商对账 ──
     broker_match = _match_broker_trades(hours)
 
+    # ── GCC-0202: 五层进化系统评分 ──
+    system_evo = _build_system_evo(
+        trade_analysis, tasks, issues,
+        dict(scan_plugins), dict(plugin_exec), hours,
+        gates, dict(gate_totals))
+
     # ── 基准K线状态 ──
     _bl_state = {}
     try:
@@ -931,7 +937,8 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
                          broker_match=broker_match,
                          plugin_accuracy=plugin_accuracy,
                          plugin_phases=plugin_phases,
-                         baseline_data=_baseline_data)
+                         baseline_data=_baseline_data,
+                         system_evo=system_evo)
 
 
 def _load_system_config() -> dict:
@@ -2331,6 +2338,237 @@ def _get_current_price_safe(symbol: str) -> float:
     return 0.0
 
 
+# ============================================================
+# GCC-0202: 五层进化 — 系统评分 + 协作问题检测
+# ============================================================
+
+BASELINE_THRESHOLDS = {
+    "win_rate": 50,      # 胜率基准 50%
+    "errors": 80,        # 错误分 80+ = 低错误率
+    "exec_eff": 30,      # 执行效率 30%+
+    "stability": 90,     # 稳定性 90+
+}
+
+
+def _calc_win_rate_score(trade_analysis: dict) -> float:
+    """S01: 从completed_trades算胜率, 归一化0-100。"""
+    wr = trade_analysis.get("win_rate", 0)
+    if isinstance(wr, (int, float)):
+        return round(min(wr * 100, 100), 1)  # 0.45 → 45.0
+    return 0.0
+
+
+def _calc_error_score(tasks: dict, issues: list) -> float:
+    """S02: 4h窗口ERROR/异常行数, 反比归一化(0错=100, 10+错=0)。"""
+    error_count = sum(1 for iss in issues if iss.get("type") == "ERROR")
+    error_count += sum(t.get("errors", 0) for t in tasks.values())
+    # 0错=100, 每个错误-10, 下限0
+    return max(0, 100 - error_count * 10)
+
+
+def _calc_execution_efficiency(scan_plugins: dict, plugin_exec: dict) -> float:
+    """S03: 外挂触发→实际下单比率, 含gate通过率。"""
+    total_trigger = sum(p.get("trigger", 0) for p in scan_plugins.values())
+    total_exec = sum(p.get("executed", 0) for p in scan_plugins.values())
+    # 也考虑主程序外挂执行
+    total_trigger += plugin_exec.get("sent", 0) + plugin_exec.get("skip", 0) + plugin_exec.get("block", 0)
+    total_exec += plugin_exec.get("sent", 0)
+    if total_trigger == 0:
+        return 50.0  # 无数据→中性
+    return round(total_exec / total_trigger * 100, 1)
+
+
+def _calc_stability_score(issues: list, hours: int) -> float:
+    """S04: 连续4h无crash/restart=100, 每次restart-20。"""
+    restart_count = sum(1 for iss in issues
+                        if "restart" in iss.get("msg", "").lower()
+                        or "crash" in iss.get("msg", "").lower()
+                        or "未运行" in iss.get("msg", ""))
+    return max(0, 100 - restart_count * 20)
+
+
+def _calc_system_score(trade_analysis: dict, tasks: dict, issues: list,
+                       scan_plugins: dict, plugin_exec: dict, hours: int) -> dict:
+    """S05: 4维加权(各0.25)返回总分 + 子分 + 基准达标。"""
+    win = _calc_win_rate_score(trade_analysis)
+    err = _calc_error_score(tasks, issues)
+    exc = _calc_execution_efficiency(scan_plugins, plugin_exec)
+    stb = _calc_stability_score(issues, hours)
+    total = round(win * 0.25 + err * 0.25 + exc * 0.25 + stb * 0.25, 1)
+    baselines = {
+        "win_rate": {"value": win, "threshold": BASELINE_THRESHOLDS["win_rate"], "met": win >= BASELINE_THRESHOLDS["win_rate"]},
+        "errors": {"value": err, "threshold": BASELINE_THRESHOLDS["errors"], "met": err >= BASELINE_THRESHOLDS["errors"]},
+        "exec_eff": {"value": exc, "threshold": BASELINE_THRESHOLDS["exec_eff"], "met": exc >= BASELINE_THRESHOLDS["exec_eff"]},
+        "stability": {"value": stb, "threshold": BASELINE_THRESHOLDS["stability"], "met": stb >= BASELINE_THRESHOLDS["stability"]},
+    }
+    return {"score": total, "win_rate": win, "errors": err, "exec_eff": exc, "stability": stb, "baselines": baselines}
+
+
+def _detect_collaboration_issues(scan_plugins: dict, tasks: dict, issues: list,
+                                 gates: dict, gate_totals: dict) -> list:
+    """S07-S12: 协作问题检测。"""
+    collab = []
+
+    # S07: 外挂触发高但gate拦截率>90%
+    for pname, pdata in scan_plugins.items():
+        trigger = pdata.get("trigger", 0)
+        executed = pdata.get("executed", 0)
+        if trigger >= 3 and executed == 0:
+            collab.append({"type": "PLUGIN_GATE_CONFLICT", "severity": "HIGH",
+                           "detail": f"{pname} 触发{trigger}次但0执行, gate全拦截"})
+        elif trigger >= 5 and executed / trigger < 0.1:
+            collab.append({"type": "PLUGIN_GATE_CONFLICT", "severity": "MEDIUM",
+                           "detail": f"{pname} 触发{trigger}次仅{executed}执行({executed/trigger:.0%})"})
+
+    # S08: DATA-STALE占总issue比>50%
+    total_issues = len([i for i in issues if i.get("type") not in ("POSITIVE",)])
+    stale_count = sum(1 for i in issues if "DATA-STALE" in i.get("task", "") or "DATA-STALE" in i.get("msg", ""))
+    if total_issues >= 3 and stale_count / total_issues > 0.5:
+        collab.append({"type": "DATA_QUALITY_ISSUE", "severity": "HIGH",
+                       "detail": f"DATA-STALE占{stale_count}/{total_issues}({stale_count/total_issues:.0%}), 数据源不稳定"})
+
+    # S09: GCC任务全ERROR(0成功)
+    error_tasks = [tid for tid, t in tasks.items() if t.get("status") == "ERROR"]
+    ok_tasks = [tid for tid, t in tasks.items() if t.get("status") == "OK"]
+    if error_tasks and not ok_tasks:
+        collab.append({"type": "TASK_FAILURE_ISSUE", "severity": "CRITICAL",
+                       "detail": f"全部GCC任务异常: {', '.join(error_tasks)}"})
+
+    # S10: 信号翻转检测(从issues中提取)
+    flip_issues = [i for i in issues if "翻转" in i.get("msg", "") or "FLIP" in i.get("msg", "").upper()]
+    if len(flip_issues) >= 2:
+        collab.append({"type": "FLIP_ISSUE", "severity": "MEDIUM",
+                       "detail": f"检测到{len(flip_issues)}次信号翻转问题"})
+
+    return collab
+
+
+def _parse_evolution_memory() -> list:
+    """S18-S21: 解析evolution-log.md → 最近10条记忆。"""
+    evo_path = ROOT / ".GCC" / "skill" / "evolution-log.md"
+    if not evo_path.exists():
+        return []
+    try:
+        text = evo_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return []
+
+    entries = []
+    pattern = re.compile(r"###\s+\[(\d{4}-\d{2}-\d{2})\]\s+\[([^\]]+)\]\s+(.*)")
+    current = None
+    for line in text.splitlines():
+        m = pattern.match(line)
+        if m:
+            if current:
+                entries.append(current)
+            current = {"date": m.group(1), "priority": m.group(2), "title": m.group(3).strip(),
+                        "fields": {}}
+        elif current and line.startswith("- **") and "**:" in line:
+            # 提取 场景/问题/解决方案/代码位置/教训
+            key_match = re.match(r"- \*\*(.+?)\*\*:\s*(.*)", line)
+            if key_match:
+                current["fields"][key_match.group(1)] = key_match.group(2).strip()
+    if current:
+        entries.append(current)
+
+    # 按日期倒排取最近10条
+    entries.sort(key=lambda x: x["date"], reverse=True)
+    return entries[:10]
+
+
+def _append_evo_history(scores: dict) -> str:
+    """S23-S28: 每4h追加到system_evo_history.jsonl + 计算trend。"""
+    hist_path = STATE_DIR / "system_evo_history.jsonl"
+    now_ny = datetime.now(NY_TZ)
+    slot = ((now_ny.hour - 8) % 24) // 4
+
+    record = {
+        "ts": now_ny.strftime("%Y-%m-%dT%H:%M"),
+        "slot": slot,
+        "score": scores.get("score", 0),
+        "win_rate": scores.get("win_rate", 0),
+        "errors": scores.get("errors", 0),
+        "exec_eff": scores.get("exec_eff", 0),
+        "stability": scores.get("stability", 0),
+    }
+
+    # 追加
+    try:
+        with open(hist_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+    # 读全部计算trend
+    history = []
+    try:
+        if hist_path.exists():
+            for line in hist_path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    try:
+                        history.append(json.loads(line))
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # 文件轮转: 超过180条保留最近180
+    if len(history) > 180:
+        history = history[-180:]
+        try:
+            with open(hist_path, "w", encoding="utf-8") as f:
+                for h in history:
+                    f.write(json.dumps(h, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+    # trend: 当前vs7天前均值
+    trend = "STABLE"
+    if len(history) >= 42:
+        recent_avg = sum(h["score"] for h in history[-6:]) / 6
+        old_avg = sum(h["score"] for h in history[-42:-36]) / 6
+        diff = recent_avg - old_avg
+        if diff > 5:
+            trend = "IMPROVING"
+        elif diff < -5:
+            trend = "DECLINING"
+    elif len(history) >= 12:
+        recent_avg = sum(h["score"] for h in history[-6:]) / 6
+        old_avg = sum(h["score"] for h in history[:6]) / 6
+        diff = recent_avg - old_avg
+        if diff > 5:
+            trend = "IMPROVING"
+        elif diff < -5:
+            trend = "DECLINING"
+
+    return trend
+
+
+def _build_system_evo(trade_analysis: dict, tasks: dict, issues: list,
+                      scan_plugins: dict, plugin_exec: dict, hours: int,
+                      gates: dict, gate_totals: dict) -> dict:
+    """S13-S17: 组装system_evo字段。"""
+    scores = _calc_system_score(trade_analysis, tasks, issues, scan_plugins, plugin_exec, hours)
+    collab_issues = _detect_collaboration_issues(scan_plugins, tasks, issues, gates, gate_totals)
+    memory = _parse_evolution_memory()
+    trend = _append_evo_history(scores)
+    scores["collab_issues"] = collab_issues
+    scores["collab_count"] = len(collab_issues)
+
+    return {
+        "score": scores["score"],
+        "win_rate": scores["win_rate"],
+        "errors": scores["errors"],
+        "exec_eff": scores["exec_eff"],
+        "stability": scores["stability"],
+        "baselines": scores["baselines"],
+        "trend": trend,
+        "collab_issues": collab_issues,
+        "collab_count": len(collab_issues),
+        "memory_history": memory,
+    }
+
+
 def _build_result(now_str, hours, tasks, summary_metrics,
                   vf_by_plugin, macd_stats, knn_suppress,
                   knn_suppress_total, plugin_exec, governance_actions,
@@ -2343,7 +2581,8 @@ def _build_result(now_str, hours, tasks, summary_metrics,
                   block_validation=None, strategy_ranking=None,
                   broker_match=None, plugin_accuracy=None,
                   plugin_phases=None,
-                  baseline_data=None):
+                  baseline_data=None,
+                  system_evo=None):
     """构建输出数据结构。"""
     # 序列化defaultdict → dict
     _macd = dict(macd_stats)
@@ -2492,6 +2731,7 @@ def _build_result(now_str, hours, tasks, summary_metrics,
         "plugin_accuracy": plugin_accuracy or {},
         "plugin_phases": plugin_phases or {},
         "baseline": baseline_data or {"stats": {"total": 0, "pass": 0, "block": 0, "no_data": 0, "by_symbol": {}, "by_direction": {}}, "state": {}},
+        "system_evo": system_evo or {"score": 0, "baselines": {}, "collab_issues": [], "collab_count": 0, "memory_history": [], "trend": "STABLE"},
         "issues": issues,
     }
 
