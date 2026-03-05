@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t.login_title }}{% endblock %}
+
+{% block extra_css %}
+.auth-container {
+    max-width: 400px;
+    margin: 60px auto;
+}
+
+.auth-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 32px;
+    box-shadow: var(--shadow-md);
+}
+
+.auth-header {
+    text-align: center;
+    margin-bottom: 24px;
+}
+
+.auth-header h1 {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.auth-header p {
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.auth-footer {
+    text-align: center;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.auth-footer a {
+    color: var(--accent-blue);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.auth-footer a:hover {
+    text-decoration: underline;
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+    .auth-container {
+        margin: 24px auto;
+        padding: 0 12px;
+    }
+
+    .auth-card {
+        padding: 24px 20px;
+    }
+
+    .auth-header h1 {
+        font-size: 20px;
+    }
+
+    .auth-header p {
+        font-size: 13px;
+    }
+}
+
+@media (max-width: 375px) {
+    .auth-card {
+        padding: 20px 16px;
+    }
+
+    .auth-header h1 {
+        font-size: 18px;
+    }
+}
+{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-header">
+            <h1>{{ t.nav_login }}</h1>
+            <p>AI PRO Trading System</p>
+        </div>
+
+        <div id="errorMsg" class="alert alert-error" style="display: none;"></div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label class="form-label">{{ t.email }}</label>
+                <input type="email" class="form-input" id="email" required placeholder="your@email.com">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">{{ t.password }}</label>
+                <input type="password" class="form-input" id="password" required placeholder="••••••••">
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-full" id="submitBtn">
+                <i class="bi bi-box-arrow-in-right"></i>
+                {{ t.login_button }}
+            </button>
+        </form>
+
+        <div class="auth-footer">
+            {{ t.no_account }} <a href="/register">{{ t.register_button }}</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const T = {{ t | tojson }};
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const btn = document.getElementById('submitBtn');
+    const errorMsg = document.getElementById('errorMsg');
+    errorMsg.style.display = 'none';
+
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> ' + T.loading;
+
+    try {
+        const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            location.href = '/';
+        } else {
+            errorMsg.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${T[data.message] || data.message}`;
+            errorMsg.style.display = 'flex';
+        }
+    } catch (err) {
+        errorMsg.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${err.message}`;
+        errorMsg.style.display = 'flex';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="bi bi-box-arrow-in-right"></i> ${T.login_button}`;
+    }
+});
+</script>
+{% endblock %}

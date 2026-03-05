@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t.signals_title }}{% endblock %}
+
+{% block extra_css %}
+.filter-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.filter-btn {
+    padding: 8px 16px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.filter-btn:hover { border-color: var(--accent-blue); }
+.filter-btn.active { background: var(--accent-blue); color: white; border-color: var(--accent-blue); }
+
+/* Mobile */
+@media (max-width: 768px) {
+    .filter-bar {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .filter-btn {
+        padding: 10px 14px;
+        font-size: 12px;
+        flex: 1;
+        min-width: 80px;
+        text-align: center;
+    }
+
+    .table-container {
+        margin: 0 -16px;
+        padding: 0 16px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .data-table {
+        min-width: 600px;
+    }
+}
+
+@media (max-width: 375px) {
+    .filter-btn {
+        padding: 8px 10px;
+        font-size: 11px;
+    }
+}
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-list-check"></i> {{ t.signal_history }}
+    </div>
+    <div class="card-body">
+        <div class="filter-bar">
+            <button class="filter-btn active" onclick="filterSignals('')">{{ t.filter_all }}</button>
+            <button class="filter-btn" onclick="filterSignals('BUY')">{{ t.filter_buy }}</button>
+            <button class="filter-btn" onclick="filterSignals('SELL')">{{ t.filter_sell }}</button>
+        </div>
+
+        <div class="table-container">
+            <table class="data-table" id="signalsTable">
+                <thead>
+                    <tr>
+                        <th>{{ t.time }}</th>
+                        <th>{{ t.symbol }}</th>
+                        <th>{{ t.action }}</th>
+                        <th>{{ t.price }}</th>
+                        <th>{{ t.confidence }}</th>
+                        <th>{{ t.reason }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="6" style="text-align: center; padding: 48px; color: var(--text-muted);">{{ t.loading }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const T = {{ t | tojson }};
+let currentFilter = '';
+
+async function loadSignals(action = '') {
+    try {
+        const url = '/api/history?limit=100' + (action ? `&action=${action}` : '');
+        const response = await fetch(url);
+        const data = await response.json();
+
+        const tbody = document.querySelector('#signalsTable tbody');
+
+        if (data.success && data.history.length > 0) {
+            tbody.innerHTML = data.history.reverse().map(s => `
+                <tr>
+                    <td>${new Date(s.timestamp).toLocaleString()}</td>
+                    <td><strong>${s.symbol}</strong></td>
+                    <td><span class="signal-badge ${s.action.toLowerCase()}">${s.action}</span></td>
+                    <td>$${s.price.toFixed(2)}</td>
+                    <td>${(s.confidence * 100).toFixed(0)}%</td>
+                    <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${s.reason || '-'}</td>
+                </tr>
+            `).join('');
+        } else {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 48px; color: var(--text-muted);">${T.no_signals}</td></tr>`;
+        }
+    } catch (err) {
+        console.error('Load signals failed:', err);
+    }
+}
+
+function filterSignals(action) {
+    currentFilter = action;
+    document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+    loadSignals(action);
+}
+
+loadSignals();
+</script>
+{% endblock %}

@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AI PRO Trading{% endblock %}</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f9fafb;
+            --bg-card: #ffffff;
+            --bg-hover: #f3f4f6;
+            --border-color: #e5e7eb;
+            --border-focus: #0052ff;
+            --text-primary: #0a0b0d;
+            --text-secondary: #5b616e;
+            --text-muted: #8a919e;
+            --accent-blue: #0052ff;
+            --accent-blue-light: #e8f0ff;
+            --color-buy: #00a478;
+            --color-buy-bg: #e6f7f2;
+            --color-sell: #cf202f;
+            --color-sell-bg: #fde8ea;
+            --color-hold: #f5a623;
+            --color-hold-bg: #fef7e6;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'IBM Plex Mono', monospace;
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+
+        .navbar {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 0 24px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+        }
+
+        .navbar-inner {
+            max-width: 1280px;
+            margin: 0 auto;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--accent-blue);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 18px;
+        }
+
+        .logo-text { font-weight: 700; font-size: 18px; color: var(--text-primary); }
+
+        .logo-badge {
+            background: var(--color-hold-bg);
+            color: var(--color-hold);
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: var(--radius-sm);
+            transition: all 0.15s ease;
+        }
+
+        .nav-link:hover { color: var(--text-primary); background: var(--bg-hover); }
+        .nav-link.active { color: var(--accent-blue); background: var(--accent-blue-light); }
+
+        .nav-version {
+            color: var(--text-muted);
+            font-size: 12px;
+            font-family: var(--font-mono);
+            padding: 4px 10px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-sm);
+            margin-left: 8px;
+        }
+
+        .lang-switch {
+            display: flex;
+            gap: 4px;
+            margin-left: 12px;
+            padding: 4px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-sm);
+        }
+
+        .lang-btn {
+            padding: 4px 10px;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.15s;
+        }
+
+        .lang-btn:hover { color: var(--text-primary); }
+        .lang-btn.active { background: var(--bg-primary); color: var(--accent-blue); box-shadow: var(--shadow-sm); }
+
+        /* Mobile hamburger menu */
+        .menu-toggle {
+            display: none;
+            width: 44px;
+            height: 44px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            padding: 10px;
+            position: relative;
+        }
+
+        .menu-toggle span {
+            display: block;
+            width: 24px;
+            height: 2px;
+            background: var(--text-primary);
+            margin: 5px 0;
+            transition: all 0.3s ease;
+            border-radius: 2px;
+        }
+
+        .menu-toggle.active span:nth-child(1) {
+            transform: rotate(45deg) translate(5px, 5px);
+        }
+
+        .menu-toggle.active span:nth-child(2) {
+            opacity: 0;
+        }
+
+        .menu-toggle.active span:nth-child(3) {
+            transform: rotate(-45deg) translate(5px, -5px);
+        }
+
+        .mobile-menu {
+            display: none;
+            position: fixed;
+            top: 56px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-primary);
+            z-index: 99;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .mobile-menu.active {
+            display: block;
+        }
+
+        .mobile-menu-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 16px;
+            font-weight: 500;
+            border-radius: var(--radius-md);
+            margin-bottom: 4px;
+            transition: all 0.15s ease;
+        }
+
+        .mobile-menu-link:hover,
+        .mobile-menu-link:active {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .mobile-menu-link.active {
+            background: var(--accent-blue-light);
+            color: var(--accent-blue);
+        }
+
+        .mobile-menu-link i {
+            font-size: 20px;
+            width: 24px;
+            text-align: center;
+        }
+
+        .mobile-lang-switch {
+            display: flex;
+            gap: 8px;
+            padding: 16px;
+            margin-top: 16px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .mobile-lang-btn {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: var(--radius-md);
+            transition: all 0.15s;
+        }
+
+        .mobile-lang-btn.active {
+            background: var(--accent-blue);
+            color: white;
+            border-color: var(--accent-blue);
+        }
+
+        /* Mobile bottom navigation */
+        .bottom-nav {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-primary);
+            border-top: 1px solid var(--border-color);
+            padding: 8px 0;
+            padding-bottom: max(8px, env(safe-area-inset-bottom));
+            z-index: 100;
+        }
+
+        .bottom-nav-inner {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+
+        .bottom-nav-link {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 8px 16px;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 10px;
+            font-weight: 500;
+            transition: all 0.15s;
+        }
+
+        .bottom-nav-link i {
+            font-size: 20px;
+            margin-bottom: 2px;
+        }
+
+        .bottom-nav-link.active {
+            color: var(--accent-blue);
+        }
+
+        .main-content {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .card-header i { color: var(--accent-blue); }
+        .card-body { padding: 20px; }
+
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; }
+
+        .form-select, .form-input {
+            width: 100%;
+            padding: 10px 14px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            font-size: 14px;
+            transition: all 0.15s ease;
+        }
+
+        .form-select:focus, .form-input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px var(--accent-blue-light);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 20px;
+            font-family: var(--font-sans);
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-decoration: none;
+        }
+
+        .btn-primary { background: var(--accent-blue); color: white; }
+        .btn-primary:hover { background: #0046d9; transform: translateY(-1px); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-secondary { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); }
+        .btn-full { width: 100%; }
+
+        .signal-buy { color: var(--color-buy); }
+        .signal-sell { color: var(--color-sell); }
+        .signal-hold { color: var(--color-hold); }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .alert-error { background: var(--color-sell-bg); color: var(--color-sell); }
+        .alert-success { background: var(--color-buy-bg); color: var(--color-buy); }
+
+        .footer {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 24px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid white;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .data-table th {
+            text-align: left;
+            padding: 10px 14px;
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 12px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+        }
+
+        .data-table td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .signal-badge {
+            display: inline-flex;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .signal-badge.buy { background: var(--color-buy-bg); color: var(--color-buy); }
+        .signal-badge.sell { background: var(--color-sell-bg); color: var(--color-sell); }
+        .signal-badge.hold { background: var(--color-hold-bg); color: var(--color-hold); }
+
+        /* ============================================
+           Mobile Responsive Design
+           ============================================ */
+
+        /* Tablet */
+        @media (max-width: 1024px) {
+            .main-content { padding: 16px; }
+        }
+
+        /* Mobile */
+        @media (max-width: 768px) {
+            .navbar {
+                padding: 0 12px;
+                height: 56px;
+            }
+
+            .navbar-inner {
+                flex-wrap: nowrap;
+            }
+
+            .logo-icon {
+                width: 32px;
+                height: 32px;
+                font-size: 16px;
+            }
+
+            .logo-text { display: none; }
+
+            .logo-badge {
+                font-size: 10px;
+                padding: 2px 6px;
+                margin-left: 6px;
+            }
+
+            /* Hide desktop navigation on mobile */
+            .nav-links {
+                display: none;
+            }
+
+            /* Show hamburger menu */
+            .menu-toggle {
+                display: block;
+            }
+
+            /* Show bottom navigation */
+            .bottom-nav {
+                display: block;
+            }
+
+            .main-content {
+                padding: 12px;
+                padding-bottom: 80px; /* Space for bottom nav */
+            }
+
+            .card {
+                border-radius: var(--radius-md);
+            }
+
+            .card-header {
+                padding: 12px 16px;
+                font-size: 13px;
+            }
+
+            .card-body {
+                padding: 16px;
+            }
+
+            .form-group {
+                margin-bottom: 12px;
+            }
+
+            .form-select, .form-input {
+                padding: 12px 14px;
+                font-size: 16px; /* Prevents iOS zoom */
+            }
+
+            .btn {
+                padding: 12px 20px;
+                font-size: 15px;
+            }
+
+            .footer {
+                padding: 16px;
+                padding-bottom: 80px; /* Space for bottom nav */
+                font-size: 11px;
+            }
+
+            /* Table scroll */
+            .table-container {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .data-table {
+                font-size: 12px;
+                min-width: 500px;
+            }
+
+            .data-table th,
+            .data-table td {
+                padding: 10px 8px;
+                white-space: nowrap;
+            }
+
+            .signal-badge {
+                padding: 3px 8px;
+                font-size: 11px;
+            }
+
+            .alert {
+                padding: 10px 12px;
+                font-size: 13px;
+            }
+        }
+
+        /* Small Mobile */
+        @media (max-width: 375px) {
+            .navbar {
+                padding: 0 8px;
+            }
+
+            .nav-link {
+                padding: 8px;
+            }
+
+            .lang-switch {
+                margin-left: 4px;
+            }
+
+            .lang-btn {
+                padding: 5px 6px;
+                font-size: 10px;
+            }
+
+            .main-content {
+                padding: 8px;
+            }
+
+            .card-body {
+                padding: 12px;
+            }
+        }
+
+        /* Touch-friendly improvements */
+        @media (pointer: coarse) {
+            .nav-link,
+            .btn,
+            .lang-btn,
+            .form-select,
+            .form-input {
+                min-height: 44px; /* Apple's recommended touch target */
+            }
+
+            .nav-link {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+        }
+
+        /* Safe area for notched phones */
+        @supports (padding: max(0px)) {
+            .navbar {
+                padding-left: max(12px, env(safe-area-inset-left));
+                padding-right: max(12px, env(safe-area-inset-right));
+            }
+
+            .main-content {
+                padding-left: max(12px, env(safe-area-inset-left));
+                padding-right: max(12px, env(safe-area-inset-right));
+            }
+        }
+
+        {% block extra_css %}{% endblock %}
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-inner">
+            <a href="/" class="logo">
+                <div class="logo-icon"><i class="bi bi-graph-up-arrow"></i></div>
+                <span class="logo-text">AI PRO Trading</span>
+                <span class="logo-badge">{{ t.dry_run }}</span>
+            </a>
+
+            <div class="nav-links">
+                <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">
+                    <i class="bi bi-grid-1x2"></i>
+                    <span>{{ t.nav_dashboard }}</span>
+                </a>
+                <a href="/signals" class="nav-link {% if request.path == '/signals' %}active{% endif %}">
+                    <i class="bi bi-list-check"></i>
+                    <span>{{ t.nav_signals }}</span>
+                </a>
+
+                {% if user %}
+                <a href="/subscribe" class="nav-link {% if request.path == '/subscribe' %}active{% endif %}">
+                    <i class="bi bi-bell"></i>
+                    <span>{{ t.nav_subscribe }}</span>
+                </a>
+                {% if user.is_admin %}
+                <a href="/admin" class="nav-link {% if request.path == '/admin' %}active{% endif %}">
+                    <i class="bi bi-gear"></i>
+                    <span>{{ t.nav_admin }}</span>
+                </a>
+                {% endif %}
+                <a href="#" class="nav-link" onclick="logout()">
+                    <i class="bi bi-box-arrow-right"></i>
+                    <span>{{ t.nav_logout }}</span>
+                </a>
+                {% else %}
+                <a href="/login" class="nav-link {% if request.path == '/login' %}active{% endif %}">
+                    <i class="bi bi-person"></i>
+                    <span>{{ t.nav_login }}</span>
+                </a>
+                {% endif %}
+
+                <span class="nav-version">v{{ version }}</span>
+
+                <div class="lang-switch">
+                    <button class="lang-btn {% if lang == 'en' %}active{% endif %}" onclick="setLang('en')">EN</button>
+                    <button class="lang-btn {% if lang == 'zh' %}active{% endif %}" onclick="setLang('zh')">中文</button>
+                </div>
+            </div>
+
+            <!-- Mobile hamburger menu button -->
+            <button class="menu-toggle" onclick="toggleMobileMenu()" aria-label="Menu">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Mobile slide-down menu -->
+    <div class="mobile-menu" id="mobileMenu">
+        <a href="/" class="mobile-menu-link {% if request.path == '/' %}active{% endif %}">
+            <i class="bi bi-grid-1x2"></i>
+            {{ t.nav_dashboard }}
+        </a>
+        <a href="/signals" class="mobile-menu-link {% if request.path == '/signals' %}active{% endif %}">
+            <i class="bi bi-list-check"></i>
+            {{ t.nav_signals }}
+        </a>
+        {% if user %}
+        <a href="/subscribe" class="mobile-menu-link {% if request.path == '/subscribe' %}active{% endif %}">
+            <i class="bi bi-bell"></i>
+            {{ t.nav_subscribe }}
+        </a>
+        {% if user.is_admin %}
+        <a href="/admin" class="mobile-menu-link {% if request.path == '/admin' %}active{% endif %}">
+            <i class="bi bi-gear"></i>
+            {{ t.nav_admin }}
+        </a>
+        {% endif %}
+        <a href="#" class="mobile-menu-link" onclick="logout()">
+            <i class="bi bi-box-arrow-right"></i>
+            {{ t.nav_logout }}
+        </a>
+        {% else %}
+        <a href="/login" class="mobile-menu-link {% if request.path == '/login' %}active{% endif %}">
+            <i class="bi bi-person"></i>
+            {{ t.nav_login }}
+        </a>
+        <a href="/register" class="mobile-menu-link {% if request.path == '/register' %}active{% endif %}">
+            <i class="bi bi-person-plus"></i>
+            {{ t.register_button }}
+        </a>
+        {% endif %}
+
+        <div class="mobile-lang-switch">
+            <button class="mobile-lang-btn {% if lang == 'en' %}active{% endif %}" onclick="setLang('en')">English</button>
+            <button class="mobile-lang-btn {% if lang == 'zh' %}active{% endif %}" onclick="setLang('zh')">中文</button>
+        </div>
+
+        <div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 12px;">
+            v{{ version }} &mdash; {{ t.cloud_mode }}
+        </div>
+    </div>
+
+    <!-- Mobile bottom navigation -->
+    <nav class="bottom-nav">
+        <div class="bottom-nav-inner">
+            <a href="/" class="bottom-nav-link {% if request.path == '/' %}active{% endif %}">
+                <i class="bi bi-grid-1x2"></i>
+                <span>{{ t.nav_dashboard }}</span>
+            </a>
+            <a href="/signals" class="bottom-nav-link {% if request.path == '/signals' %}active{% endif %}">
+                <i class="bi bi-list-check"></i>
+                <span>{{ t.nav_signals }}</span>
+            </a>
+            {% if user %}
+            <a href="/subscribe" class="bottom-nav-link {% if request.path == '/subscribe' %}active{% endif %}">
+                <i class="bi bi-bell"></i>
+                <span>{{ t.nav_subscribe }}</span>
+            </a>
+            {% else %}
+            <a href="/login" class="bottom-nav-link {% if request.path == '/login' %}active{% endif %}">
+                <i class="bi bi-person"></i>
+                <span>{{ t.nav_login }}</span>
+            </a>
+            {% endif %}
+        </div>
+    </nav>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        {{ t.footer_text }} v{{ version }} &mdash; {{ t.cloud_mode }}
+    </footer>
+
+    <script>
+        function setLang(lang) {
+            fetch('/api/lang/' + lang)
+                .then(() => location.reload());
+        }
+
+        async function logout() {
+            await fetch('/api/logout', { method: 'POST' });
+            location.href = '/';
+        }
+
+        // Mobile menu toggle
+        function toggleMobileMenu() {
+            const menu = document.getElementById('mobileMenu');
+            const toggle = document.querySelector('.menu-toggle');
+            menu.classList.toggle('active');
+            toggle.classList.toggle('active');
+            document.body.style.overflow = menu.classList.contains('active') ? 'hidden' : '';
+        }
+
+        // Close mobile menu on resize to desktop
+        window.addEventListener('resize', function() {
+            if (window.innerWidth > 768) {
+                const menu = document.getElementById('mobileMenu');
+                const toggle = document.querySelector('.menu-toggle');
+                if (menu.classList.contains('active')) {
+                    menu.classList.remove('active');
+                    toggle.classList.remove('active');
+                    document.body.style.overflow = '';
+                }
+            }
+        });
+    </script>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

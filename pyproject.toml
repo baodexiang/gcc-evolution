@@ -1,0 +1,205 @@
+[build-system]
+requires = ["setuptools>=62.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gcc-evo"
+version = "5.295"
+description = "AI Self-Evolution Engine — Persistent memory + continuous learning for LLM"
+readme = "opensource/README.md"
+requires-python = ">=3.9"
+license = {text = "BUSL-1.1"}
+authors = [
+    {name = "baodexiang", email = "baodexiang@hotmail.com"}
+]
+maintainers = [
+    {name = "baodexiang", email = "baodexiang@hotmail.com"}
+]
+keywords = [
+    "ai", "llm", "memory", "evolution", "retrieval", "distillation",
+    "self-improvement", "prompt", "gpt", "claude"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "click>=8.0.0",
+    "pyyaml>=6.0",
+    "requests>=2.28.0",
+    "python-dotenv>=0.20.0",
+    "tqdm>=4.64.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.0.0",
+    "pytest-timeout>=2.1.0",
+    "black>=22.0.0",
+    "isort>=5.11.0",
+    "flake8>=5.0.0",
+    "mypy>=0.990",
+    "pylint>=2.15.0",
+    "bandit>=1.7.0",
+    "safety>=2.3.0",
+]
+
+docs = [
+    "sphinx>=5.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+    "sphinx-autodoc-typehints>=1.19.0",
+]
+
+local-llm = [
+    "ollama>=0.1.0",
+    "sentence-transformers>=2.2.0",
+]
+
+[project.urls]
+Documentation = "https://github.com/baodexiang/gcc-evo"
+"Source Code" = "https://github.com/baodexiang/gcc-evo"
+"Bug Tracker" = "https://github.com/baodexiang/gcc-evo/issues"
+Changelog = "https://github.com/baodexiang/gcc-evo/blob/main/opensource/CHANGELOG.md"
+
+[project.scripts]
+gcc-evo = "gcc_evolution.cli:main"
+
+[tool.setuptools]
+packages = ["gcc_evolution"]
+include-package-data = true
+zip-safe = false
+
+[tool.setuptools.package-data]
+gcc_evolution = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # 目录
+  \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | \.eggs
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_mode = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+line_length = 100
+skip_gitignore = true
+known_first_party = ["gcc_evolution"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+    "--disable-warnings",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow tests (deselect with '-m \"not slow\"')",
+    "network: Tests requiring network access",
+]
+
+[tool.coverage.run]
+source = ["gcc_evolution"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__main__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "@abc.abstractmethod",
+]
+precision = 2
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+pretty = true
+show_error_context = true
+strict_optional = true
+ignore_missing_imports = true
+files = ["gcc_evolution"]
+
+[tool.pylint.messages_control]
+disable = [
+    "C0330", "C0326",  # bad-whitespace
+    "C0103",           # invalid-name
+    "R0913",           # too-many-arguments
+    "R0914",           # too-many-locals
+    "W0212",           # protected-access
+]
+
+[tool.pylint.format]
+max-line-length = 100
+max-locals = 15
+max-attributes = 7
+
+[tool.pylint.design]
+max-args = 5
+max-attributes = 7
+max-bool-expr = 5
+max-branches = 12
+max-statements = 50
+
+[tool.bandit]
+exclude_dirs = [
+    "tests",
+    ".tox",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+    ".eggs",
+]
+
+[tool.bandit.assert_used]
+skips = ["*/tests/*"]

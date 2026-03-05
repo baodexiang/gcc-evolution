@@ -1,0 +1,21 @@
+{
+  "stock": {
+    "capital": 200000,
+    "max_symbols": 5,
+    "symbols": [],
+    "fee_rate": 0.0,
+    "position_ratio": 0.20
+  },
+  "crypto": {
+    "capital": 50000,
+    "max_symbols": 2,
+    "symbols": [],
+    "fee_rate": 0.001,
+    "position_ratio": 0.50
+  },
+  "auto_trade": true,
+  "created_at": null,
+  "initialized": false,
+  "cash_stock": 200000,
+  "cash_crypto": 50000
+}

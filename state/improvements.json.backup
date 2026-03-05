@@ -1,0 +1,250 @@
+{
+  "version": "2.0",
+  "structure": "by-key",
+  "last_updated": "2026-02-19T00:05:00",
+  "archive_closed_count": 57,
+  "notes": "活跃改善按KEY-001~KEY-006分组。CLOSED条目不再展示。",
+  "deferred": [
+    {
+      "id": "SYS-023",
+      "title": "Regime自适应数据窗口"
+    },
+    {
+      "id": "SYS-027",
+      "title": "Volume Profile+L2确认(HVN/LVN)"
+    },
+    {
+      "id": "SYS-028",
+      "title": "止盈止损VP锚定"
+    },
+    {
+      "id": "SYS-029",
+      "title": "实时Performance Dashboard"
+    },
+    {
+      "id": "SYS-033",
+      "title": "Utility-Weighted校准"
+    }
+  ],
+  "keys": {
+    "KEY-001": {
+      "title": "N字结构门控升级",
+      "status": "IN_PROGRESS",
+      "phase": "Phase4完成(加密ACTIVE/股票OBSERVE); Phase5(HMM)待启动",
+      "observations": [
+        "【观测断路】log_analyzer日报n_gate=0 state=无数据，但state/n_structure_state.json正常(15品种ACTIVE)。需修观测路径才能量化效果",
+        "【来回翻转】ZEC/AMD跨K线翻转(-\u0000.03)根因是L1趋势稳定性，bar_freeze已管住单K线。需KEY-002 YAML收紧或L1改进"
+      ],
+      "sub_items": [
+        {
+          "id": "SYS-011",
+          "title": "跨周期共识度评分",
+          "status": "IN_PROGRESS",
+          "note": "5源加权投票,Phase1仅log,Phase2阈值<0.30拦截"
+        },
+        {
+          "id": "SYS-032",
+          "title": "流动性过滤+分批退出调度器",
+          "status": "FOUND",
+          "note": "optimal_exit_scheduler分批平仓,高ATR放慢"
+        },
+        {
+          "id": "SYS-034",
+          "title": "Regime自适应阈值",
+          "status": "FOUND",
+          "note": "Bull/Normal/Crisis动态BUY/SELL阈值+ATR倍数"
+        },
+        {
+          "id": "AUD-052",
+          "title": "ZECUSDC跨K线来回翻转(-6.49)",
+          "status": "FOUND",
+          "note": "根因L1趋势稳定性(缠论45.8%),需KEY-002 YAML"
+        },
+        {
+          "id": "AUD-053",
+          "title": "本周2品种来回翻转(-0.03)",
+          "status": "FOUND",
+          "note": "ZEC+AMD,bar_freeze已管单K线,跨K线需L1改进"
+        },
+        {
+          "id": "KEY-001-T07",
+          "title": "N字因子观测与审计闭环",
+          "status": "FOUND",
+          "note": "规格文档: improvement/Key001/KEY001_因子观测与审计需求.md"
+        }
+      ]
+    },
+    "KEY-002": {
+      "title": "品种自适应参数进化",
+      "status": "IN_PROGRESS",
+      "phase": "PARAM_YAML Phase1运行中; 动态自适应待积累数据",
+      "observations": [],
+      "sub_items": [
+        {
+          "id": "RES-001",
+          "title": "节奏阈值品种分化(加密75%/美股65%)",
+          "status": "TESTING"
+        },
+        {
+          "id": "RES-002",
+          "title": "Vision过度自信降权(conf>95%冲突x0.6)",
+          "status": "TESTING"
+        },
+        {
+          "id": "RES-003",
+          "title": "校准器晚期融合诊断",
+          "status": "TESTING"
+        },
+        {
+          "id": "RES-004",
+          "title": "动态τ过滤(涨跌<1%噪声排除)",
+          "status": "TESTING"
+        },
+        {
+          "id": "RES-005",
+          "title": "视角分歧度→Vision覆盖阈值90%",
+          "status": "TESTING"
+        },
+        {
+          "id": "RES-006",
+          "title": "EMA窗口品种分化(加密EMA8/美股EMA5)",
+          "status": "TESTING"
+        },
+        {
+          "id": "RES-007",
+          "title": "趋势阶段风险预算(初期/主期/末期)",
+          "status": "IN_PROGRESS"
+        },
+        {
+          "id": "RES-008",
+          "title": "持仓时间衰减因子",
+          "status": "IN_PROGRESS"
+        },
+        {
+          "id": "SYS-022",
+          "title": "Bounded Tilts仓位平滑过渡",
+          "status": "IN_PROGRESS"
+        },
+        {
+          "id": "KEY-002-BT",
+          "title": "每日回溯分析与品种自适应策略",
+          "status": "FOUND"
+        }
+      ]
+    },
+    "KEY-003": {
+      "title": "股票价值分析模块MVP",
+      "status": "TESTING",
+      "phase": "T01-T10全完成,后5名限买1次/天+仓位上限4",
+      "observations": [
+        "BUY拦截=0(今日无股票BUY信号触发,非故障)"
+      ],
+      "sub_items": []
+    },
+    "KEY-004": {
+      "title": "外挂品质治理与评估体系",
+      "status": "TESTING",
+      "phase": "T01-T07完成,治理消费运行中",
+      "observations": [
+        "【唐纳奇修复 v21.21 CLOSED】原动态阈值有效率3%(218次中7次正确)，已改为固定底部10%/顶部10%。commit: 2fda667",
+        "【治理消费=0】events=290但governance=0，state/plugin_governance_actions.json可能为空，_key004_load_governance()未触发",
+        "【EMA过滤待升Phase2】缠论BS EMA过滤有效率73%(22/16正确)，SuperTrend 67%，有数据支撑升级为真拦截"
+      ],
+      "sub_items": [
+        {
+          "id": "SYS-015",
+          "title": "SQS量价质量门槛",
+          "status": "IN_PROGRESS",
+          "note": "Phase1记录,避免缩量假突破重仓"
+        },
+        {
+          "id": "SYS-016",
+          "title": "外挂信号统一量价过滤(VF)",
+          "status": "IN_PROGRESS",
+          "note": "所有外挂经volume_filter(),Phase1记录"
+        },
+        {
+          "id": "SYS-025",
+          "title": "趋势健康度(CVD+relVol)x4质量",
+          "status": "IN_PROGRESS"
+        },
+        {
+          "id": "SYS-026",
+          "title": "Donchian量价增强(volume_density)",
+          "status": "IN_PROGRESS"
+        },
+        {
+          "id": "KEY-004-T08",
+          "title": "因子观测台+LLM进化层需求规格 v2.0",
+          "status": "FOUND",
+          "note": "规格文档: improvement/因子观测台_LLM进化层_需求规格_v2.0.html"
+        },
+        {
+          "id": "KEY-004-T09",
+          "title": "因子观测台 × GCC‑EVO 对齐细化",
+          "status": "FOUND",
+          "note": "细化文档: improvement/Key004/KEY004_因子观测台_GCC-EVO对齐细化.md"
+        }
+      ]
+    },
+    "KEY-005": {
+      "title": "行为金融学增强层",
+      "status": "TESTING",
+      "phase": "M01-M10全完成,数据管线激活",
+      "observations": [
+        "BFI=0 DQS=0: 需确认state/orderflow_state.json已同步到服务器"
+      ],
+      "sub_items": [
+        {
+          "id": "SYS-006",
+          "title": "Module B 交易频率控制",
+          "status": "IN_PROGRESS",
+          "note": "Phase2已启用(enforce=True)"
+        },
+        {
+          "id": "SYS-007",
+          "title": "Module C 反思迭代闭环",
+          "status": "IN_PROGRESS",
+          "note": "Phase1收盘后运行"
+        },
+        {
+          "id": "SYS-017",
+          "title": "连续亏损熔断",
+          "status": "IN_PROGRESS",
+          "note": "Phase2已启用,3连亏/5连亏/日亏3%"
+        },
+        {
+          "id": "SYS-018",
+          "title": "StrategyEvaluator集成管道",
+          "status": "IN_PROGRESS",
+          "note": "今日WR=54.8% PF=1.20"
+        },
+        {
+          "id": "SYS-019",
+          "title": "组合相关性风控",
+          "status": "IN_PROGRESS",
+          "note": "rolling 20日correlation,rho>0.7限仓60%"
+        },
+        {
+          "id": "SYS-020",
+          "title": "共识权重动态再平衡",
+          "status": "IN_PROGRESS"
+        }
+      ]
+    },
+    "KEY-006": {
+      "title": "系统性改善: 三模块边界与接口治理",
+      "status": "IN_PROGRESS",
+      "phase": "Phase1建档; T03 Signal Gate integrate验证中",
+      "observations": [],
+      "sub_items": [
+        {
+          "id": "KEY-006-T03",
+          "title": "Signal Gate微观结构过滤(Hurst+VR+SignedFlow)",
+          "status": "IN_PROGRESS",
+          "note": "双咽喉Phase1(ENABLED=False),待nogo准确率>60%升Phase2"
+        }
+      ]
+    }
+  }
+}

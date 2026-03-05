@@ -1,0 +1,73 @@
+version: 2
+
+updates:
+  # Python dependencies (via pip)
+  - package-ecosystem: "pip"
+    directory: "/opensource"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "baodexiang"
+    assignees:
+      - "baodexiang"
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+      include: "scope"
+    pull-request-branch-name:
+      separator: "/"
+    allow:
+      - dependency-type: "all"
+    ignore:
+      # Ignore unstable pre-releases
+      - dependency-name: "*"
+        update-types: ["version-update:semver-pre"]
+    rebase-strategy: "auto"
+    labels:
+      - "dependencies"
+      - "python"
+    milestone: 1
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "baodexiang"
+    commit-message:
+      prefix: "ci(actions)"
+      include: "scope"
+    labels:
+      - "ci"
+      - "github-actions"
+
+  # Docker (if using containers)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "03:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "baodexiang"
+    commit-message:
+      prefix: "ci(docker)"
+      include: "scope"
+    labels:
+      - "ci"
+      - "docker"
+
+version-settings:
+  # Treat major version bumps as security updates for timely patches
+  consider-major-version-bumps: true
