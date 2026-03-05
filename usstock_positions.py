@@ -23,16 +23,16 @@ SERVER_URL = "http://localhost:6001"
 # 美股仓位配置 - 填入实际持仓单位数 (0 = 空仓)
 # v2.840: 美股仍为5档，加密货币为5档
 POSITION_CONFIG = {
-    "TSLA": 2,
-    "COIN": 1,
+    "TSLA": 1,
+    "COIN": 2,
     "RDDT": 1,
-    "AMD": 0,
+    "AMD": 2,
     "NBIS": 0,
-    "CRWV": 2,
-    "RKLB": 0,
-    "HIMS": 2,
-    "OPEN": 4,
-    "ONDS": 5,
+    "CRWV": 0,
+    "RKLB": 2,
+    "HIMS": 3,
+    "OPEN": 2,
+    "ONDS": 2,
     "PLTR": 1
 }
 
