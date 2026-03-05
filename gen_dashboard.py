@@ -226,8 +226,10 @@ if ho_sessions:
     inject_lines.append(f"DATA.sessions = {json.dumps(ho_sessions, ensure_ascii=False)};")
 
 # skillbank / suggestions
-for key, fname in [("skillbank","skillbank.jsonl"),("suggestions","suggestions.jsonl")]:
+for key, fname in [("skills","skillbank.jsonl"),("suggestions","suggestions.jsonl")]:
     fp = GCC_DIR / fname
+    if not fp.exists():
+        fp = pathlib.Path("gcc") / fname
     if fp.exists():
         rows = []
         for line in fp.read_text(encoding="utf-8", errors="ignore").splitlines():
