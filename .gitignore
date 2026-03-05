@@ -1,0 +1,205 @@
+# ═══════════════════════════════════════════════════
+# AI Trading Bot .gitignore
+# 原则：代码和配置入库，运行产物不入库
+# ═══════════════════════════════════════════════════
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── System ──
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+nul
+.env
+
+# ── OneDrive Sync Copies (Other Machines) ──
+# 禁止: 不要修改或提交 MSI / PCS / BAO 后缀的文件
+*-MSI.*
+*-MSI/
+*-PCS.*
+*-PCS/
+*-BaoPCS.*
+*-BaoPCS/
+*-Bao.*
+*-Bao/
+
+# ── IDE / Tools ──
+.claude/
+.vscode/
+.idea/
+*.code-workspace
+
+# ── Logs ──
+*.log
+logs/
+
+# ── Models / Labels ──
+models/*.pth
+labels/
+
+# ── Backup / Archive ──
+backup/
+vision_test/
+decision_logs_v1982/
+
+# ═══════════════════════════════════════════════════
+# 主程序运行产物 (服务器每5-15min更新，不入库)
+# ═══════════════════════════════════════════════════
+
+# 扫描引擎状态文件
+scan_*_state.json
+scan_*_state-*.json
+scan_state.json
+scan_signals.json
+scan_heartbeat.json
+scan_heartbeat-*.json
+
+# L1/L2/全局状态
+global_trend_state.json
+global_trend_state-*.json
+l1_plugin_state.json
+l1_plugin_state-*.json
+l2_gate_state.json
+l2_10m_state.json
+l2_10m_klines.json
+plugin_profit_state.json
+plugin_profit_state-*.json
+
+# state/ 目录下所有运行产物 (敏感的交易数据)
+state/**/*.json
+state/**/*.bak
+state/**/*.db
+state/**/*.jsonl
+state/*_log.jsonl
+state/*_state.json
+state/vision_*.jsonl
+state/macd_*.jsonl
+state/nowcast_*.jsonl
+state/key009_*.json
+
+# ═══════════════════════════════════════════════════
+# GCC 运行产物 (gcc-evo 自动生成，不入库)
+# ═══════════════════════════════════════════════════
+
+# .gcc/ 小写目录 — gcc-evo运行时产物
+.gcc/experiences/
+.gcc/local_memory/
+.gcc/verification/
+.gcc/consolidation/
+.gcc/STATUS.md
+
+# .GCC/.gcc/ 嵌套运行时目录
+.GCC/.gcc/
+
+# .GCC 运行产物 — 数据库
+.GCC/gcc.db
+.GCC/gcc_evo.db
+.GCC/*.db
+
+# .GCC 运行产物 — 状态/日志/缓存
+.GCC/anchor_log.jsonl
+.GCC/anchor_state.json
+.GCC/anchor_today.json
+.GCC/human_anchors.json
+.GCC/state.json
+.GCC/duckdb_sources.json
+.GCC/graph.json
+.GCC/suggestions.jsonl
+.GCC/tasks.jsonl
+.GCC/knowledge_index.jsonl
+.GCC/paper_fetch.jsonl
+.GCC/research_history.jsonl
+.GCC/research_processed.json
+.GCC/research_workflow.jsonl
+.GCC/skillbank.jsonl
+.GCC/STATUS.md
+.GCC/.gcc_state.yaml
+.GCC/nul
+.GCC/schedule.json
+
+# .GCC 运行产物 — 自动生成目录
+.GCC/experiences/
+.GCC/local_memory/
+.GCC/verification/
+.GCC/consolidation/
+.GCC/knowledge/
+.GCC/knowledge_drafts/
+.GCC/sensory/
+.GCC/snapshots/
+.GCC/pipeline/*
+!.GCC/pipeline/tasks.json
+.GCC/scripts/
+.GCC/build/
+
+# .GCC 运行产物 — 分析报告 (每次分析自动生成)
+.GCC/analysis/
+
+# .GCC 运行产物 — Handoff JSON (每次ho create自动生成)
+.GCC/handoffs/*.json
+
+# .GCC 运行产物 — Dashboard HTML (每次check自动生成)
+.GCC/dashboard.html
+.GCC/gcc_dashboard.html
+
+# .GCC 运行产物 — 历史打包 (doc/下的tar/gz/zip)
+.GCC/doc/*.tar
+.GCC/doc/*.tar.gz
+.GCC/doc/*.gz
+.GCC/doc/*.zip
+
+# .GCC 运行产物 — 发布包
+.GCC/gcc_v*.zip
+
+# .GCC 运行产物 — __pycache__
+.GCC/**/__pycache__/
+
+# .GCC 运行产物 — failure logs
+.GCC/failure_logs/
+
+# ── GCC 私密配置 (API keys等，禁止入库) ──
+.gcc/evolution.local.yaml
+.gcc/evolution.local.yml
+.GCC/evolution.local.yaml
+.GCC/evolution.local.yml
+*.local.yaml
+*.local.yml
+
+# ── 不忽略 (重要配置/代码必须入库) ──
+!.GCC/evolution.yaml
+!.GCC/evolution.local.yaml.example
+!.GCC/keys.yaml
+!.GCC/handoff.md
+!.GCC/handoff_*.md
+!.GCC/branches/
+!.GCC/configs/
+!.GCC/params/
+!.GCC/gcc_evolution/
+!.GCC/gcc_evo.py
+!.GCC/improvement/
+!.GCC/research/
+!.GCC/skill/
+!.GCC/tests/
+!.GCC/README.md
+!.GCC/README_CN.md
+!.GCC/RESEARCH.md
+!.GCC/SKILL.md
+!.GCC/agents.md
+!.GCC/main.md
+!.GCC/pyproject.toml
+!.GCC/install.bat
+!.GCC/gen_dashboard.py
+
+# Accidental local scratch files
+65%
+65%硬阈值，SELL动态调整
+=4
+_ul

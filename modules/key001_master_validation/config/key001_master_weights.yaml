@@ -1,0 +1,5 @@
+version: key001-master-weights-v1
+masters:
+  Livermore: 1.00
+  Druckenmiller: 1.20
+  Connors: 1.00

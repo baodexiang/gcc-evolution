@@ -1,0 +1,299 @@
+# Business Source License 1.1
+
+## Parameters
+
+| Field | Value |
+|-------|-------|
+| **Licensor** | baodexiang <baodexiang@hotmail.com> |
+| **Licensed Work** | gcc-evo — AI Self-Evolution Engine |
+| **Copyright** | (c) 2024-2025 baodexiang |
+| **Change Date** | May 1, 2028 |
+| **Change License** | Apache License 2.0 |
+
+---
+
+## 1. Terms
+
+The Licensor hereby grants You the right to copy, modify, create derivative works, and distribute the Licensed Work. If Your use of the Licensed Work exceeds the Permitted Use, You must pay Licensor a fee for such use and follow the Commercial Terms below.
+
+---
+
+## 2. Permitted Use (Royalty-Free)
+
+Your use of the Licensed Work is **free of charge** so long as one of the following is true:
+
+**a) Individual Use**
+- You are an individual using the Licensed Work for personal purposes (hobby projects, learning, non-commercial)
+
+**b) Small Business**
+- You are a legal entity with:
+  - Fewer than five (5) employees, **AND**
+  - Fewer than one (1) million USD (or equivalent) in annual gross revenue
+  - Using the Licensed Work for your internal business purposes
+
+**c) Educational & Research**
+- You are using the Licensed Work for educational, academic, or research purposes that are non-commercial in nature
+- Includes university courses, research projects, thesis work, academic publications
+
+**d) Non-Profit**
+- You are using the Licensed Work for non-profit purposes
+- Charitable organizations, NGOs, community projects
+
+### Determining Permitted Use Status
+
+> **Note**: The determination of whether your use qualifies is based on the **primary purpose** of deployment:
+
+- **Permitted**: Running gcc-evo internally to improve your own trading system / industrial equipment
+- **Commercial** (requires license): Offering gcc-evo as a service, embedding in a paid product, or reselling improvements
+
+---
+
+## 3. Commercial Use (License Required)
+
+If Your use of the Licensed Work exceeds the Permitted Use categories above, You must obtain a **Commercial License** from the Licensor.
+
+### Commercial License Pricing
+
+Commercial licenses are available at variable pricing based on:
+
+| Factor | Pricing Model |
+|--------|---------------|
+| **Deployment Scope** | Internal Use: $X/year \| SaaS/Reselling: $Y/year |
+| **Number of Employees** | Scaled by headcount |
+| **Annual Revenue** | Percentage-based or flat fee options |
+| **Support Level** | Community: free \| Premium: $Z/month |
+
+**Licensing Examples**:
+
+| Scenario | License Type | Pricing |
+|----------|--------------|---------|
+| Solopreneur using gcc-evo for own trading | Permitted (free) | $0 |
+| 4-person startup using gcc-evo internally | Permitted (free) | $0 |
+| Company with 20 employees reselling gcc-evo as SaaS | Commercial | $4,999/year + support |
+| Enterprise internal deployment (500 employees) | Commercial | Custom quote |
+
+### How to Obtain Commercial License
+
+1. **Email**: baodexiang@hotmail.com with:
+   - Company name and jurisdiction
+   - Intended use case (internal vs. SaaS)
+   - Team size, annual revenue, deployment scale
+   - Required support level
+
+2. **Evaluation Period**: No fee evaluation licenses available for 30 days before commitment
+
+3. **Terms**:
+   - Annual renewable license
+   - Includes priority support and security updates
+   - No source code modifications required for license compliance
+   - Restrictions on reselling the license itself (white-label requires separate negotiation)
+
+---
+
+## 4. Additional Use Grant (Open Collaboration)
+
+**Notwithstanding the restrictions in the Permitted Use**, the Licensor hereby grants You an **unlimited license** to use the Licensed Work for **any purpose, including commercial purposes**, provided that:
+
+### Conditions for Additional Use Grant
+
+**1. Contribution Grant**
+- You grant the Licensor a **non-exclusive, perpetual, irrevocable** right to use any modifications, improvements, or derivative works You make to the Licensed Work
+- Attribution required: "Based on/derivative of gcc-evo by baodexiang"
+- Improvements may be integrated into future releases
+
+**2. Feedback & Collaboration**
+- You provide the Licensor with regular feedback on:
+  - How you use the Licensed Work
+  - Issues discovered or fixed
+  - Improvements you've made
+  - Performance metrics from your deployment
+- Feedback submission: Email or GitHub Issues (public or private)
+
+**3. Attribution & Credit**
+- You do **not** hold yourself out as the creator of the Licensed Work
+- Appropriate credit in README/ABOUT/LICENSE: "Powered by gcc-evo (baodexiang)"
+- If creating derivative work: "Based on gcc-evo"
+
+### Who Can Use Additional Use Grant
+
+- **Solo developers** building on gcc-evo and sharing improvements
+- **Research teams** extending gcc-evo with new algorithms
+- **Open-source projects** using gcc-evo as a component
+- **Early-stage companies** (<$1M revenue) wanting to customize without paying license fees
+
+### Example: Using Additional Use Grant
+
+```
+Scenario: You modify gcc-evo to support additional LLM models
+
+✓ Additional Use Grant Conditions:
+  - You may use your modified version for commercial purposes
+  - You contribute these LLM model integrations back to the project
+  - You give credit in your README: "Based on gcc-evo (baodexiang)"
+  - You provide feedback on model compatibility
+
+✓ You can then:
+  - Use internally for trading/operations
+  - Sell services using your customized version
+  - Publish improvements as open-source (must attribute gcc-evo)
+```
+
+---
+
+## 5. Term & Renewal
+
+The rights granted under this License **will terminate on the Change Date** (May 1, 2028) unless:
+
+1. A commercial license is obtained before that date, **OR**
+2. The Licensed Work converts to Apache 2.0 (automatic)
+
+**License renewal** (if commercial):
+- Annual renewal required
+- Terms may be updated with 90-day notice
+- Early renewal discounts available
+
+---
+
+## 6. Automatic License Conversion
+
+### On May 1, 2028
+
+If You have **not obtained a Commercial License** from the Licensor prior to the Change Date, Your rights under this License shall **automatically convert to the Apache License 2.0**, and the Licensed Work shall be made available under Apache License 2.0 at that time **without any additional action required**.
+
+**Implications**:
+- All previous versions remain under BUSL 1.1
+- Versions released on/after May 1, 2028 are Apache 2.0
+- You may continue using BUSL 1.1 versions; Apache 2.0 is optional upgrade path
+
+---
+
+## 7. Contributor License Agreement (CLA)
+
+All contributions to the Licensed Work (via GitHub Pull Requests) require signing a **Contributor License Agreement**:
+
+### For Individual Contributors
+
+**[See CONTRIBUTOR_LICENSE_AGREEMENT.md]**
+
+Summary:
+- You grant gcc-evo the right to use your contributions
+- You represent you have authority to contribute
+- Contributions are licensed under BUSL 1.1
+- After 2028-05-01, contributions available under Apache 2.0
+
+### For Corporate Contributors
+
+**[See ENTERPRISE_CONTRIBUTOR_LICENSE_AGREEMENT.md]**
+
+Requirements:
+- Legal representative signature required
+- List of contributing employees
+- Grant of IP rights to gcc-evo
+- Compliance with BUSL 1.1 commercial terms if applicable
+
+### CLA Automation
+
+- GitHub bot (`cla-bot`) automatically checks CLA status on PRs
+- PR blocked until CLA signed (via cla-assistant.io or similar)
+- One-time signing required per organization
+
+---
+
+## 8. Disclaimer of Warranty
+
+**AS IS.** The Licensed Work is provided on an **"as-is" basis**. The Licensor makes **no warranties, express or implied**, including but not limited to:
+
+- Merchantability
+- Fitness for a particular purpose
+- Non-infringement
+- Accuracy of results
+- Uninterrupted operation
+- Production readiness
+
+**Use at your own risk**. Test thoroughly before production deployment.
+
+---
+
+## 9. Limitation of Liability
+
+**IN NO EVENT** shall the Licensor be liable for:
+
+- **Direct damages**: Loss of data, business interruption, loss of profits
+- **Indirect damages**: Consequential, incidental, special, punitive damages
+- **Even if advised** of the possibility of such damages
+
+**Maximum liability** (if any): Limited to fees paid for commercial license (or $0 if free tier)
+
+---
+
+## 10. Frequently Asked Questions
+
+### Q: Can I use gcc-evo in my trading bot without paying?
+
+**A**: Yes, if you use it **for personal trading only** (individual). If your team has 5+ people, or annual revenue >$1M, contact us for commercial licensing.
+
+### Q: Can I modify gcc-evo and use it commercially?
+
+**A**: Yes, via the **Additional Use Grant**, provided you:
+1. Share improvements with the project
+2. Give appropriate credit in your README
+3. Provide feedback on how it's working
+
+### Q: What if I embed gcc-evo in a SaaS product?
+
+**A**: That requires a **Commercial License**. Email baodexiang@hotmail.com with details. Pricing is per-deployment, not per-user.
+
+### Q: Can I white-label gcc-evo?
+
+**A**: Not under the standard license. White-label requires a custom Commercial License agreement. Contact for details.
+
+### Q: What happens on May 1, 2028?
+
+**A**: Unless you have a Commercial License, gcc-evo automatically converts to **Apache 2.0**. You'll have full freedom to use and modify without restrictions.
+
+### Q: How does Additional Use Grant differ from Commercial License?
+
+| Aspect | Additional Use Grant | Commercial License |
+|--------|---------------------|-------------------|
+| **Cost** | Free | Paid (variable) |
+| **Commercial Use** | Yes, with conditions | Yes, unrestricted |
+| **Must Share Improvements** | Yes | No (optional) |
+| **Support** | Community only | Priority support included |
+| **Best for** | Startups, researchers | Enterprises, SaaS providers |
+
+### Q: Do I need CLA to use gcc-evo?
+
+**A**: No. CLA is only required if you're **contributing code back** via GitHub PR. Users don't need CLA.
+
+### Q: What about privacy & data handling?
+
+**A**: See **SECURITY.md** for data handling, config separation, and audit requirements. gcc-evo is stateless and only interacts with your local files.
+
+---
+
+## 11. License Text Files
+
+- **Personal CLA**: [CONTRIBUTOR_LICENSE_AGREEMENT.md](CONTRIBUTOR_LICENSE_AGREEMENT.md)
+- **Enterprise CLA**: [ENTERPRISE_CONTRIBUTOR_LICENSE_AGREEMENT.md](ENTERPRISE_CONTRIBUTOR_LICENSE_AGREEMENT.md)
+- **Security Policy**: [SECURITY.md](SECURITY.md)
+- **Contributing Guide**: [CONTRIBUTING.md](CONTRIBUTING.md)
+
+---
+
+## 12. Contact & Legal
+
+**Licensor**: baodexiang <baodexiang@hotmail.com>
+
+**For**:
+- Commercial licensing inquiries
+- CLA questions
+- License interpretation
+- Security issues (confidential): security@gcc-evo.dev (see SECURITY.md)
+
+**Jurisdiction**: Governed by laws of the jurisdiction where Licensor resides.
+
+---
+
+**Last Updated**: March 3, 2026
+
+**License Version**: 1.0 (BUSL 1.1 + Additional Use Grant)

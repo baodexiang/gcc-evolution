@@ -1,0 +1,73 @@
+# === 收费模块保护 (BIZ-2026-001 §3.3) ===
+# 即使路径写错也不会上传
+**/knn_evolution/
+**/walk_forward*
+**/signal_evolution*
+**/bandit_scheduler*
+**/adaptive_dag*
+**/skillbank_content/
+**/gcc-private/
+**/*_private*
+**/*_core*
+**/knn_*
+**/signal_evolution*
+
+# === 敏感配置 ===
+.env
+**/api_keys*
+**/secrets*
+**/tokens*
+**/.env.local
+**/.env.*.local
+
+# === Python 产物 ===
+__pycache__/
+*.py[cod]
+*pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg
+
+# === IDEs ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# === 本地状态 ===
+state/
+*.db
+*.log
+*.sqlite
+*.db-journal
+
+# === 测试输出 ===
+.tox/
+.hypothesis/
+test_results/
+
+# === 备份和临时文件 ===
+*.bak
+*.backup
+*~
+.#*
+*.tmp
+
+# === 大型数据文件 ===
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+
+# === 虚拟环境 ===
+venv/
+env/
+ENV/
+.venv

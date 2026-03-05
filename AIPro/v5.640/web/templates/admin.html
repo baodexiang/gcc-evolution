@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t.admin_title }}{% endblock %}
+
+{% block extra_css %}
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent-blue);
+}
+
+.stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.user-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+    border-radius: var(--radius-sm);
+}
+
+.btn-danger {
+    background: var(--color-sell);
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #b01a27;
+}
+
+.btn-toggle {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+.status-badge {
+    display: inline-flex;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.status-badge.subscribed {
+    background: var(--color-buy-bg);
+    color: var(--color-buy);
+}
+
+.status-badge.not-subscribed {
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+}
+
+.status-badge.admin {
+    background: var(--accent-blue-light);
+    color: var(--accent-blue);
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+
+    .stat-card {
+        padding: 12px;
+    }
+
+    .stat-value {
+        font-size: 22px;
+    }
+
+    .stat-label {
+        font-size: 11px;
+    }
+
+    /* Card-based layout for users on mobile */
+    .user-card-mobile {
+        display: block;
+    }
+
+    .user-table-desktop {
+        display: none;
+    }
+
+    .user-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 16px;
+        margin-bottom: 12px;
+    }
+
+    .user-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 12px;
+    }
+
+    .user-card-email {
+        font-weight: 600;
+        font-size: 14px;
+        word-break: break-all;
+        flex: 1;
+        margin-right: 8px;
+    }
+
+    .user-card-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 12px;
+    }
+
+    .user-card-meta span {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .user-card-meta i {
+        font-size: 14px;
+    }
+
+    .user-card-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+    .user-card-actions .btn-sm {
+        flex: 1;
+        padding: 10px;
+        font-size: 13px;
+        justify-content: center;
+    }
+}
+
+/* Desktop - show table, hide cards */
+@media (min-width: 769px) {
+    .user-card-mobile {
+        display: none;
+    }
+
+    .user-table-desktop {
+        display: block;
+    }
+}
+
+/* Small Mobile */
+@media (max-width: 375px) {
+    .stats-grid {
+        gap: 8px;
+    }
+
+    .stat-card {
+        padding: 10px;
+    }
+
+    .stat-value {
+        font-size: 20px;
+    }
+
+    .stat-label {
+        font-size: 10px;
+    }
+
+    .user-card {
+        padding: 12px;
+    }
+
+    .user-card-email {
+        font-size: 13px;
+    }
+
+    .user-card-meta {
+        font-size: 11px;
+    }
+
+    .user-card-actions .btn-sm {
+        padding: 8px;
+        font-size: 12px;
+    }
+}
+{% endblock %}
+
+{% block content %}
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ user_stats.total }}</div>
+        <div class="stat-label">{{ t.admin_total_users }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ user_stats.subscribed }}</div>
+        <div class="stat-label">{{ t.admin_subscribed }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ user_stats.available }}</div>
+        <div class="stat-label">{{ t.admin_available }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ user_stats.max_users }}</div>
+        <div class="stat-label">{{ t.admin_max_users }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-people"></i> {{ t.admin_user_management }}
+    </div>
+    <div class="card-body">
+        <!-- Desktop Table View -->
+        <div class="table-container user-table-desktop">
+            <table class="data-table" id="usersTable">
+                <thead>
+                    <tr>
+                        <th>{{ t.admin_email }}</th>
+                        <th>{{ t.admin_created }}</th>
+                        <th>{{ t.admin_last_login }}</th>
+                        <th>{{ t.admin_status }}</th>
+                        <th>{{ t.admin_actions }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users_list %}
+                    <tr data-email="{{ u.email }}">
+                        <td>
+                            <strong>{{ u.email }}</strong>
+                            {% if u.is_admin %}
+                            <span class="status-badge admin">Admin</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ u.created_at[:10] if u.created_at else '-' }}</td>
+                        <td>{{ u.last_login[:10] if u.last_login else '-' }}</td>
+                        <td>
+                            <span class="status-badge {{ 'subscribed' if u.subscribed else 'not-subscribed' }}">
+                                {{ t.admin_subscribed if u.subscribed else t.admin_not_subscribed }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if not u.is_admin %}
+                            <div class="user-actions">
+                                <button class="btn btn-sm btn-toggle" onclick="toggleSubscription('{{ u.email }}')">
+                                    {{ t.admin_toggle }}
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteUser('{{ u.email }}')">
+                                    {{ t.admin_delete }}
+                                </button>
+                            </div>
+                            {% else %}
+                            <span style="color: var(--text-muted);">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Mobile Card View -->
+        <div class="user-card-mobile">
+            {% for u in users_list %}
+            <div class="user-card" data-email="{{ u.email }}">
+                <div class="user-card-header">
+                    <div class="user-card-email">
+                        {{ u.email }}
+                        {% if u.is_admin %}
+                        <span class="status-badge admin" style="margin-left: 8px;">Admin</span>
+                        {% endif %}
+                    </div>
+                    <span class="status-badge {{ 'subscribed' if u.subscribed else 'not-subscribed' }}">
+                        {{ t.admin_subscribed if u.subscribed else t.admin_not_subscribed }}
+                    </span>
+                </div>
+                <div class="user-card-meta">
+                    <span><i class="bi bi-calendar"></i> {{ u.created_at[:10] if u.created_at else '-' }}</span>
+                    <span><i class="bi bi-clock"></i> {{ u.last_login[:10] if u.last_login else '-' }}</span>
+                </div>
+                {% if not u.is_admin %}
+                <div class="user-card-actions">
+                    <button class="btn btn-sm btn-toggle" onclick="toggleSubscription('{{ u.email }}')">
+                        <i class="bi bi-toggle-on"></i> {{ t.admin_toggle }}
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteUser('{{ u.email }}')">
+                        <i class="bi bi-trash"></i> {{ t.admin_delete }}
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const T = {{ t | tojson }};
+
+async function toggleSubscription(email) {
+    if (!confirm(T.admin_confirm_toggle + ' ' + email + '?')) return;
+
+    try {
+        const response = await fetch('/api/admin/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        const data = await response.json();
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.message || 'Error');
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+async function deleteUser(email) {
+    if (!confirm(T.admin_confirm_delete + ' ' + email + '?')) return;
+
+    try {
+        const response = await fetch('/api/admin/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        const data = await response.json();
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.message || 'Error');
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+</script>
+{% endblock %}

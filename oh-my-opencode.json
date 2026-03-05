@@ -1,0 +1,8 @@
+{
+  "lsp": {
+    "markdown": {
+      "command": ["markdown-language-server", "--stdio"],
+      "extensions": [".md", ".markdown"]
+    }
+  }
+}

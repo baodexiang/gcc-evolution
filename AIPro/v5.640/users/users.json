@@ -1,0 +1,16 @@
+{
+  "users": {
+    "admin@aipro.com": {
+      "id": "admin_001",
+      "email": "admin@aipro.com",
+      "salt": "71c6dae499880f4eba142c0efbf14bb1",
+      "password_hash": "fd80e069674ec9b43e96491030ff45dc9557be18fff14e6cfb237bb924b2a588",
+      "created_at": "2026-02-12T17:01:53.666948",
+      "subscribed": true,
+      "subscription_date": "2026-02-12T17:01:53.666948",
+      "language": "en",
+      "last_login": null,
+      "is_admin": true
+    }
+  }
+}

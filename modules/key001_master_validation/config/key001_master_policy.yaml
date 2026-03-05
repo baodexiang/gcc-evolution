@@ -1,0 +1,18 @@
+version: key001-master-policy-v1
+decision:
+  downgrade:
+    composite_lt: 0.30
+    low_count_min: 2
+    low_score_lt: 0.30
+    macro_veto: true
+  upgrade:
+    all_score_min: 0.70
+    composite_min: 0.75
+    signal_strength_min: 0.70
+    max_blocked_gates: 2
+    reject_if_blocked_reason_contains:
+      - DANGER
+missing_data:
+  market_default: 0.50
+  macro_stale_downweight: 0.85
+  stats_low_sample_default: 0.45

@@ -1,0 +1,164 @@
+# GCC v3.95 — Seed Experiences
+# Pre-loaded experience cards for common project types.
+# These are "tribal knowledge" that agents don't learn from code alone.
+# Load on first init: gcc-evo seed <type>
+
+# ─── Mobile / iOS ──────────────────────────────────────────
+mobile_ios:
+  - trigger: "new feature implementation"
+    insight: "Every new feature MUST be wrapped in a feature flag for gradual rollout and A/B testing"
+    pitfalls:
+      - "Implementing feature without flag causes 54% of industrial failures (SWE-Bench Mobile)"
+      - "Missing feature toggle blocks QA from testing in production"
+    tags: [feature_flag, mobile, ios, production]
+    confidence: 0.95
+
+  - trigger: "UI component change"
+    insight: "Always verify both light/dark mode and all supported device sizes after UI changes"
+    pitfalls:
+      - "UI passes on one device but breaks on others"
+      - "Dark mode colors not updated when changing theme"
+    tags: [ui, mobile, testing]
+    confidence: 0.85
+
+  - trigger: "data model change"
+    insight: "New data models must include migration path from existing schema and backward compatibility"
+    pitfalls:
+      - "Missing data model is second most common failure (22%)"
+      - "Breaking existing user data on schema update"
+    tags: [data, migration, mobile]
+    confidence: 0.90
+
+  - trigger: "any code change"
+    insight: "Add analytics/logging event for every user-facing feature change"
+    pitfalls:
+      - "Feature shipped without tracking, can't measure impact"
+    tags: [analytics, logging, production]
+    confidence: 0.80
+
+# ─── Trading System ────────────────────────────────────────
+trading_system:
+  - trigger: "signal or indicator change"
+    insight: "Every signal change must be validated with backtest on at least 2 years of data before live deployment"
+    pitfalls:
+      - "Overfitting to recent market regime"
+      - "Not testing across bull/bear/sideways markets"
+    tags: [signal, backtest, validation]
+    confidence: 0.95
+
+  - trigger: "order execution logic"
+    insight: "Always implement kill switch and max position size guard before live trading"
+    pitfalls:
+      - "Runaway orders without safety limits"
+      - "Missing rate limiter on API calls"
+    tags: [execution, safety, risk]
+    confidence: 0.95
+
+  - trigger: "new filter or gate"
+    insight: "Test filter addition AND removal independently — removing a filter can cause false signal explosion"
+    pitfalls:
+      - "Directly removing HOLD band caused 40% false signal increase"
+      - "Not A/B testing filter changes"
+    tags: [filter, gate, testing]
+    confidence: 0.90
+
+  - trigger: "multi-timeframe change"
+    insight: "Verify consensus mechanism still works after changing any single timeframe's logic"
+    pitfalls:
+      - "Breaking voting balance between timeframes"
+      - "Timeframe conflict causing contradictory signals"
+    tags: [multi_timeframe, consensus]
+    confidence: 0.85
+
+  - trigger: "any code change"
+    insight: "Run full regression test suite and compare key metrics (CAGR, Sharpe, MaxDD) against baseline before merging"
+    pitfalls:
+      - "Metric regression caught too late in production"
+    tags: [regression, metrics, ci]
+    confidence: 0.90
+
+# ─── Industrial Automation ─────────────────────────────────
+industrial_automation:
+  - trigger: "robot program change"
+    insight: "Always dry-run new welding/CNC programs at reduced speed (10%) before full speed execution"
+    pitfalls:
+      - "Collision damage from untested path"
+      - "Weld quality issues not caught until production run"
+    tags: [robot, safety, welding, cnc]
+    confidence: 0.95
+
+  - trigger: "PLC or controller logic"
+    insight: "Every safety interlock must be tested independently — never assume upstream safety checks work"
+    pitfalls:
+      - "Safety bypass during testing left in production code"
+      - "Interlock race condition under high-speed operation"
+    tags: [plc, safety, interlock]
+    confidence: 0.95
+
+  - trigger: "MES integration"
+    insight: "Validate data flow end-to-end: sensor → PLC → MES → ERP before declaring integration complete"
+    pitfalls:
+      - "Data loss between MES and ERP layers"
+      - "Timestamp sync issues across systems"
+    tags: [mes, erp, integration]
+    confidence: 0.85
+
+  - trigger: "parameter tuning"
+    insight: "Document every parameter change with before/after values and reason — these get lost fast"
+    pitfalls:
+      - "Optimal parameters forgotten after shift change"
+      - "No record of why parameter was changed"
+    tags: [parameters, documentation]
+    confidence: 0.80
+
+# ─── Web / API ─────────────────────────────────────────────
+web_api:
+  - trigger: "API endpoint change"
+    insight: "Always version API endpoints and maintain backward compatibility for at least one version"
+    pitfalls:
+      - "Breaking existing clients with unversioned change"
+      - "Missing deprecation notice period"
+    tags: [api, versioning, compatibility]
+    confidence: 0.90
+
+  - trigger: "database migration"
+    insight: "Write rollback migration for every forward migration before deploying"
+    pitfalls:
+      - "Failed migration with no rollback path"
+      - "Data corruption from partial migration"
+    tags: [database, migration, rollback]
+    confidence: 0.90
+
+  - trigger: "authentication change"
+    insight: "Test auth changes against all user roles and edge cases (expired tokens, concurrent sessions)"
+    pitfalls:
+      - "Admin lockout from auth change"
+      - "Token refresh race condition"
+    tags: [auth, security, testing]
+    confidence: 0.85
+
+# ─── General (applied to all projects) ─────────────────────
+general:
+  - trigger: "any code change"
+    insight: "Practice defensive programming: check inputs, handle edge cases, validate assumptions before acting"
+    pitfalls:
+      - "Defensive prompts outperform complex ones by 7.4% (SWE-Bench Mobile)"
+      - "Null/empty checks missed in happy-path coding"
+    tags: [defensive, quality, general]
+    confidence: 0.85
+
+  - trigger: "any code change"
+    insight: "Run existing tests before AND after changes to catch regressions immediately"
+    pitfalls:
+      - "Regression introduced silently"
+      - "Test suite not run until PR review"
+    tags: [testing, regression, ci]
+    confidence: 0.90
+
+  - trigger: "error handling"
+    insight: "Every external call (API, DB, file) must have explicit error handling with meaningful error messages"
+    pitfalls:
+      - "Silent failure from unhandled exception"
+      - "Generic error message unhelpful for debugging"
+    tags: [error_handling, resilience]
+    confidence: 0.85

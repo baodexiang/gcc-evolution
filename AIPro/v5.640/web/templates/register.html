@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t.register_title }}{% endblock %}
+
+{% block extra_css %}
+.auth-container { max-width: 400px; margin: 60px auto; }
+.auth-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 32px; box-shadow: var(--shadow-md); }
+.auth-header { text-align: center; margin-bottom: 24px; }
+.auth-header h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+.auth-header p { color: var(--text-secondary); font-size: 14px; }
+.auth-footer { text-align: center; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color); }
+.auth-footer a { color: var(--accent-blue); text-decoration: none; font-weight: 500; }
+
+/* Mobile */
+@media (max-width: 768px) {
+    .auth-container { margin: 24px auto; padding: 0 12px; }
+    .auth-card { padding: 24px 20px; }
+    .auth-header h1 { font-size: 20px; }
+    .auth-header p { font-size: 13px; }
+}
+
+@media (max-width: 375px) {
+    .auth-card { padding: 20px 16px; }
+    .auth-header h1 { font-size: 18px; }
+}
+{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-header">
+            <h1>{{ t.register_button }}</h1>
+            <p>AI PRO Trading System</p>
+        </div>
+
+        <div id="errorMsg" class="alert alert-error" style="display: none;"></div>
+        <div id="successMsg" class="alert alert-success" style="display: none;"></div>
+
+        <form id="registerForm">
+            <div class="form-group">
+                <label class="form-label">{{ t.email }}</label>
+                <input type="email" class="form-input" id="email" required placeholder="your@email.com">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">{{ t.password }}</label>
+                <input type="password" class="form-input" id="password" required placeholder="Min 6 characters" minlength="6">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">{{ t.confirm_password }}</label>
+                <input type="password" class="form-input" id="confirmPassword" required placeholder="••••••••">
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-full" id="submitBtn">
+                <i class="bi bi-person-plus"></i>
+                {{ t.register_button }}
+            </button>
+        </form>
+
+        <div class="auth-footer">
+            {{ t.has_account }} <a href="/login">{{ t.login_button }}</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const T = {{ t | tojson }};
+
+document.getElementById('registerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const btn = document.getElementById('submitBtn');
+    const errorMsg = document.getElementById('errorMsg');
+    const successMsg = document.getElementById('successMsg');
+    errorMsg.style.display = 'none';
+    successMsg.style.display = 'none';
+
+    const password = document.getElementById('password').value;
+    const confirm = document.getElementById('confirmPassword').value;
+
+    if (password !== confirm) {
+        errorMsg.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${T.password_mismatch}`;
+        errorMsg.style.display = 'flex';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> ' + T.loading;
+
+    try {
+        const response = await fetch('/api/register', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                email: document.getElementById('email').value,
+                password: password,
+                confirm_password: confirm
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            successMsg.innerHTML = `<i class="bi bi-check-circle"></i> ${T.register_success}`;
+            successMsg.style.display = 'flex';
+            setTimeout(() => location.href = '/login', 1500);
+        } else {
+            errorMsg.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${T[data.message] || data.message}`;
+            errorMsg.style.display = 'flex';
+        }
+    } catch (err) {
+        errorMsg.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${err.message}`;
+        errorMsg.style.display = 'flex';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="bi bi-person-plus"></i> ${T.register_button}`;
+    }
+});
+</script>
+{% endblock %}

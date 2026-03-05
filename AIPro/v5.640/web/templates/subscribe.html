@@ -1,0 +1,391 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t.subscribe_title }}{% endblock %}
+
+{% block extra_css %}
+.subscribe-container { max-width: 800px; margin: 40px auto; }
+.subscribe-header { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-md); text-align: center; margin-bottom: 20px; }
+.subscribe-icon { font-size: 48px; color: var(--accent-blue); margin-bottom: 12px; }
+.subscribe-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.subscribe-desc { color: var(--text-secondary); font-size: 14px; }
+
+.status-badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 500; margin: 16px 0; }
+.status-badge.subscribed { background: var(--color-buy-bg); color: var(--color-buy); }
+.status-badge.not-subscribed { background: var(--bg-secondary); color: var(--text-muted); }
+
+.watchlist-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-md); margin-bottom: 20px; }
+.watchlist-card h3 { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.watchlist-card h3 i { color: var(--accent-blue); }
+.watchlist-card .counter { font-size: 13px; color: var(--text-muted); font-weight: normal; margin-left: auto; }
+
+.chip-container { display: flex; flex-wrap: wrap; gap: 8px; max-height: 200px; overflow-y: auto; padding: 4px; }
+.chip { display: inline-flex; align-items: center; padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 20px; font-size: 13px; cursor: pointer; transition: all 0.2s; background: var(--bg-secondary); }
+.chip:hover { border-color: var(--accent-blue); }
+.chip.selected { background: var(--accent-blue); color: white; border-color: var(--accent-blue); }
+.chip.disabled { opacity: 0.5; cursor: not-allowed; }
+
+.timeframe-section { margin-top: 16px; }
+.timeframe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; }
+.timeframe-btn { padding: 10px; text-align: center; border: 1px solid var(--border-color); border-radius: var(--radius-md); cursor: pointer; transition: all 0.2s; background: var(--bg-secondary); font-size: 13px; }
+.timeframe-btn:hover { border-color: var(--accent-blue); }
+.timeframe-btn.selected { background: var(--accent-blue); color: white; border-color: var(--accent-blue); }
+
+.action-buttons { display: flex; gap: 12px; margin-top: 20px; }
+.action-buttons .btn { flex: 1; }
+
+.user-email { font-size: 12px; color: var(--text-muted); text-align: center; margin-top: 16px; }
+
+/* Mobile */
+@media (max-width: 768px) {
+    .subscribe-container {
+        margin: 16px auto;
+        padding: 0 12px;
+        padding-bottom: 20px;
+    }
+
+    .subscribe-header {
+        padding: 20px 16px;
+        margin-bottom: 16px;
+    }
+
+    .subscribe-icon {
+        font-size: 40px;
+        margin-bottom: 10px;
+    }
+
+    .subscribe-title {
+        font-size: 18px;
+    }
+
+    .subscribe-desc {
+        font-size: 13px;
+    }
+
+    .status-badge {
+        padding: 6px 12px;
+        font-size: 13px;
+        margin: 12px 0;
+    }
+
+    .watchlist-card {
+        padding: 16px;
+        margin-bottom: 16px;
+    }
+
+    .watchlist-card h3 {
+        font-size: 14px;
+        margin-bottom: 12px;
+    }
+
+    .watchlist-card .counter {
+        font-size: 12px;
+    }
+
+    .chip-container {
+        max-height: 180px;
+        gap: 6px;
+        padding: 2px;
+    }
+
+    .chip {
+        padding: 8px 12px;
+        font-size: 13px;
+        border-radius: 16px;
+        /* Touch-friendly sizing */
+        min-height: 36px;
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .chip span {
+        font-size: 10px;
+        margin-left: 3px;
+    }
+
+    .timeframe-section {
+        margin-top: 12px;
+    }
+
+    .timeframe-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+    }
+
+    .timeframe-btn {
+        padding: 12px 8px;
+        font-size: 12px;
+        /* Touch-friendly sizing */
+        min-height: 44px;
+    }
+
+    .action-buttons {
+        flex-direction: column;
+        margin-top: 16px;
+    }
+
+    .action-buttons .btn {
+        min-height: 48px;
+        font-size: 15px;
+    }
+
+    .user-email {
+        font-size: 11px;
+        margin-top: 12px;
+    }
+}
+
+/* Small Mobile */
+@media (max-width: 375px) {
+    .subscribe-container {
+        padding: 0 8px;
+    }
+
+    .subscribe-header {
+        padding: 16px 12px;
+    }
+
+    .subscribe-icon {
+        font-size: 32px;
+    }
+
+    .subscribe-title {
+        font-size: 16px;
+    }
+
+    .watchlist-card {
+        padding: 12px;
+    }
+
+    .chip-container {
+        max-height: 160px;
+    }
+
+    .chip {
+        padding: 6px 10px;
+        font-size: 12px;
+        min-height: 32px;
+    }
+
+    .timeframe-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .timeframe-btn {
+        padding: 10px 6px;
+        font-size: 11px;
+    }
+}
+
+/* Touch device improvements */
+@media (pointer: coarse) {
+    .chip {
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .chip:active {
+        transform: scale(0.95);
+    }
+
+    .timeframe-btn:active {
+        transform: scale(0.95);
+    }
+}
+{% endblock %}
+
+{% block content %}
+<div class="subscribe-container">
+    <!-- Header -->
+    <div class="subscribe-header">
+        <div class="subscribe-icon"><i class="bi bi-bell"></i></div>
+        <h1 class="subscribe-title">{{ t.subscribe_signals }}</h1>
+        <p class="subscribe-desc">{{ t.subscribe_desc }}</p>
+
+        <div id="statusBadge" class="status-badge {% if user.subscribed %}subscribed{% else %}not-subscribed{% endif %}">
+            <i class="bi {% if user.subscribed %}bi-check-circle{% else %}bi-x-circle{% endif %}"></i>
+            <span>{% if user.subscribed %}{{ t.subscribed }}{% else %}{{ t.not_subscribed }}{% endif %}</span>
+        </div>
+    </div>
+
+    <!-- Stock Selection -->
+    <div class="watchlist-card">
+        <h3>
+            <i class="bi bi-graph-up"></i> {{ t.us_stocks }}
+            <span class="counter" id="stockCounter">(<span id="stockCount">0</span>/10)</span>
+        </h3>
+        <div class="chip-container" id="stockChips">
+            {% for stock in available_stocks %}
+            <div class="chip" data-symbol="{{ stock }}" onclick="toggleStock('{{ stock }}')">{{ stock }}</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Crypto Selection -->
+    <div class="watchlist-card">
+        <h3>
+            <i class="bi bi-currency-bitcoin"></i> {{ t.cryptocurrency }}
+            <span class="counter" id="cryptoCounter">(<span id="cryptoCount">0</span>/5)</span>
+        </h3>
+        <div class="chip-container" id="cryptoChips">
+            {% for crypto in available_crypto %}
+            <div class="chip" data-id="{{ crypto.id }}" data-symbol="{{ crypto.symbol }}" onclick="toggleCrypto('{{ crypto.symbol }}')">
+                {{ crypto.symbol }} <span style="color: var(--text-muted); font-size: 11px; margin-left: 4px;">{{ crypto.name }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Timeframe Selection -->
+    <div class="watchlist-card">
+        <h3><i class="bi bi-clock"></i> {{ t.timeframe }}</h3>
+        <div class="timeframe-grid" id="timeframeGrid">
+            {% for tf, info in timeframes.items() %}
+            <div class="timeframe-btn" data-tf="{{ tf }}" onclick="selectTimeframe('{{ tf }}')">{{ info.display }}</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="action-buttons">
+        <button class="btn btn-primary" onclick="saveWatchlist()">
+            <i class="bi bi-check2"></i> {{ t.save }}
+        </button>
+        {% if user.subscribed %}
+        <button class="btn btn-secondary" onclick="unsubscribe()">
+            <i class="bi bi-bell-slash"></i> {{ t.unsubscribe_button }}
+        </button>
+        {% else %}
+        <button class="btn btn-secondary" onclick="subscribe()">
+            <i class="bi bi-bell"></i> {{ t.subscribe_button }}
+        </button>
+        {% endif %}
+    </div>
+
+    <p class="user-email">{{ user.email }}</p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const T = {{ t | tojson }};
+const MAX_STOCKS = 10;
+const MAX_CRYPTO = 5;
+
+let selectedStocks = {{ watchlist.stocks | tojson }};
+let selectedCrypto = {{ watchlist.crypto | tojson }};
+let selectedTimeframe = "{{ watchlist.timeframe }}";
+
+// Initialize UI
+document.addEventListener('DOMContentLoaded', () => {
+    // Mark selected stocks
+    selectedStocks.forEach(stock => {
+        const chip = document.querySelector(`#stockChips .chip[data-symbol="${stock}"]`);
+        if (chip) chip.classList.add('selected');
+    });
+
+    // Mark selected crypto (v5.487: 支持symbol和id两种格式以兼容旧数据)
+    selectedCrypto.forEach(item => {
+        // 先尝试按symbol匹配，再按id匹配（兼容旧数据）
+        let chip = document.querySelector(`#cryptoChips .chip[data-symbol="${item}"]`);
+        if (!chip) {
+            chip = document.querySelector(`#cryptoChips .chip[data-id="${item}"]`);
+        }
+        if (chip) chip.classList.add('selected');
+    });
+
+    // Mark selected timeframe
+    const tfBtn = document.querySelector(`#timeframeGrid .timeframe-btn[data-tf="${selectedTimeframe}"]`);
+    if (tfBtn) tfBtn.classList.add('selected');
+
+    updateCounters();
+});
+
+function toggleStock(symbol) {
+    const chip = document.querySelector(`#stockChips .chip[data-symbol="${symbol}"]`);
+    if (!chip) return;
+
+    if (selectedStocks.includes(symbol)) {
+        selectedStocks = selectedStocks.filter(s => s !== symbol);
+        chip.classList.remove('selected');
+    } else {
+        if (selectedStocks.length >= MAX_STOCKS) {
+            alert(`{{ t.max_stocks_alert }}`.replace('{0}', MAX_STOCKS));
+            return;
+        }
+        selectedStocks.push(symbol);
+        chip.classList.add('selected');
+    }
+    updateCounters();
+}
+
+function toggleCrypto(symbol) {
+    // v5.487: 使用symbol而非CoinGecko ID
+    const chip = document.querySelector(`#cryptoChips .chip[data-symbol="${symbol}"]`);
+    if (!chip) return;
+
+    if (selectedCrypto.includes(symbol)) {
+        selectedCrypto = selectedCrypto.filter(c => c !== symbol);
+        chip.classList.remove('selected');
+    } else {
+        if (selectedCrypto.length >= MAX_CRYPTO) {
+            alert(`{{ t.max_crypto_alert }}`.replace('{0}', MAX_CRYPTO));
+            return;
+        }
+        selectedCrypto.push(symbol);
+        chip.classList.add('selected');
+    }
+    updateCounters();
+}
+
+function selectTimeframe(tf) {
+    document.querySelectorAll('#timeframeGrid .timeframe-btn').forEach(btn => {
+        btn.classList.remove('selected');
+    });
+    const btn = document.querySelector(`#timeframeGrid .timeframe-btn[data-tf="${tf}"]`);
+    if (btn) btn.classList.add('selected');
+    selectedTimeframe = tf;
+}
+
+function updateCounters() {
+    document.getElementById('stockCount').textContent = selectedStocks.length;
+    document.getElementById('cryptoCount').textContent = selectedCrypto.length;
+}
+
+async function saveWatchlist() {
+    try {
+        const response = await fetch('/api/watchlist', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                stocks: selectedStocks,
+                crypto: selectedCrypto,
+                timeframe: selectedTimeframe
+            })
+        });
+        const data = await response.json();
+        if (data.success) {
+            alert('{{ t.save_success }}');
+        } else {
+            alert('{{ t.save_failed }}' + data.message);
+        }
+    } catch (err) {
+        alert('{{ t.error_prefix }}' + err.message);
+    }
+}
+
+async function subscribe() {
+    try {
+        const response = await fetch('/api/subscribe', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) location.reload();
+    } catch (err) { alert(err.message); }
+}
+
+async function unsubscribe() {
+    try {
+        const response = await fetch('/api/unsubscribe', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) location.reload();
+    } catch (err) { alert(err.message); }
+}
+</script>
+{% endblock %}
