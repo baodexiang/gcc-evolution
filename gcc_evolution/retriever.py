@@ -30,6 +30,40 @@ from .models import CardStatus, ExperienceCard, ExperienceType
 logger = logging.getLogger("gcc.retriever")
 
 
+# v4.98: layer_weights从config.yaml读取, fallback到默认值
+_DEFAULT_LAYER_WEIGHTS = {
+    "keyword": 0.30, "embedding": 0.25, "confidence": 0.15,
+    "status": 0.10, "freshness": 0.10, "downstream": 0.10,
+}
+
+
+def _load_layer_weights() -> dict[str, float]:
+    """Load retriever scoring weights from config.yaml if available."""
+    try:
+        import yaml
+        from pathlib import Path
+        for cfg_path in [Path(".gcc/config.yaml"), Path(".GCC/config.yaml")]:
+            if cfg_path.exists():
+                cfg = yaml.safe_load(cfg_path.read_text("utf-8")) or {}
+                overrides = cfg.get("retriever", {}).get("layer_weights", {})
+                if overrides and isinstance(overrides, dict):
+                    merged = dict(_DEFAULT_LAYER_WEIGHTS)
+                    for k, v in overrides.items():
+                        if k in merged and isinstance(v, (int, float)):
+                            merged[k] = float(v)
+                    # 归一化: 确保权重和≈1.0
+                    total = sum(merged.values())
+                    if total > 0 and abs(total - 1.0) > 0.01:
+                        merged = {k: v / total for k, v in merged.items()}
+                    return merged
+    except Exception:
+        pass
+    return dict(_DEFAULT_LAYER_WEIGHTS)
+
+
+LAYER_WEIGHTS: dict[str, float] = _load_layer_weights()
+
+
 # ════════════════════════════════════════════════════════════
 # Embedders
 # ════════════════════════════════════════════════════════════
@@ -227,11 +261,6 @@ class RetrievalResult:
         self.gated_out: list[tuple[ExperienceCard, str]] = []
         # v4.1: graph-expanded cards tracked separately
         self.graph_expanded: list[ExperienceCard] = []
-        # v5.010 P1-SF/SEP-2: 检索Grounding监控
-        self.total_candidates: int = 0
-        self.avg_score: float = 0.0
-        self.top_score: float = 0.0
-        self.regime_matched: int = 0
 
     @property
     def all_cards(self) -> list[ExperienceCard]:
@@ -240,20 +269,6 @@ class RetrievalResult:
     @property
     def all_ids(self) -> list[str]:
         return [c.id for c in self.all_cards]
-
-    def grounding_report(self) -> dict:
-        """v5.010 P1-SF/SEP-2: 检索Grounding可观察报告"""
-        total = len(self.all_cards)
-        return {
-            "candidates_scanned": self.total_candidates,
-            "cards_returned": total,
-            "gated_out": len(self.gated_out),
-            "graph_expanded": len(self.graph_expanded),
-            "avg_score": round(self.avg_score, 4),
-            "top_score": round(self.top_score, 4),
-            "regime_matched": self.regime_matched,
-            "hit_rate": round(total / max(self.total_candidates, 1), 4),
-        }
 
     def summary(self) -> str:
         gated = len(self.gated_out)
@@ -265,8 +280,6 @@ class RetrievalResult:
         )
         if graph > 0:
             base += f" | Graph-expanded: {graph}"
-        if self.total_candidates > 0:
-            base += f" | Grounding: {self.avg_score:.2f}avg/{self.top_score:.2f}top"
         return base
 
 
@@ -304,10 +317,8 @@ class Retriever:
     EXECUTION_TYPES = {ExperienceType.MUTATION, ExperienceType.FAILURE,
                        ExperienceType.PARTIAL}
 
-    def __init__(self, store: GlobalMemory, config: GCCConfig | None = None,
-                 current_regime: str = ""):
+    def __init__(self, store: GlobalMemory, config: GCCConfig | None = None):
         self.store = store
-        self.current_regime = current_regime  # v5.010 P1-THGNN-2: 市场状态匹配
         self.top_k = (config.retrieval_top_k if config else 5)
         self.graph_hop_depth = (
             getattr(config, 'graph_hop_depth', 1) if config else 1)
@@ -318,16 +329,14 @@ class Retriever:
     # ════════════════════════════════════════════════════════
 
     def retrieve_dual(self, task: str, project: str | None = None,
-                      top_k: int | None = None,
-                      cross_key: bool = False) -> RetrievalResult:
+                      top_k: int | None = None) -> RetrievalResult:
         """
         Two-stage retrieval + v4.1 graph expansion + v4.97 LLM re-ranking.
-        v5.010 P0-StockMem-1: cross_key=True 解锁跨KEY全库检索
         """
         k = top_k or self.top_k
         result = RetrievalResult()
 
-        candidates = self._get_candidates(project, cross_key=cross_key)
+        candidates = self._get_candidates(project)
         if not candidates:
             return result
 
@@ -339,18 +348,6 @@ class Retriever:
             score = self._score(card, q_emb, q_kw)
             scored.append((score, card))
         scored.sort(key=lambda x: x[0], reverse=True)
-
-        # v5.010 P1-SF/SEP-2: Grounding监控数据
-        result.total_candidates = len(candidates)
-        if scored:
-            scores_only = [s for s, _ in scored]
-            result.top_score = scores_only[0]
-            result.avg_score = sum(scores_only) / len(scores_only)
-            result.regime_matched = sum(
-                1 for _, c in scored
-                if getattr(c, 'market_regime', '') == self.current_regime
-                and self.current_regime
-            )
 
         planning_pool = [(s, c) for s, c in scored
                          if c.exp_type in self.PLANNING_TYPES]
@@ -453,7 +450,7 @@ class Retriever:
 
         try:
             raw = llm.generate(system=system, user=user,
-                               temperature=0.1, max_tokens=100, repeat=2)
+                               temperature=0.1, max_tokens=100)
             raw = raw.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -475,8 +472,7 @@ class Retriever:
                 if i not in seen:
                     result.append(c)
             return result
-        except Exception as e:
-            logger.warning("[RETRIEVER] LLM re-ranking failed, using default order: %s", e)
+        except Exception:
             return candidates[:top_k]
 
     def _get_llm(self):
@@ -490,16 +486,14 @@ class Retriever:
             if cfg.llm_api_key:
                 self._llm = LLMClient(cfg)
                 return self._llm
-        except Exception as e:
-            logger.warning("[RETRIEVER] LLM client initialization failed: %s", e)
+        except Exception:
+            pass
         return None
 
     def retrieve(self, query: str, top_k: int | None = None,
-                 project: str | None = None,
-                 cross_key: bool = False) -> list[ExperienceCard]:
+                 project: str | None = None) -> list[ExperienceCard]:
         """Backward-compatible single-layer retrieve."""
-        result = self.retrieve_dual(query, project=project, top_k=top_k,
-                                    cross_key=cross_key)
+        result = self.retrieve_dual(query, project=project, top_k=top_k)
         return result.all_cards
 
     # ════════════════════════════════════════════════════════
@@ -529,8 +523,7 @@ class Retriever:
                 neighbor_ids.append(card.parent_id)
             if card.supersedes_id and card.supersedes_id not in selected_ids:
                 neighbor_ids.append(card.supersedes_id)
-            # v5.010 P2-THGNN-2: related_ids最多展开3个，避免过度扩展
-            for rid in card.related_ids[:3]:
+            for rid in card.related_ids:
                 if rid not in selected_ids:
                     neighbor_ids.append(rid)
 
@@ -544,13 +537,7 @@ class Retriever:
                     continue
                 neighbor = candidate_map.get(nid) or self.store.get(nid)
                 if neighbor and neighbor.status != CardStatus.DEPRECATED:
-                    # v5.050 P2-THGNN-2: 同体制邻居优先，不同体制降低优先级
-                    n_regime = getattr(neighbor, 'market_regime', '')
-                    if self.current_regime and n_regime and n_regime != self.current_regime:
-                        # 不同体制放到末尾（仍可扩展，只是优先级低）
-                        expanded.append(neighbor)
-                    else:
-                        expanded.insert(0, neighbor)
+                    expanded.append(neighbor)
                     selected_ids.add(nid)
 
         return expanded
@@ -561,16 +548,14 @@ class Retriever:
 
     def retrieve_for_step(self, step_goal: str, task_context: str = "",
                           project: str | None = None,
-                          top_k: int = 2,
-                          cross_key: bool = False) -> RetrievalResult:
+                          top_k: int = 2) -> RetrievalResult:
         """
         Step-level retrieval with goal-aware pruning.
         Combines task_context (broad) + step_goal (specific).
         Stricter relevance threshold than session-level retrieval.
-        v5.010 P0-StockMem-1: cross_key=True 跨KEY检索
         """
         result = RetrievalResult()
-        candidates = self._get_candidates(project, cross_key=cross_key)
+        candidates = self._get_candidates(project)
         if not candidates:
             return result
 
@@ -615,10 +600,6 @@ class Retriever:
                     result.execution_cards.append(card)
             else:
                 result.gated_out.append((card, reason))
-
-        # v5.010 P1-GA-1: 检索命中后更新last_used (与retrieve_dual一致)
-        for card in result.all_cards:
-            self.store.increment_use(card.id)
 
         return result
 
@@ -802,11 +783,9 @@ class Retriever:
     # Internal helpers
     # ════════════════════════════════════════════════════════
 
-    def _get_candidates(self, project: str | None,
-                        cross_key: bool = False) -> list[ExperienceCard]:
-        """v5.010 P0-StockMem-1: cross_key=True 跳过project过滤，全库检索"""
+    def _get_candidates(self, project: str | None) -> list[ExperienceCard]:
         candidates = self.store.get_all(limit=500)
-        if project and not cross_key:
+        if project:
             proj_match = [c for c in candidates
                           if project.lower() in (c.project or "").lower()]
             if proj_match:
@@ -835,35 +814,16 @@ class Retriever:
         freshness = self._freshness_score(card)
 
         # v4.1: downstream impact boost
-        # v5.050 P1-DATA-5: downstream_avg<0.3时降权(低相关性)
-        raw_downstream = card.downstream_avg if card.downstream_avg > 0 else 0.0
-        if 0 < raw_downstream < 0.3 and len(card.downstream_scores) >= 3:
-            downstream = raw_downstream * 0.5   # 低相关性降权
-        else:
-            downstream = min(1.0, raw_downstream)
+        downstream = (min(1.0, card.downstream_avg)
+                       if card.downstream_avg > 0 else 0.0)
 
-        # v5.010 P0-GA-2: LLM重要性评分权重 (GA论文2304.03442)
-        importance = getattr(card, 'importance_score', 0.5)
-
-        # v5.010 P0-GA-2: 权重重构 — embedding>keyword, +importance
+        # v4.98: 权重从config.yaml读取 (LAYER_WEIGHTS)
+        w = LAYER_WEIGHTS
         base_score = (
-            emb_score * 0.30 + kw_score * 0.25 + conf * 0.15
-            + importance * 0.10 + status_score * 0.08
-            + freshness * 0.07 + downstream * 0.05
+            kw_score * w["keyword"] + emb_score * w["embedding"]
+            + conf * w["confidence"] + status_score * w["status"]
+            + freshness * w["freshness"] + downstream * w["downstream"]
         )
-
-        # v5.010 P0-THGNN-1: ExperienceType分路由检索权重
-        TYPE_WEIGHTS = {
-            "success": 1.0, "crossover": 1.0, "mutation": 0.85,
-            "partial": 0.7, "failure": 0.6,
-        }
-        type_mult = TYPE_WEIGHTS.get(card.exp_type.value, 0.8)
-
-        # v5.010 P1-THGNN-2: 市场状态匹配加分
-        regime_mult = 1.0
-        card_regime = getattr(card, 'market_regime', '')
-        if self.current_regime and card_regime:
-            regime_mult = 1.15 if card_regime == self.current_regime else 0.9
 
         # v4.85: Hierarchical priority weights (AdaptiveNN coarse-to-fine)
         # Direction layer (C1) > Project layer (C2) > Execution layer (C3)
@@ -878,8 +838,8 @@ class Retriever:
         align_mult = 1.0 if aligned else 0.3
 
         reuse_penalty = math.log2(max(card.use_count, 0) + 1) * 0.05
-        return max(0.0, base_score * type_mult * regime_mult * layer_mult
-                   * anchor_mult * align_mult - reuse_penalty)
+        return max(0.0, base_score * layer_mult * anchor_mult * align_mult
+                   - reuse_penalty)
 
     def _effective_confidence(self, card: ExperienceCard) -> float:
         if not card.last_validated:
@@ -895,14 +855,11 @@ class Retriever:
 
     @staticmethod
     def _freshness_score(card: ExperienceCard) -> float:
-        """v5.010 P0-GA-1: 优先last_used + 指数衰减 (GA论文2304.03442)"""
-        import math
         try:
-            ref_time = card.last_used or card.created_at
-            t = datetime.fromisoformat(ref_time)
+            created = datetime.fromisoformat(card.created_at)
             now = datetime.now(timezone.utc)
-            days = max(0, (now - t).days)
-            return max(0.05, math.exp(-0.01 * days))
+            days = (now - created).days
+            return max(0.1, 1.0 - days * 0.01)
         except (ValueError, TypeError):
             return 0.5
 

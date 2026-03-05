@@ -13,11 +13,8 @@ Card Lifecycle:
 from __future__ import annotations
 
 import json
-import logging
 import re
 from datetime import datetime, timezone
-
-logger = logging.getLogger(__name__)
 
 from .models import ExperienceCard, ExperienceType, CardStatus
 
@@ -32,7 +29,7 @@ Rewrite the given card into a standardized format. Rules:
    GOOD: "Replace HOLD band with N-gate before removal to prevent false signals"
 
 2. trigger_symptom: WHEN does this apply? One short phrase.
-   BAD:  "when you're working on the trading system signals"
+   BAD:  "when you're working on the domain system signals"
    GOOD: "modifying signal filtering logic"
 
 3. strategy: HOW to do it. 1-2 concrete sentences.
@@ -371,7 +368,7 @@ class Normalizer:
 
         try:
             raw = self.llm.generate(
-                system=NORMALIZE_SYSTEM, user=prompt, temperature=0.2, repeat=2,
+                system=NORMALIZE_SYSTEM, user=prompt, temperature=0.2,
             )
             text = raw.strip()
             if text.startswith("```"):
@@ -392,8 +389,8 @@ class Normalizer:
             if d.get("confidence"):
                 card.confidence = float(d["confidence"])
 
-        except Exception as e:
-            logger.warning("[NORMALIZER] LLM normalization failed, using rule-based fallback: %s", e)
+        except Exception:
+            pass  # Silently fall back to rule-based result
 
         return card
 

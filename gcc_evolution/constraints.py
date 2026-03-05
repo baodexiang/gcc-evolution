@@ -9,13 +9,10 @@ Retriever injects constraints alongside positive experiences.
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -28,7 +25,7 @@ class Constraint:
     id: str = ""
     source_card_id: str = ""
     rule: str = ""                  # "DO NOT use fixed ATR in choppy markets"
-    context: str = ""               # "SPY ER<0.3 Choppiness>61.8"
+    context: str = ""               # "PROD_A ER<0.3 Choppiness>61.8"
     key: str = ""                   # improvement KEY
     confidence: float = 0.0         # from failure card
     violation_count: int = 0        # times agent violated this
@@ -85,8 +82,7 @@ class ConstraintStore:
             try:
                 data = json.loads(self._path.read_text("utf-8"))
                 self._constraints = [Constraint.from_dict(d) for d in data]
-            except Exception as e:
-                logger.warning("[CONSTRAINTS] Failed to load constraints file: %s", e)
+            except Exception:
                 self._constraints = []
 
     def _save(self):

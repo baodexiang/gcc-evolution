@@ -15,14 +15,11 @@ Each stage has:
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -213,17 +210,13 @@ class PipelineTask:
     requirements: str = ""
     design_doc: str = ""
     dependencies: list[str] = field(default_factory=list)
-    key: str = ""              # GCC evolution key (Layer 1)
-    module: str = ""           # v5.010: 改善要求/模块 (Layer 2, e.g. "vision-cache")
+    key: str = ""              # GCC evolution key
 
     # Metrics
     tokens_used: int = 0
     cost: float = 0.0
     started_at: str = ""
     completed_at: str = ""
-
-    # Pipeline steps (三级结构第三层)
-    steps: list[dict] = field(default_factory=list)
 
     def advance_stage(self) -> PipelineStage | None:
         """Move to next stage. Returns new stage or None if already done."""
@@ -295,7 +288,7 @@ class PipelineTask:
             start = datetime.fromisoformat(self.started_at)
             finish = datetime.fromisoformat(end)
             return int((finish - start).total_seconds())
-        except (ValueError, TypeError):
+        except Exception:
             return 0
 
     def to_dict(self) -> dict:
@@ -315,12 +308,10 @@ class PipelineTask:
             "design_doc": self.design_doc,
             "dependencies": self.dependencies,
             "key": self.key,
-            "module": self.module,
             "tokens_used": self.tokens_used,
             "cost": self.cost,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
-            "steps": self.steps,
         }
 
     @classmethod
@@ -341,12 +332,10 @@ class PipelineTask:
             design_doc=d.get("design_doc", ""),
             dependencies=d.get("dependencies", []),
             key=d.get("key", ""),
-            module=d.get("module", ""),
             tokens_used=d.get("tokens_used", 0),
             cost=d.get("cost", 0.0),
             started_at=d.get("started_at", ""),
             completed_at=d.get("completed_at", ""),
-            steps=d.get("steps", []),
         )
         return t
 
@@ -376,18 +365,12 @@ class TaskPipeline:
             return
         try:
             data = json.loads(path.read_text("utf-8"))
-        except Exception as e:
-            logger.warning("[PIPELINE] load tasks.json failed: %s", e)
-            return
-        # 兼容两种格式: list [...] 或 dict {"tasks": [...]}
-        task_list = data if isinstance(data, list) else data.get("tasks", [])
-        for td in task_list:
-            try:
+            for td in data.get("tasks", []):
                 task = PipelineTask.from_dict(td)
                 self.tasks[task.task_id] = task
-            except Exception as e:
-                logger.warning("[PIPELINE] skip invalid task: %s", e)
-        self._counter = len(self.tasks) if isinstance(data, list) else data.get("counter", len(self.tasks))
+            self._counter = data.get("counter", len(self.tasks))
+        except Exception:
+            pass
 
     def _save(self) -> None:
         """Persist tasks to disk."""
@@ -567,17 +550,9 @@ class TaskPipeline:
         """Pipeline status summary."""
         by_stage: dict[str, int] = {}
         by_priority: dict[str, int] = {}
-        by_key: dict[str, dict[str, int]] = {}
         for t in self.tasks.values():
             by_stage[t.stage.value] = by_stage.get(t.stage.value, 0) + 1
             by_priority[t.priority] = by_priority.get(t.priority, 0) + 1
-            # 按 KEY 拆分统计（仅统计 key 非空的任务）
-            if t.key:
-                if t.key not in by_key:
-                    by_key[t.key] = {"total": 0, "completed": 0}
-                by_key[t.key]["total"] += 1
-                if t.stage == PipelineStage.DONE:
-                    by_key[t.key]["completed"] += 1
 
         total_tokens = sum(t.tokens_used for t in self.tasks.values())
         total_cost = sum(t.cost for t in self.tasks.values())
@@ -586,41 +561,12 @@ class TaskPipeline:
         if completed:
             avg_duration = sum(t.duration_sec for t in completed) // len(completed)
 
-        # 计算全局完成率
-        completion_rate = 0.0
-        if len(self.tasks) > 0:
-            completion_rate = len(completed) / len(self.tasks)
-
         return {
             "total_tasks": len(self.tasks),
             "by_stage": by_stage,
             "by_priority": by_priority,
-            "by_key": by_key,
             "total_tokens": total_tokens,
             "total_cost": round(total_cost, 2),
             "completed": len(completed),
             "avg_duration_sec": avg_duration,
-            "completion_rate": round(completion_rate, 2),
         }
-
-    def stale_tasks(self, days: int = 7) -> list[str]:
-        """
-        返回非终态且 updated_at 距今 >= days 天的 task_id 列表。
-        用于检测长期停滞的任务。
-        """
-        stale = []
-        now = datetime.now(timezone.utc)
-        for task_id, task in self.tasks.items():
-            # 跳过已完成或已暂停的任务
-            if task.stage in [PipelineStage.DONE, PipelineStage.SUSPENDED]:
-                continue
-            # 解析 updated_at，计算时间差
-            try:
-                updated = datetime.fromisoformat(task.updated_at.replace('Z', '+00:00'))
-                delta_days = (now - updated).days
-                if delta_days >= days:
-                    stale.append(task_id)
-            except Exception:
-                # 如果解析失败，跳过
-                pass
-        return stale

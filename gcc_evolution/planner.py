@@ -7,11 +7,8 @@ Inspired by QuantaAlpha's Diversified Planning Initialization.
 from __future__ import annotations
 
 import json
-import logging
 
 from .models import ExperienceCard, ImprovementPlan
-
-logger = logging.getLogger(__name__)
 
 
 PLAN_SYSTEM = """You are the planning engine for GCC v4.05.
@@ -86,7 +83,7 @@ class Planner:
         )
 
         try:
-            raw = self.llm.generate(system=PLAN_SYSTEM, user=prompt, temperature=0.5, repeat=2)
+            raw = self.llm.generate(system=PLAN_SYSTEM, user=prompt, temperature=0.5)
             text = raw.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -101,8 +98,7 @@ class Planner:
                         confidence=float(d.get("confidence", 0.5)),
                     ))
             return plans[:3]
-        except Exception as e:
-            logger.warning("[PLANNER] LLM plan generation failed, using defaults: %s", e)
+        except Exception:
             return self._default_plans(task)
 
     def _default_plans(self, task: str) -> list[ImprovementPlan]:

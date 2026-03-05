@@ -13,13 +13,10 @@ Runs on every `gcc-evo` startup or explicitly via `gcc-evo check`.
 from __future__ import annotations
 
 import json
-import logging
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 try:
     import yaml
@@ -91,9 +88,9 @@ def migrate_config() -> list[str]:
 
     # Ensure version
     old_version = raw.get("version", "")
-    if old_version != "5.050":
-        raw["version"] = "5.050"
-        changes.append(f"version: {old_version} -> 5.050")
+    if old_version != "4.98":
+        raw["version"] = "4.98"
+        changes.append(f"version: {old_version} -> 4.98")
 
     # Ensure constraints section
     if "constraints" not in raw:
@@ -169,8 +166,7 @@ def generate_status_md() -> Path:
             lines.append(f"GCC version: {raw.get('version', '?')}")
         else:
             lines.append("## Project: (no config)")
-    except Exception as e:
-        logger.warning("[SELFCHECK] failed to read project config: %s", e)
+    except Exception:
         lines.append("## Project: (config error)")
 
     lines.append("")
@@ -192,8 +188,8 @@ def generate_status_md() -> Path:
         if dirty_count > 0:
             lines.append(f"**Dirty: {dirty_count} files**")
         lines.append("")
-    except Exception as e:
-        logger.warning("[SELFCHECK] failed to read git status: %s", e)
+    except Exception:
+        pass
 
     # Active KEYs
     keys_path = Path(".gcc/keys.yaml")
@@ -208,8 +204,8 @@ def generate_status_md() -> Path:
                     task = v.get("task", "")
                     lines.append(f"- **{k}**: {task}")
                 lines.append("")
-        except Exception as e:
-            logger.warning("[SELFCHECK] failed to parse keys.yaml: %s", e)
+        except Exception:
+            pass
 
     # Pipeline tasks
     try:
@@ -223,8 +219,8 @@ def generate_status_md() -> Path:
                     lines.append(f"- [{t.get('task_id')}] {t.get('title', '')} "
                                f"({t.get('stage', '?')}) P{t.get('priority', '?')}")
                 lines.append("")
-    except Exception as e:
-        logger.warning("[SELFCHECK] failed to read pipeline tasks: %s", e)
+    except Exception:
+        pass
 
     # Params status
     try:
@@ -243,12 +239,11 @@ def generate_status_md() -> Path:
                             lines.append(f"- {sym}: Sharpe={sharpe:.2f}")
                         else:
                             lines.append(f"- {sym}: no backtest")
-                    except Exception as e:
-                        logger.warning("[SELFCHECK] failed to read params for %s: %s", sym, e)
+                    except Exception:
                         lines.append(f"- {sym}: (read error)")
                 lines.append("")
-    except Exception as e:
-        logger.warning("[SELFCHECK] failed to read params directory: %s", e)
+    except Exception:
+        pass
 
     # Constraints
     try:
@@ -263,8 +258,8 @@ def generate_status_md() -> Path:
                 if len(active_c) > 5:
                     lines.append(f"- ... and {len(active_c)-5} more")
                 lines.append("")
-    except Exception as e:
-        logger.warning("[SELFCHECK] failed to read constraints: %s", e)
+    except Exception:
+        pass
 
     # Recent handoffs
     try:
@@ -281,11 +276,11 @@ def generate_status_md() -> Path:
                             f"{hdata.get('key', '')} — "
                             f"{hdata.get('changes_summary', '')[:50]}"
                         )
-                    except Exception as e:
-                        logger.warning("[SELFCHECK] failed to parse handoff %s: %s", hf.name, e)
+                    except Exception:
+                        pass
                 lines.append("")
-    except Exception as e:
-        logger.warning("[SELFCHECK] failed to read handoffs directory: %s", e)
+    except Exception:
+        pass
 
     # Branch-specific handoffs
     try:
@@ -300,8 +295,8 @@ def generate_status_md() -> Path:
                 for fl in first_lines:
                     lines.append(fl)
                 lines.append("")
-    except Exception as e:
-        logger.warning("[SELFCHECK] failed to read branch handoffs: %s", e)
+    except Exception:
+        pass
 
     # Write
     status_path = Path(".gcc/STATUS.md")
@@ -354,12 +349,11 @@ def _auto_commit(dirty_lines: list[str]) -> bool:
                 subprocess.run(
                     ["git", "push"],
                     capture_output=True, text=True, timeout=30)
-        except Exception as e:
-            logger.warning("[SELFCHECK] auto-push failed: %s", e)
+        except Exception:
+            pass
 
         return True
-    except Exception as e:
-        logger.warning("[SELFCHECK] auto-commit failed: %s", e)
+    except Exception:
         return False
 
 
@@ -376,7 +370,7 @@ _CODE_EXTS = {".py", ".yaml", ".yml", ".json", ".md", ".toml", ".cfg", ".txt"}
 def _build_commit_msg(dirty_lines: list[str]) -> str:
     """
     Build commit message highlighting meaningful changes.
-    Example: [GCC] signal_filter.py, SPY-ATR/params.yaml (+2 other)
+    Example: [GCC] signal_filter.py, PROD_A-ATR/params.yaml (+2 other)
     """
     meaningful = []
     noise_count = 0
@@ -520,7 +514,7 @@ def run_self_check(verbose: bool = False) -> dict:
     """
     result = {
         "timestamp": _now(),
-        "version": "4.8",
+        "version": "4.98",
         "checks": [],
         "issues": [],
         "actions": [],
@@ -594,9 +588,8 @@ def run_self_check(verbose: bool = False) -> dict:
             result["actions"].append(f"Auto-generated card: {card_path.name}")
             result["checks"].append({"name": "auto_card", "ok": True,
                                     "detail": str(card_path.name)})
-    except Exception as e:
-        logger.warning("[SELFCHECK] auto-card generation failed: %s", e)
-        # Non-blocking — card generation failure shouldn't stop check
+    except Exception:
+        pass  # Non-blocking — card generation failure shouldn't stop check
 
     # 8. Git — auto-commit dirty files (after STATUS.md + card so they're included)
     try:
@@ -622,8 +615,7 @@ def run_self_check(verbose: bool = False) -> dict:
         else:
             result["checks"].append({"name": "git", "ok": True,
                                     "detail": "clean"})
-    except Exception as e:
-        logger.warning("[SELFCHECK] git check failed: %s", e)
+    except Exception:
         result["checks"].append({"name": "git", "ok": True,
                                 "detail": "not a git repo"})
 
@@ -634,7 +626,7 @@ def run_self_check(verbose: bool = False) -> dict:
 def format_check_report(result: dict) -> str:
     """Human-readable self-check report."""
     lines = [
-        f"  GCC v4.8 Self-Check — {result['timestamp'][:19]}",
+        f"  GCC v{result['version']} Self-Check — {result['timestamp'][:19]}",
         f"  {'═'*50}",
     ]
 

@@ -1,6 +1,5 @@
 """
-GCC v5.050 — Configuration
-v5.050: KEY-007 23项论文驱动改善 (GA/StockMem/THGNN/SF-SEP/SkillRL)
+GCC v4.1 — Configuration
 v4.1: + embedding_model, graph_hop_depth, goal_aware_pruning
 """
 
@@ -57,8 +56,6 @@ class GCCConfig:
     llm_api_key: str = ""
     llm_api_base: str = ""
     llm_temperature: float = 0.2
-    llm_repeat: int = 1              # GCC-0060: 全局默认repeat次数(1=不重复)
-    llm_debug_prompt: bool = False   # GCC-0060: 打印LLM prompt用于调试
 
     # v4.4: Pipeline
     pipeline_max_concurrent: int = 3
@@ -119,7 +116,7 @@ def _parse(raw: dict) -> GCCConfig:
     llm = raw.get("llm", {})
 
     return GCCConfig(
-        version=raw.get("version", "4.1"),
+        version=raw.get("version", "5.050"),
         project_name=proj.get("name", ""),
         project_type=proj.get("type", "custom"),
         auto_evaluate=evo.get("auto_evaluate", True),
@@ -138,8 +135,6 @@ def _parse(raw: dict) -> GCCConfig:
         llm_api_key=llm.get("api_key", ""),
         llm_api_base=llm.get("api_base", ""),
         llm_temperature=llm.get("temperature", 0.2),
-        llm_repeat=llm.get("repeat", 1),
-        llm_debug_prompt=llm.get("debug_prompt", False),
     )
 
 
@@ -152,7 +147,7 @@ def init_config(project_name: str, project_type: str = "custom") -> Path:
 
     config_path = gcc_dir / "evolution.yaml"
     config_path.write_text(f"""# GCC v4.1 Evolution Config
-version: "4.2"
+version: "5.050"
 
 project:
   name: "{project_name}"

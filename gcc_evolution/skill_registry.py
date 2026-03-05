@@ -1,5 +1,5 @@
 """
-GCC v4.6 — Skill Registry
+GCC v5.050 — Skill Registry
 Inspired by FactorMiner: Modular Skill Architecture.
 
 Wraps GCC capabilities as callable skills with tool-use compatible interface.
@@ -9,14 +9,11 @@ Agent calls skill by name, zero internal knowledge needed.
 from __future__ import annotations
 
 import json
-import logging
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
-
-logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -67,19 +64,19 @@ class SkillRegistry:
     def _register_builtins(self):
         """Register all built-in GCC skills."""
 
-        # ── Params skills ──
+        # -- Params skills --
         self.register(SkillDef(
             name="params_gate_check",
-            description="Run gate check for a trading product. Returns pass/fail with 7 metrics.",
-            input_schema={"symbol": "str (e.g. SPY, BTC)", "previous_backtest": "dict? (optional)"},
+            description="Run gate check for a product. Returns pass/fail with 7 metrics.",
+            input_schema={"product_id": "str", "previous_backtest": "dict? (optional)"},
             output_type="ParamGateResult",
             handler=self._h_params_gate,
         ))
 
         self.register(SkillDef(
             name="params_show",
-            description="Show all parameters for a trading product.",
-            input_schema={"symbol": "str"},
+            description="Show all parameters for a product.",
+            input_schema={"product_id": "str"},
             output_type="dict (full params YAML)",
             handler=self._h_params_show,
         ))
@@ -87,12 +84,12 @@ class SkillRegistry:
         self.register(SkillDef(
             name="params_update_backtest",
             description="Update backtest results for a product after optimization.",
-            input_schema={"symbol": "str", "results": "dict {sharpe, max_dd_pct, win_rate, ...}"},
+            input_schema={"product_id": "str", "results": "dict {sharpe, max_dd_pct, win_rate, ...}"},
             output_type="Path",
             handler=self._h_params_update_bt,
         ))
 
-        # ── Constraint skills ──
+        # -- Constraint skills --
         self.register(SkillDef(
             name="get_constraints",
             description="Get active DO NOT constraints for a KEY. Used to prune search space.",
@@ -109,7 +106,7 @@ class SkillRegistry:
             handler=self._h_add_constraint,
         ))
 
-        # ── Pipeline skills ──
+        # -- Pipeline skills --
         self.register(SkillDef(
             name="pipeline_status",
             description="Get current pipeline dashboard: all tasks with stages and status.",
@@ -126,7 +123,7 @@ class SkillRegistry:
             handler=self._h_pipeline_advance,
         ))
 
-        # ── Handoff skills ──
+        # -- Handoff skills --
         self.register(SkillDef(
             name="handoff_create",
             description="Create a handoff anchored to an improvement KEY.",
@@ -143,7 +140,7 @@ class SkillRegistry:
             handler=self._h_handoff_pickup,
         ))
 
-        # ── Self-check skill ──
+        # -- Self-check skill --
         self.register(SkillDef(
             name="self_check",
             description="Run GCC self-check: verify all modules, files, and config integrity.",
@@ -197,7 +194,7 @@ class SkillRegistry:
         return list(self._call_log)
 
     def _distill_failure(self, skill_name: str, kwargs: dict, error: Exception):
-        """v5.010 P0-SkillRL-1: 失败Skill独立蒸馏 — 生成s⁻经验卡"""
+        """v5.010 P0-SkillRL-1: Failed Skill independent distillation -- generate s- experience card"""
         card_dict = {
             "skill": skill_name,
             "args": {k: str(v)[:100] for k, v in kwargs.items()},
@@ -208,29 +205,29 @@ class SkillRegistry:
         self._failure_cards.append(card_dict)
 
     def get_failure_cards(self) -> list[dict]:
-        """返回失败蒸馏记录（供Distiller消费生成ExperienceCard）"""
+        """Return failure distillation records (for Distiller to consume)"""
         return list(self._failure_cards)
 
     def clear_failure_cards(self):
         self._failure_cards.clear()
 
-    # ═══ Handlers ═══
+    # === Handlers ===
 
     @staticmethod
-    def _h_params_gate(symbol: str, previous_backtest: dict | None = None):
+    def _h_params_gate(product_id: str, previous_backtest: dict | None = None):
         from .params import ParamGate
-        result = ParamGate.check(symbol, previous_backtest)
+        result = ParamGate.check(product_id, previous_backtest)
         return result.to_dict()
 
     @staticmethod
-    def _h_params_show(symbol: str):
+    def _h_params_show(product_id: str):
         from .params import ParamStore
-        return ParamStore.load(symbol)
+        return ParamStore.load(product_id)
 
     @staticmethod
-    def _h_params_update_bt(symbol: str, results: dict):
+    def _h_params_update_bt(product_id: str, results: dict):
         from .params import ParamStore
-        path = ParamStore.update_backtest(symbol, results)
+        path = ParamStore.update_backtest(product_id, results)
         return str(path)
 
     @staticmethod
@@ -404,8 +401,8 @@ class SkillRegistry:
                           "detail": f"branch={branch} dirty={dirty}"})
             if dirty > 0:
                 issues.append(f"Git: {dirty} dirty files")
-        except Exception as e:
-            checks.append({"name": "git", "status": "skip", "detail": f"not a git repo: {e}"})
+        except Exception:
+            checks.append({"name": "git", "status": "skip", "detail": "not a git repo"})
 
         # 9. Directory structure
         expected_dirs = [".gcc", ".gcc/experiences", ".gcc/params",
@@ -423,21 +420,21 @@ class SkillRegistry:
         return {"status": overall, "checks": checks, "issues": issues}
 
 
-# ══════════════════════════════════════════════════════════════
-# v4.90 — SkillBank（借鉴 SkillRL，论文 #16，arxiv:2602.08234）
+# ==============================================================
+# v4.90 — SkillBank(借鉴 SkillRL，论文 #16，arxiv:2602.08234)
 #
-# SkillRL 核心思路：
-#   原始轨迹 → 噪声大难泛化
-#   → 自动提炼成可复用 Skill
-#   → General Skills（跨任务通用）+ Task-Specific Skills（产品独特）
-#   → 递归进化：新经验自动更新旧 Skill
+# SkillRL core idea:
+#   Raw trajectories -> noisy, hard to generalize
+#   -> Auto-distill into reusable Skills
+#   -> General Skills (cross-task universal) + Task-Specific Skills (product-specific)
+#   -> Recursive evolution: new experience auto-updates old Skills
 #
-# GCC 实现方式：
-#   General Skills  = 知识卡（cards表，跨品种通用规律）
-#   Task-Specific   = 产品yaml（每个品种独特参数和策略）
-#   蒸馏机制        = retrospective → suggest → 人类审核 → 更新
-#   递归进化        = 每次 db sync 后，新数据影响下次 opinion
-# ══════════════════════════════════════════════════════════════
+# GCC implementation:
+#   General Skills  = knowledge cards (cards table, cross-product universal rules)
+#   Task-Specific   = product yaml (each product unique params and strategies)
+#   Distillation    = retrospective -> suggest -> human review -> update
+#   Recursive evo   = after each db sync, new data influences next opinion
+# ==============================================================
 
 from dataclasses import dataclass as _dc
 from typing import Literal as _Lit
@@ -445,25 +442,22 @@ from typing import Literal as _Lit
 
 @_dc
 class SkillEntry:
-    """SkillBank 中的一个技能条目"""
+    """A skill entry in SkillBank"""
     skill_id:    str
     name:        str
     skill_type:  _Lit["general", "task_specific"]  # General or Task-Specific
-    symbol:      str                  # task_specific 时有值，general 时为空
-    key_id:      str                  # 关联改善点
-    content:     str                  # 技能描述/规则
+    product_id:  str                  # task_specific: has value; general: empty
+    key_id:      str                  # Associated improvement KEY
+    content:     str                  # Skill description/rule
     source:      str                  # card/suggest/retrospective/human
-    confidence:  float = 0.8          # 可信度，被验证后提升
-    use_count:   int   = 0            # 被引用次数
-    success_rate: float = 0.0         # 应用成功率
+    confidence:  float = 0.8          # Confidence, increases after validation
+    use_count:   int   = 0            # Reference count
+    success_rate: float = 0.0         # Application success rate
     created_at:  str   = ""
     updated_at:  str   = ""
-    version:     int   = 1            # 递归进化版本号
+    version:     int   = 1            # Recursive evolution version number
     embedding:   list  = None         # v5.010 P1-SkillRL-1: 懒加载embedding向量
     when_to_apply: str = ""          # v5.010 P2-SkillRL-1: 适用场景描述(与content分离)
-    skill_category: str = ""         # v5.050 P0-SkillRL-1: general/failure/prevention
-    failure_pattern: str = ""        # v5.050 P0-SkillRL-1: 失败模式描述(s⁻蒸馏)
-    prevention: str = ""             # v5.050 P0-SkillRL-1: 预防措施(从失败轨迹提取)
 
     def __post_init__(self):
         if self.embedding is None:
@@ -472,13 +466,13 @@ class SkillEntry:
 
 class SkillBank:
     """
-    技能库，实现 SkillRL 的 General + Task-Specific 分层。
-    持久化到 .gcc/skillbank.jsonl。
+    Skill bank，实现 SkillRL 的 General + Task-Specific 分层。
+    Persistence到 .gcc/skillbank.jsonl。
 
-    检索策略（借鉴 SkillRL 自适应检索）：
-      - 通用任务 → 优先检索 General Skills
-      - 特定品种 → General + Task-Specific 合并，Task-Specific 权重更高
-      - 置信度 * 成功率 决定排序
+    Retrieval策略(借鉴 SkillRL AdaptiveRetrieval)：
+      - 通用任务 → 优先Retrieval General Skills
+      - 特定品种 → General + Task-Specific 合并，Task-Specific Weight更高
+      - confidence * success_rate determines ranking
     """
 
     def __init__(self, gcc_dir="./gcc"):
@@ -492,10 +486,10 @@ class SkillBank:
         self._skills: dict[str, SkillEntry] = {}
         self._load()
 
-    # ── 写入 ──────────────────────────────────────────────
+    # -- Write ----------------------------------------------
 
     def add(self, entry: SkillEntry) -> SkillEntry:
-        """添加或更新技能"""
+        """Add or update skill"""
         import json
         from datetime import datetime, timezone
 
@@ -506,7 +500,7 @@ class SkillBank:
 
         existing = self._skills.get(entry.skill_id)
         if existing:
-            # 递归进化：版本号递增，保留统计数据
+            # Recursive evolution: version incremented, statistics preserved
             entry.version      = existing.version + 1
             entry.use_count    = existing.use_count
             entry.success_rate = existing.success_rate
@@ -516,7 +510,7 @@ class SkillBank:
         return entry
 
     def record_usage(self, skill_id: str, success: bool):
-        """记录技能使用结果，更新成功率（递归进化的数据基础）"""
+        """Record skill usage result, update success rate (data foundation for recursive evolution)"""
         entry = self._skills.get(skill_id)
         if not entry:
             return
@@ -526,24 +520,11 @@ class SkillBank:
         entry.updated_at   = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()
         self._save()
 
-    def get(self, skill_id: str) -> "SkillEntry | None":
-        """GCC-0153: 获取单个技能（与GlobalMemory.get对齐）"""
-        return self._skills.get(skill_id)
-
-    def get_all(self, limit: int = 200) -> list["SkillEntry"]:
-        """GCC-0153: 获取所有技能（与GlobalMemory.get_all对齐）"""
-        entries = list(self._skills.values())
-        return entries[:limit]
-
-    def count(self) -> int:
-        """GCC-0153: 技能总数（与GlobalMemory.count对齐）"""
-        return len(self._skills)
-
-    # ── 检索（自适应，借鉴 SkillRL）─────────────────────────
+    # -- Retrieval(Adaptive，借鉴 SkillRL)-------------------------
 
     @staticmethod
     def _cosine_sim(a: list[float], b: list[float]) -> float:
-        """向量余弦相似度"""
+        """Vector cosine similarity"""
         if not a or not b or len(a) != len(b):
             return 0.0
         dot = sum(x * y for x, y in zip(a, b))
@@ -551,12 +532,12 @@ class SkillBank:
         nb = sum(x * x for x in b) ** 0.5
         return dot / (na * nb) if na > 0 and nb > 0 else 0.0
 
-    def retrieve(self, query: str = "", symbol: str = "",
+    def retrieve(self, query: str = "", product_id: str = "",
                  top_k: int = 5,
                  embedder: "Callable[[str], list[float]] | None" = None,
                  ) -> list[SkillEntry]:
         """
-        v5.010 P1-SkillRL-1: 自适应检索，支持embedding相似度。
+        v5.010 P1-SkillRL-1: AdaptiveRetrieval，支持embedding相似度。
 
         embedder: 可选的文本→向量函数。提供时用cosine相似度，
                   否则回退关键词匹配。
@@ -569,13 +550,12 @@ class SkillBank:
         if embedder and query:
             try:
                 query_emb = embedder(query)
-            except Exception as e:
-                logger.warning("[SKILL] embed query failed: %s", e)
+            except Exception:
                 query_emb = []
 
         for entry in self._skills.values():
-            # 过滤
-            if symbol and entry.skill_type == "task_specific" and entry.symbol != symbol:
+            # Filter
+            if product_id and entry.skill_type == "task_specific" and entry.product_id != product_id:
                 continue
 
             # v5.010: embedding相似度优先，fallback关键词
@@ -588,8 +568,8 @@ class SkillBank:
             else:
                 relevance = 0.5
 
-            # 权重
-            weight = 1.5 if (symbol and entry.skill_type == "task_specific") else 1.0
+            # Weight
+            weight = 1.5 if (product_id and entry.skill_type == "task_specific") else 1.0
 
             score = entry.confidence * max(entry.success_rate, 0.5) * relevance * weight
             results.append((score, entry))
@@ -598,7 +578,7 @@ class SkillBank:
         return [e for _, e in results[:top_k]]
 
     def ensure_embeddings(self, embedder: "Callable[[str], list[float]]") -> int:
-        """懒加载所有skill的embedding。返回新生成的数量。"""
+        """Lazy-load embeddings for all skills. Returns count of newly generated."""
         count = 0
         for entry in self._skills.values():
             if entry.embedding:
@@ -607,48 +587,48 @@ class SkillBank:
                 text = f"{entry.name} {entry.content}"
                 entry.embedding = embedder(text)
                 count += 1
-            except Exception as e:
-                logger.warning("[SKILL] embed skill %s failed: %s", entry.skill_id, e)
+            except Exception:
+                pass
         if count > 0:
             self._save()
         return count
 
-    def retrieve_for_opinion(self, symbol: str = "", key_id: str = "") -> str:
+    def retrieve_for_opinion(self, product_id: str = "", key_id: str = "") -> str:
         """
-        为 opinion 命令格式化技能上下文，注入提示词。
-        General Skills 先，Task-Specific 后。
+        Format skill context for opinion command, inject into prompt.
+        General Skills first, Task-Specific second.
         """
         generals   = [e for e in self._skills.values()
                       if e.skill_type == "general"
                       and (not key_id or e.key_id == key_id)]
         task_specs = [e for e in self._skills.values()
                       if e.skill_type == "task_specific"
-                      and (not symbol or e.symbol == symbol)]
+                      and (not product_id or e.product_id == product_id)]
 
         lines = []
         if generals:
-            lines.append("通用技能（General Skills）：")
+            lines.append("General Skills:")
             for e in sorted(generals, key=lambda x: -x.confidence)[:5]:
-                lines.append(f"  [{e.key_id}] {e.name} (置信度{e.confidence:.0%}) - {e.content[:60]}")
+                lines.append(f"  [{e.key_id}] {e.name} (confidence{e.confidence:.0%}) - {e.content[:60]}")
 
         if task_specs:
-            lines.append(f"\n品种技能（{symbol or 'Task-Specific'}）：")
+            lines.append(f"\nProduct skills ({product_id or 'Task-Specific'}):")
             for e in sorted(task_specs, key=lambda x: -x.confidence)[:5]:
-                lines.append(f"  [{e.symbol}] {e.name} (成功率{e.success_rate:.0%}) - {e.content[:60]}")
+                lines.append(f"  [{e.product_id}] {e.name} (success_rate{e.success_rate:.0%}) - {e.content[:60]}")
 
         return "\n".join(lines) if lines else ""
 
-    # ── 从现有数据蒸馏 ────────────────────────────────────
+    # -- Distill from existing data ------------------------------------
 
-    # ── v4.97 SkillRL: Recursive Co-evolution (#16 SkillRL 2026) ──
+    # -- v4.97 SkillRL: Recursive Co-evolution (#16 SkillRL 2026) --
 
     def mark_needs_revision(self, skill_id: str, reason: str = "") -> bool:
         """
         v4.97 — SkillRL Recursive Co-evolution 自动触发 (#16 SkillRL 2026)
 
-        原论文缺口：SkillRL 在验证失败时自动更新技能库，GCC 4.96 需手动操作。
+        原论文缺口：SkillRL 在验证失败时自动更新Skill bank，GCC 4.96 需手动操作。
         修复：skeptic 失败 → 调用此方法标记 skill 需复审
-              consolidate 时自动对标记 skill 重蒸馏（auto_redist_marked）
+              consolidate 时自动对标记 skill 重蒸馏(auto_redist_marked)
 
         被 skeptic._apply() 在验证失败时调用：
             skillbank.mark_needs_revision(
@@ -660,10 +640,10 @@ class SkillBank:
         entry = self._skills.get(skill_id)
         if not entry:
             return False
-        # 降低置信度，标记复审
+        # Lower confidence, mark for review
         entry.confidence = max(0.1, entry.confidence - 0.15)
         entry.updated_at = datetime.now(timezone.utc).isoformat()
-        # 在 content 中追加失败记录
+        # Append failure record to content
         if reason:
             entry.content = (entry.content + f" [NEEDS_REVISION: {reason[:80]}]")[:200]
         self._save()
@@ -684,10 +664,10 @@ class SkillBank:
         if not marked:
             return 0
 
-        # 重新从知识卡蒸馏（覆盖旧内容）
+        # Re-distill from knowledge cards (overwrite old content)
         redist_count = self.distill_from_cards(gcc_root=gcc_root)
 
-        # 清除 NEEDS_REVISION 标记
+        # Clear NEEDS_REVISION marks
         for entry in self._skills.values():
             if "NEEDS_REVISION" in entry.content:
                 entry.content = entry.content.split("[NEEDS_REVISION:")[0].strip()
@@ -696,9 +676,9 @@ class SkillBank:
 
     def distill_from_cards(self, gcc_root=None) -> int:
         """
-        从知识卡蒸馏 General Skills。
-        知识卡 → 提炼核心规则 → 写入 SkillBank。
-        对应 SkillRL 的 experience-based distillation。
+        Distill General Skills from knowledge cards.
+        Knowledge cards -> extract core rules -> write to SkillBank.
+        Corresponds to SkillRL experience-based distillation.
         """
         import json
         from pathlib import Path
@@ -724,7 +704,7 @@ class SkillBank:
                 skill_id   = skill_id,
                 name       = card["title"] or card["id"],
                 skill_type = "general",
-                symbol     = "",
+                product_id = "",
                 key_id     = card["key_id"] or "",
                 content    = (card["lessons_text"] or "")[:200],
                 source     = "card",
@@ -738,8 +718,8 @@ class SkillBank:
 
     def distill_from_suggestions(self, gcc_root=None) -> int:
         """
-        从已应用的参数建议蒸馏 Task-Specific Skills。
-        applied suggestions → 写入 SkillBank，带品种标记。
+        Distill Task-Specific Skills from applied parameter suggestions.
+        applied suggestions -> write to SkillBank, with product label.
         """
         import sqlite3
         from pathlib import Path
@@ -754,7 +734,7 @@ class SkillBank:
         sugs = conn.execute("""
             SELECT s.suggestion_id, s.description, s.evidence, s.suggested_value,
                    l.key_id,
-                   (SELECT symbol FROM improvement_product_links WHERE key_id=l.key_id LIMIT 1) as symbol
+                   (SELECT symbol FROM improvement_product_links WHERE key_id=l.key_id LIMIT 1) as product_id
             FROM suggestions s
             JOIN improvement_suggestion_links l ON s.suggestion_id=l.suggestion_id
             WHERE s.status='applied'
@@ -762,17 +742,17 @@ class SkillBank:
 
         n = 0
         for sug in sugs:
-            if not sug["symbol"]:
+            if not sug["product_id"]:
                 continue
             skill_id = f"TS_{sug['suggestion_id']}"
             content  = sug["description"] or ""
             if sug["evidence"]:
-                content += f" 证据：{sug['evidence'][:80]}"
+                content += f" Evidence: {sug['evidence'][:80]}"
             entry = SkillEntry(
                 skill_id   = skill_id,
                 name       = (sug["description"] or "")[:50],
                 skill_type = "task_specific",
-                symbol     = sug["symbol"],
+                product_id = sug["product_id"],
                 key_id     = sug["key_id"] or "",
                 content    = content[:200],
                 source     = "suggest",
@@ -784,7 +764,7 @@ class SkillBank:
         conn.close()
         return n
 
-    # ── 统计 ──────────────────────────────────────────────
+    # -- Statistics ----------------------------------------------
 
     def status(self) -> dict:
         generals   = [e for e in self._skills.values() if e.skill_type == "general"]
@@ -793,11 +773,11 @@ class SkillBank:
             "total":          len(self._skills),
             "general":        len(generals),
             "task_specific":  len(task_specs),
-            "symbols":        list({e.symbol for e in task_specs if e.symbol}),
+            "products":        list({e.product_id for e in task_specs if e.product_id}),
             "avg_confidence": sum(e.confidence for e in self._skills.values()) / max(len(self._skills), 1),
         }
 
-    # ── 持久化 ────────────────────────────────────────────
+    # -- Persistence --------------------------------------------
 
     def _save(self):
         import json
@@ -807,7 +787,7 @@ class SkillBank:
                 "skill_id":    e.skill_id,
                 "name":        e.name,
                 "skill_type":  e.skill_type,
-                "symbol":      e.symbol,
+                "product_id":  e.product_id,
                 "key_id":      e.key_id,
                 "content":     e.content,
                 "source":      e.source,
@@ -832,5 +812,5 @@ class SkillBank:
             try:
                 d = json.loads(line)
                 self._skills[d["skill_id"]] = SkillEntry(**d)
-            except Exception as e:
-                logger.warning("[SKILL] parse skill line failed: %s", e)
+            except Exception:
+                pass

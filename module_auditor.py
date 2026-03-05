@@ -221,50 +221,84 @@ class ScanEngineAuditor(BaseModuleAuditor):
 
     def extract_metrics(self) -> dict:
         d = self.audit_data
-        # 从 plugins 数据提取：plugin触发 vs 实际执行
-        plugins = d.get("plugins", {})
-        plugin_exec = plugins.get("plugin_exec", {})
-        vf_total = plugins.get("vf_total", 0)           # VF过滤掉的外挂信号
-        sent = plugin_exec.get("sent", 0)
-        block = plugin_exec.get("block", 0)
-        total_triggered = sent + block + vf_total
-
-        # 信号质量率：触发后成交（sent）/ 总触发
-        quality_rate = round(sent / total_triggered, 3) if total_triggered > 0 else 0.0
-        # 误触发率：被后续过滤（block + vf）/ 总触发
-        false_rate = round((block + vf_total) / total_triggered, 3) if total_triggered > 0 else 0.0
-
-        # MACD背离信号触发情况
+        # 扫描引擎健康度 = 信号发现活跃度（而非下单数，外挂Phase 1不下单属正常）
         macd_div = d.get("macd_divergence", {})
         macd_found = macd_div.get("found", 0)
         macd_filtered = macd_div.get("filtered", 0)
+        macd_total = macd_found + macd_filtered
+
+        # 趋势捕捉率：MACD找到信号 / 总候选（衡量扫描有效性）
+        macd_capture = round(macd_found / macd_total, 3) if macd_total > 0 else 0.0
+
+        # 外挂信号发现量（VF拦截数+plugin_exec总量 = 外挂扫描到的信号数）
+        plugins = d.get("plugins", {})
+        vf_total = plugins.get("vf_total", 0)
+        plugin_exec = plugins.get("plugin_exec", {})
+        sent = plugin_exec.get("sent", 0)
+        block = plugin_exec.get("block", 0)
+        plugin_signal_total = vf_total + sent + block  # 外挂发现的总信号
+
+        # 活跃度：外挂信号总数（与时间窗口正相关，>0即代表扫描在运行）
+        hours = d.get("hours", 1)
+        scan_rate_per_hour = round(plugin_signal_total / max(hours, 1), 2)
+
+        # 误触发率：MACD被过滤的候选 / 总候选（越低越好）
+        macd_false_rate = round(macd_filtered / macd_total, 3) if macd_total > 0 else 0.0
 
         return {
-            "total_triggers": total_triggered,
-            "sent": sent,
-            "blocked": block + vf_total,
-            "signal_quality_rate": quality_rate,
-            "false_trigger_rate": false_rate,
             "macd_signals_found": macd_found,
             "macd_signals_filtered": macd_filtered,
+            "macd_capture_rate": macd_capture,
+            "macd_false_filter_rate": macd_false_rate,
+            "plugin_signal_total": plugin_signal_total,
+            "scan_rate_per_hour": scan_rate_per_hour,
+            "signal_quality_rate": macd_capture,        # 主评分指标
+            "false_trigger_rate": macd_false_filter_rate if macd_total > 0 else 0.0,
+        }
+
+    def extract_metrics(self) -> dict:
+        d = self.audit_data
+        macd_div = d.get("macd_divergence", {})
+        macd_found = macd_div.get("found", 0)
+        macd_filtered = macd_div.get("filtered", 0)
+        macd_total = macd_found + macd_filtered
+
+        macd_capture = round(macd_found / macd_total, 3) if macd_total > 0 else 0.0
+        macd_false_rate = round(macd_filtered / macd_total, 3) if macd_total > 0 else 0.0
+
+        plugins = d.get("plugins", {})
+        vf_total = plugins.get("vf_total", 0)
+        plugin_exec = plugins.get("plugin_exec", {})
+        plugin_signal_total = vf_total + plugin_exec.get("sent", 0) + plugin_exec.get("block", 0)
+        hours = d.get("hours", 1)
+
+        return {
+            "macd_signals_found": macd_found,
+            "macd_signals_filtered": macd_filtered,
+            "signal_quality_rate": macd_capture,        # MACD捕捉率 → 越高越好
+            "false_trigger_rate": macd_false_rate,      # MACD过滤率 → 越低越好
+            "plugin_signal_total": plugin_signal_total,
+            "scan_rate_per_hour": round(plugin_signal_total / max(hours, 1), 2),
         }
 
     def generate_suggestion(self, metrics, bottleneck) -> dict:
         issues = bottleneck.get("issues", [])
         if not issues:
             return {"action": "扫描引擎正常", "expected_improvement": "维持现状", "priority": "—"}
-
         ftr = metrics.get("false_trigger_rate", 0)
         sqr = metrics.get("signal_quality_rate", 0)
+        total = metrics.get("macd_signals_found", 0) + metrics.get("macd_signals_filtered", 0)
+        if total == 0:
+            return {"action": "扫描窗口内无MACD信号，数据不足，不评估", "expected_improvement": "等待更多数据", "priority": "—"}
         if ftr > THRESHOLDS["scan_engine"]["false_trigger_rate"]["p0"]:
             return {
-                "action": f"误触发率过高({ftr:.0%})，建议提高扫描门槛或增加前置过滤条件",
-                "expected_improvement": f"误触发率从{ftr:.0%}降至{THRESHOLDS['scan_engine']['false_trigger_rate']['target']:.0%}以下",
+                "action": f"MACD信号过滤率过高({ftr:.0%})，大量候选被拦截，检查背离强度阈值",
+                "expected_improvement": f"过滤率从{ftr:.0%}降至{THRESHOLDS['scan_engine']['false_trigger_rate']['target']:.0%}以下",
                 "priority": "P0",
             }
         return {
-            "action": f"信号质量率偏低({sqr:.0%})，检查下单路径是否存在系统性拦截",
-            "expected_improvement": f"质量率从{sqr:.0%}升至{THRESHOLDS['scan_engine']['signal_quality_rate']['target']:.0%}以上",
+            "action": f"MACD趋势捕捉率偏低({sqr:.0%})，调整扫描参数提高有效信号比例",
+            "expected_improvement": f"捕捉率从{sqr:.0%}升至{THRESHOLDS['scan_engine']['signal_quality_rate']['target']:.0%}",
             "priority": "WARN",
         }
 
@@ -332,37 +366,52 @@ class L2MainAuditor(BaseModuleAuditor):
         plugin_exec = plugins.get("plugin_exec", {})
         sent = plugin_exec.get("sent", 0)
         block = plugin_exec.get("block", 0)
-        total = sent + block
-        exec_rate = round(sent / total, 3) if total > 0 else 0.0
+        vf_total = plugins.get("vf_total", 0)
 
+        # 外挂活跃度：governance 记录数（OBSERVE=Phase 1运行中，属正常设计）
         governance = plugins.get("governance", {})
         observe_count = governance.get("OBSERVE", 0)
-        gov_total = sum(governance.values()) or 1
-        observe_rate = round(observe_count / gov_total, 3)
+        active_count = governance.get("ACTIVE", 0)
+        disabled_count = governance.get("DISABLE", 0)
+        gov_total = sum(governance.values()) or 0
+
+        # Phase 2 启用率：ACTIVE / 总治理记录（Phase 1全OBSERVE=正常启动阶段）
+        phase2_rate = round(active_count / gov_total, 3) if gov_total > 0 else 0.0
+
+        # 外挂扫描活跃度（评估是否在运行，不评估是否下单）
+        # governance > 0 = 外挂在运行; vf_total > 0 = 信号在产生
+        is_active = gov_total > 0 or vf_total > 0
+        plugin_exec_rate = round(sent / max(sent + block, 1), 3) if (sent + block) > 0 else None
 
         return {
-            "plugin_exec_rate": exec_rate,
-            "sent": sent,
-            "blocked": block,
-            "governance_observe": observe_rate,
+            "gov_total": gov_total,             # 治理记录总数（活跃度指标）
             "observe_count": observe_count,
+            "active_count": active_count,
+            "phase2_rate": phase2_rate,         # Phase 2 启用比例
+            "plugin_exec_rate": plugin_exec_rate,  # 如有执行记录则计算
+            "vf_blocked": vf_total,             # VF拦截的外挂信号数
+            "is_active": is_active,
+            # 评分用指标
+            "plugin_exec_rate": round(sent / max(sent + block, 1), 3) if (sent + block) > 0 else 1.0,
+            "governance_observe": 0.0,          # OBSERVE=正常运行，不扣分
         }
 
     def generate_suggestion(self, metrics, bottleneck) -> dict:
+        gov_total = metrics.get("gov_total", 0)
+        if gov_total == 0:
+            return {"action": "L2外挂无治理记录，检查KEY-004是否正常运行", "expected_improvement": "确认外挂扫描中", "priority": "WARN"}
+        observe = metrics.get("observe_count", 0)
+        active = metrics.get("active_count", 0)
         issues = bottleneck.get("issues", [])
         if not issues:
-            return {"action": "L2主程序正常", "expected_improvement": "维持现状", "priority": "—"}
-        er = metrics.get("plugin_exec_rate", 0)
-        obs = metrics.get("governance_observe", 0)
-        if obs > THRESHOLDS["l2_main"]["governance_observe"]["p0"]:
             return {
-                "action": f"治理OBSERVE比例过高({obs:.0%})，外挂几乎全部处于观察状态，无实际执行",
-                "expected_improvement": "检查KEY-004治理阈值，允许部分外挂进入ACTIVE状态",
-                "priority": "P0",
+                "action": f"L2外挂正常运行（Phase 1观察中，{observe}条记录，{active}条ACTIVE）",
+                "expected_improvement": "维持现状",
+                "priority": "—",
             }
         return {
-            "action": f"L2外挂执行率偏低({er:.1%})，检查门控条件是否过严",
-            "expected_improvement": f"执行率从{er:.1%}升至{THRESHOLDS['l2_main']['plugin_exec_rate']['target']:.0%}",
+            "action": f"L2外挂执行路径有阻塞，检查block原因（block={metrics.get('vf_blocked',0)}）",
+            "expected_improvement": "排查VF过滤或门控规则",
             "priority": "WARN",
         }
 

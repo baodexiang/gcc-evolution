@@ -37,7 +37,6 @@ class CardStatus(str, Enum):
     VALIDATED = "validated"
     ARCHIVED = "archived"
     DEPRECATED = "deprecated"
-    FLAGGED = "flagged"  # v5.050 P0-SF-1/2: 低忠实度卡标记
 
 
 class StepResult(str, Enum):
@@ -57,6 +56,7 @@ class TrajectoryStep:
     feedback: str = ""
     metrics: dict[str, Any] = field(default_factory=dict)
     timestamp: str = field(default_factory=_now)
+    step_goal: str = ""  # v4.98: SkillRL步骤目标, 可从外部配置传入
 
 
 @dataclass
@@ -110,11 +110,7 @@ class TrajectoryEvaluation:
 
     # v4.0: delta vs previous session on same KEY
     delta_score: float = 0.0
-    delta_normalized: bool = False       # v5.050 P1-THGNN-1: True=z-score标准化
     prev_session_id: str = ""
-
-    # v5.010 P1-SF/SEP-1: LLM评估忠实度 (SF/SEP论文)
-    evaluation_faithfulness: float = 1.0   # 评估与轨迹的忠实度[0,1]
 
     key_improvements: list[str] = field(default_factory=list)
     key_regressions: list[str] = field(default_factory=list)
@@ -269,28 +265,6 @@ class ExperienceCard:
     downstream_scores: list[float] = field(default_factory=list)
     downstream_avg: float = 0.0
 
-    # v5.010 P0-GA-2: LLM重要性评分 (GA论文2304.03442)
-    importance_score: float = 0.5       # LLM评分[0,1], 1=极重要
-    importance_checked: bool = False    # 是否已做过LLM重要性评分
-
-    # v5.010 P1-StockMem-1: Causal Triplet (StockMem论文)
-    causal_trigger: str = ""            # 因果触发条件
-    causal_action: str = ""             # 采取的动作
-    causal_outcome: str = ""            # 结果/效果
-
-    # v5.010 P1-StockMem-2: Skeptic失败反馈追踪
-    skeptic_fail_count: int = 0         # 累计验证失败次数
-    last_skeptic_verdict: str = ""      # 最后判决标签(PASSED/FAILED/REGRESSION)
-
-    # v5.010 P1-THGNN-2: 市场状态上下文 (THGNN论文)
-    market_regime: str = ""             # bull/bear/sideways
-    vix_level: str = ""                 # low/medium/high/extreme
-    market_context: dict[str, Any] = field(default_factory=dict)  # 额外市场指标
-
-    # v5.010 P2-SF/SEP-1: 蒸馏忠实度追踪
-    faithfulness_score: float = 1.0      # distiller忠实度[0,1]
-    faithfulness_checked: bool = False   # 是否已做过忠实度校验
-
     # v4.85: Hierarchical Priority (AdaptiveNN coarse-to-fine)
     layer_priority: int = 2             # 1=执行层 2=项目层 3=方向层(最高)
     is_human_anchor: bool = False       # True=Human Anchor，永不降权
@@ -311,7 +285,7 @@ class ExperienceCard:
 
         status_icon = {
             "draft": "◇", "active": "○", "validated": "●",
-            "archived": "◆", "deprecated": "✕", "flagged": "⚑",
+            "archived": "◆", "deprecated": "✕",
         }.get(self.status.value, "?")
 
         impact = ""
@@ -356,8 +330,6 @@ class ExperienceCard:
             " ".join(self.merged_steps),
             " ".join(self.attachments),
             self.source_ref,
-            self.market_regime, self.vix_level,  # v5.010 P1-THGNN-2
-            self.self_reflection,  # v5.050 P0-FIX-4
         ]
         return " ".join(p for p in parts if p)
 

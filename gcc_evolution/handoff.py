@@ -18,7 +18,6 @@ Usage:
 from __future__ import annotations
 
 import json
-import logging
 import subprocess
 import re
 from dataclasses import dataclass, field
@@ -26,8 +25,6 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -73,7 +70,7 @@ class HandoffTask:
     agent: str = ""             # Which agent completed this
 
     # v4.5: Anchor to improvement item
-    anchor_key: str = ""        # Linked KEY (e.g. "SPY-ATR")
+    anchor_key: str = ""        # Linked KEY (e.g. "PROD_A-ATR")
     anchor_task_id: str = ""    # Linked pipeline task (e.g. "GCC-0001")
     anchor_note: str = ""       # Why this link, or "NEW: suggest creating KEY xxx"
 
@@ -373,7 +370,7 @@ class HandoffProtocol:
     def _branch_to_key(branch: str) -> str:
         """
         Extract KEY from branch name.
-        feature/spy-atr       → SPY-ATR
+        feature/spy-atr       → PROD_A-ATR
         fix/n-structure       → N-STRUCTURE
         dev/chan-divergence    → CHAN-DIVERGENCE
         main                  → MAIN
@@ -418,9 +415,9 @@ class HandoffProtocol:
             self.manifest.diff_summary = self._git(
                 "diff", "--stat", f"{commit}~1", commit).strip()
 
-        except Exception as e:
+        except Exception:
             # Not in a git repo or git not available — still usable
-            logger.warning("[HANDOFF] git context failed: %s", e)
+            pass
 
     @staticmethod
     def _git(*args) -> str:
@@ -637,8 +634,7 @@ class HandoffProtocol:
                     return hp
                 if status == "completed" and hp.manifest.is_complete():
                     return hp
-            except Exception as e:
-                logger.warning("[HANDOFF] load handoff %s failed: %s", f.name, e)
+            except Exception:
                 continue
         return None
 
@@ -655,8 +651,7 @@ class HandoffProtocol:
                 hp = cls.load(f)
                 if hp.manifest.pending_tasks():
                     results.append(hp)
-            except Exception as e:
-                logger.warning("[HANDOFF] load pending handoff %s failed: %s", f.name, e)
+            except Exception:
                 continue
         return results
 
@@ -686,8 +681,7 @@ class HandoffProtocol:
                     "complete": m.is_complete(),
                     "file": str(f),
                 })
-            except Exception as e:
-                logger.warning("[HANDOFF] list handoff %s failed: %s", f.name, e)
+            except Exception:
                 continue
         return results
 

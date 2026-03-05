@@ -6,10 +6,7 @@ Full lifecycle: plan → execute → evaluate → distill → mutate → crossov
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
 
 from .config import GCCConfig, load_config, init_config
 from .crossover import Crossover
@@ -67,8 +64,7 @@ class SessionManager:
         if use_llm and config.llm_api_key:
             try:
                 llm = LLMClient(config)
-            except Exception as e:
-                logger.warning("[SESSION_MANAGER] LLM client initialization failed: %s", e)
+            except Exception:
                 llm = None
         return cls(config, llm=llm)
 
@@ -244,9 +240,6 @@ class SessionManager:
             diagnostic=diagnostic,
             experience_feedback=exp_feedback,
         )
-
-        # ── 12. Weight feedback log (v5.050 P1-DATA-1) ──
-        self._write_weight_feedback(evaluation, used_card_ids)
 
         self._save_trajectory()
         self._trajectory = None
@@ -459,7 +452,7 @@ class SessionManager:
                          seed_file: str | None = None) -> int:
         """
         v4.0: Load pre-built experience cards from seed config.
-        project_types: e.g. ["trading_system", "general"]
+        project_types: e.g. ["domain_system", "general"]
         Skips cards whose key_insight already exists in the store.
         """
         import yaml
@@ -687,29 +680,6 @@ class SessionManager:
     # ════════════════════════════════════════════════════════
     # Internal
     # ════════════════════════════════════════════════════════
-
-    def _write_weight_feedback(self, evaluation: TrajectoryEvaluation,
-                               card_ids: list[str]) -> None:
-        """v5.050 P1-DATA-1: 检索权重反馈日志 — 追踪哪些卡片被检索+session最终得分."""
-        if not self._trajectory:
-            return
-        try:
-            from datetime import datetime, timezone
-            fb_path = Path(self.config.local_dir).parent / "weight_feedback.jsonl"
-            fb_path.parent.mkdir(parents=True, exist_ok=True)
-            record = {
-                "ts": datetime.now(timezone.utc).isoformat(),
-                "session_id": self._trajectory.session_id,
-                "key": self._trajectory.key,
-                "card_ids": card_ids,
-                "score": evaluation.overall_score,
-                "delta": evaluation.delta_score,
-                "delta_normalized": evaluation.delta_normalized,
-            }
-            with open(fb_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        except Exception as e:
-            logger.warning("[SESSION_MANAGER] Weight feedback write failed: %s", e)
 
     def _save_trajectory(self) -> None:
         if not self._trajectory:

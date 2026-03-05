@@ -1,5 +1,5 @@
 """
-GCC v4.5 — Product Parameters Module
+GCC v5.050 — Product Parameters Module
 KEY-001 P0: Parameter configuration infrastructure.
 
 Manages per-product YAML parameter files with:
@@ -10,17 +10,17 @@ Manages per-product YAML parameter files with:
 
 Usage:
     # Load params for a product
-    params = ParamStore.load("SPY")
+    params = ParamStore.load("product_A")
 
     # Run gate check after backtest
-    gate = ParamGate.check("SPY")
+    gate = ParamGate.check("product_A")
     if gate.passed:
         print("Ready to deploy")
     else:
         print(gate.report())
 
     # Update backtest results
-    ParamStore.update_backtest("SPY", {
+    ParamStore.update_backtest("product_A", {
         "sharpe": 2.3, "max_dd_pct": 12, "win_rate": 0.58, ...
     })
 """
@@ -29,13 +29,10 @@ from __future__ import annotations
 
 import copy
 import json
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 try:
     import yaml
@@ -50,24 +47,12 @@ def _now() -> str:
 # ── Default Schema ──────────────────────────────────────────
 
 DEFAULT_PARAMS = {
-    "symbol": "",
-    "market": "US_STOCK",       # US_STOCK | CRYPTO
+    "product_id": "",
+    "category": "default",
     "timeframe": "4h",
     "trend_tf": "16h",
 
-    "entry": {
-        "atr_period": 14,
-        "atr_multiplier": 2.0,
-        "efficiency_ratio_period": 10,
-        "kama_fast": 2,
-        "kama_slow": 30,
-        "chan_buy_signals": [1, 2],
-        "chan_divergence": True,
-        "choppiness_threshold": 61.8,
-        "x4_lookback": 20,
-        "n_structure_enabled": True,
-        "n_structure_min_ratio": 0.5,
-    },
+    "strategy": {},
 
     "risk": {
         "max_position_pct": 80,
@@ -108,50 +93,24 @@ DEFAULT_PARAMS = {
     },
 }
 
-# Crypto products get relaxed defaults
-CRYPTO_OVERRIDES = {
-    "targets": {
-        "sharpe_min": 1.5,
-        "max_dd_pct": 20,
-        "win_rate_min": 0.50,
-        "calmar_min": 1.0,
-        "sortino_min": 1.5,
-        "cagr_min": 0.30,
-    },
-    "risk": {
-        "max_position_pct": 60,
-        "stop_loss_atr_mult": 2.0,
-        "trailing_atr_mult": 2.5,
-        "max_drawdown_pct": 20,
-    },
-}
-
-# Known products with market type
-KNOWN_PRODUCTS = {
-    "SPY": "US_STOCK", "QQQ": "US_STOCK", "IWM": "US_STOCK",
-    "DIA": "US_STOCK", "AAPL": "US_STOCK", "MSFT": "US_STOCK",
-    "BTC": "CRYPTO", "ETH": "CRYPTO", "SOL": "CRYPTO",
-    "DOGE": "CRYPTO", "ADA": "CRYPTO", "AVAX": "CRYPTO",
-}
-
 
 # ── Param Store ─────────────────────────────────────────────
 
 class ParamStore:
     """
     Per-product YAML parameter manager.
-    Files stored in .gcc/params/{SYMBOL}.yaml
+    Files stored in .gcc/params/{PRODUCT_ID}.yaml
     """
 
     PARAMS_DIR = ".gcc/params"
 
     @classmethod
-    def path_for(cls, symbol: str) -> Path:
-        return Path(cls.PARAMS_DIR) / f"{symbol.upper()}.yaml"
+    def path_for(cls, product_id: str) -> Path:
+        return Path(cls.PARAMS_DIR) / f"{product_id.upper()}.yaml"
 
     @classmethod
-    def exists(cls, symbol: str) -> bool:
-        return cls.path_for(symbol).exists()
+    def exists(cls, product_id: str) -> bool:
+        return cls.path_for(product_id).exists()
 
     @classmethod
     def list_products(cls) -> list[str]:
@@ -164,27 +123,17 @@ class ParamStore:
         )
 
     @classmethod
-    def load(cls, symbol: str) -> dict:
+    def load(cls, product_id: str) -> dict:
         """
         Load params for a product.
         Falls back to defaults if file missing or fields incomplete.
         """
-        symbol = symbol.upper()
-        path = cls.path_for(symbol)
+        product_id = product_id.upper()
+        path = cls.path_for(product_id)
 
         # Start with defaults
         params = copy.deepcopy(DEFAULT_PARAMS)
-        params["symbol"] = symbol
-
-        # Auto-detect market
-        market = KNOWN_PRODUCTS.get(symbol, "US_STOCK")
-        params["market"] = market
-
-        # Apply crypto overrides if applicable
-        if market == "CRYPTO":
-            for section, overrides in CRYPTO_OVERRIDES.items():
-                if section in params:
-                    params[section].update(overrides)
+        params["product_id"] = product_id
 
         # Load from file if exists
         if path.exists() and yaml:
@@ -192,16 +141,16 @@ class ParamStore:
                 file_data = yaml.safe_load(path.read_text("utf-8"))
                 if file_data and isinstance(file_data, dict):
                     cls._deep_merge(params, file_data)
-            except Exception as e:
-                logger.warning("[PARAMS] Failed to load params file for %s, using defaults: %s", symbol, e)
+            except Exception:
+                pass  # fall back to defaults
 
         return params
 
     @classmethod
-    def save(cls, symbol: str, params: dict) -> Path:
+    def save(cls, product_id: str, params: dict) -> Path:
         """Save params to YAML file."""
-        symbol = symbol.upper()
-        path = cls.path_for(symbol)
+        product_id = product_id.upper()
+        path = cls.path_for(product_id)
         path.parent.mkdir(parents=True, exist_ok=True)
 
         if yaml:
@@ -216,71 +165,43 @@ class ParamStore:
         return path
 
     @classmethod
-    def init_product(cls, symbol: str, market: str = "") -> Path:
+    def init_product(cls, product_id: str, category: str = "default") -> Path:
         """Initialize a new product YAML from defaults."""
-        symbol = symbol.upper()
-        if not market:
-            market = KNOWN_PRODUCTS.get(symbol, "US_STOCK")
+        product_id = product_id.upper()
 
         params = copy.deepcopy(DEFAULT_PARAMS)
-        params["symbol"] = symbol
-        params["market"] = market
-
-        if market == "CRYPTO":
-            for section, overrides in CRYPTO_OVERRIDES.items():
-                if section in params:
-                    params[section].update(overrides)
-
-        return cls.save(symbol, params)
+        params["product_id"] = product_id
+        params["category"] = "default"
 
     @classmethod
-    def update_backtest(cls, symbol: str, results: dict) -> Path:
+    def update_backtest(cls, product_id: str, results: dict) -> Path:
         """Update backtest results in YAML after optimization."""
-        params = cls.load(symbol)
+        params = cls.load(product_id)
         bt = params.get("backtest", {})
         bt.update(results)
         bt["updated_at"] = _now()
         params["backtest"] = bt
-        return cls.save(symbol, params)
+        return cls.save(product_id, params)
 
     @classmethod
-    def update_param(cls, symbol: str, section: str, key: str, value: Any) -> Path:
+    def update_param(cls, product_id: str, section: str, key: str, value: Any) -> Path:
         """Update a single parameter."""
-        params = cls.load(symbol)
+        params = cls.load(product_id)
         if section in params and isinstance(params[section], dict):
             params[section][key] = value
-        return cls.save(symbol, params)
+        return cls.save(product_id, params)
 
     @classmethod
-    def diff(cls, symbol: str, old_params: dict | None = None) -> list[dict]:
+    def diff(cls, product_id: str, old_params: dict | None = None) -> list[dict]:
         """
         Compare current params vs previous version.
         Returns list of changes.
         """
-        current = cls.load(symbol)
+        current = cls.load(product_id)
         if old_params is None:
             # Compare against defaults
-            market = current.get("market", "US_STOCK")
             old_params = copy.deepcopy(DEFAULT_PARAMS)
-            if market == "CRYPTO":
-                for s, o in CRYPTO_OVERRIDES.items():
-                    if s in old_params:
-                        old_params[s].update(o)
-
-        changes = []
-        for section in ("entry", "risk", "regime", "targets"):
-            curr_sec = current.get(section, {})
-            old_sec = old_params.get(section, {})
-            for k in set(list(curr_sec.keys()) + list(old_sec.keys())):
-                cv = curr_sec.get(k)
-                ov = old_sec.get(k)
-                if cv != ov:
-                    changes.append({
-                        "section": section, "param": k,
-                        "old": ov, "new": cv,
-                    })
-        return changes
-
+            old_params = copy.deepcopy(DEFAULT_PARAMS)
     @staticmethod
     def _deep_merge(base: dict, override: dict) -> None:
         """Deep merge override into base (in-place)."""
@@ -316,7 +237,7 @@ class GateCheckResult:
 @dataclass
 class ParamGateResult:
     """Complete gate check result for a product."""
-    symbol: str
+    product_id: str
     checks: list[GateCheckResult] = field(default_factory=list)
     checked_at: str = field(default_factory=_now)
     passed: bool = False
@@ -349,13 +270,13 @@ class ParamGateResult:
     def report(self) -> str:
         """Human-readable gate report."""
         lines = [
-            f"═══ Gate Check: {self.symbol} ═══",
-            f"Result: {'✅ PASSED' if self.passed else '❌ FAILED'}",
+            f"═══ Gate Check: {self.product_id} ═══",
+            f"Result: {'PASSED PASSED' if self.passed else 'FAILED FAILED'}",
             f"Pass Rate: {self.pass_rate:.0%} (Required: {self.required_pass_rate:.0%})",
             "",
         ]
         for c in self.checks:
-            icon = "✓" if c.passed else "✗"
+            icon = "+" if c.passed else "-"
             req = " *" if c.required else ""
             if c.current is not None and c.target is not None:
                 lines.append(
@@ -367,7 +288,7 @@ class ParamGateResult:
 
         if not self.no_regression:
             lines.append("")
-            lines.append("  ⚠ Regression detected:")
+            lines.append("  WARNING: Regression detected:")
             for d in self.regression_details:
                 lines.append(f"    - {d}")
 
@@ -375,7 +296,7 @@ class ParamGateResult:
 
     def to_dict(self) -> dict:
         return {
-            "symbol": self.symbol,
+            "product_id": self.product_id,
             "passed": self.passed,
             "pass_rate": self.pass_rate,
             "required_pass_rate": self.required_pass_rate,
@@ -404,17 +325,17 @@ class ParamGate:
     ]
 
     @classmethod
-    def check(cls, symbol: str, previous_backtest: dict | None = None) -> ParamGateResult:
+    def check(cls, product_id: str, previous_backtest: dict | None = None) -> ParamGateResult:
         """
         Run full gate check for a product.
         Compares backtest results vs targets.
         Optionally checks regression vs previous backtest.
         """
-        params = ParamStore.load(symbol)
+        params = ParamStore.load(product_id)
         targets = params.get("targets", {})
         backtest = params.get("backtest", {})
 
-        result = ParamGateResult(symbol=symbol.upper())
+        result = ParamGateResult(product_id=product_id.upper())
 
         for name, bt_key, tgt_key, direction, required in cls.METRICS:
             current = backtest.get(bt_key)
@@ -475,7 +396,7 @@ class ParamGate:
         vdir = Path(".gcc/verification")
         vdir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        path = vdir / f"params_{result.symbol}_{ts}.json"
+        path = vdir / f"params_{result.product_id}_{ts}.json"
         path.write_text(
             json.dumps(result.to_dict(), indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -483,14 +404,14 @@ class ParamGate:
         return path
 
     @classmethod
-    def quick_status(cls, symbol: str) -> str:
+    def quick_status(cls, product_id: str) -> str:
         """One-line status for dashboard display."""
-        params = ParamStore.load(symbol)
+        params = ParamStore.load(product_id)
         bt = params.get("backtest", {})
         targets = params.get("targets", {})
 
         if bt.get("sharpe") is None:
-            return f"{symbol}: no backtest data"
+            return f"{product_id}: no backtest data"
 
         checks = []
         for name, bt_key, tgt_key, direction, required in cls.METRICS:
@@ -502,35 +423,25 @@ class ParamGate:
                 checks.append("?")
                 continue
             if direction == ">=":
-                checks.append("✓" if v >= t else "✗")
+                checks.append("+" if v >= t else "-")
             else:
-                checks.append("✓" if v <= t else "✗")
+                checks.append("+" if v <= t else "-")
 
         sharpe = bt.get("sharpe", 0)
         dd = bt.get("max_dd_pct", 0)
         wr = bt.get("win_rate", 0)
 
         status = "".join(checks)
-        return f"{symbol} [{status}] Sharpe={sharpe:.2f} DD={dd:.1f}% WR={wr:.0%}"
+        return f"{product_id} [{status}] Sharpe={sharpe:.2f} DD={dd:.1f}% WR={wr:.0%}"
 
 
 # ── Batch Operations ────────────────────────────────────────
 
-def init_all_products() -> list[str]:
-    """Initialize param files for all known products."""
-    created = []
-    for symbol, market in KNOWN_PRODUCTS.items():
-        if not ParamStore.exists(symbol):
-            ParamStore.init_product(symbol, market)
-            created.append(symbol)
-    return created
-
-
 def gate_check_all() -> dict[str, ParamGateResult]:
     """Run gate check on all products with backtest data."""
     results = {}
-    for symbol in ParamStore.list_products():
-        params = ParamStore.load(symbol)
+    for product_id in ParamStore.list_products():
+        params = ParamStore.load(product_id)
         if params.get("backtest", {}).get("sharpe") is not None:
-            results[symbol] = ParamGate.check(symbol)
+            results[product_id] = ParamGate.check(product_id)
     return results

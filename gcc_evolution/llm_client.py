@@ -7,12 +7,8 @@ Only needs: generate(system, user) → str
 from __future__ import annotations
 
 import json
-import logging
 import os
-import time
 from dataclasses import dataclass
-
-logger = logging.getLogger(__name__)
 
 from .config import GCCConfig
 
@@ -36,8 +32,6 @@ class LLMClient:
         self.api_key = config.llm_api_key
         self.api_base = config.llm_api_base
         self.temperature = config.llm_temperature
-        self.default_repeat = getattr(config, 'llm_repeat', 1)
-        self.debug_prompt = getattr(config, 'llm_debug_prompt', False)
 
         # Local LLM 模式：不需要 API key
         if self.provider == "local":
@@ -70,8 +64,8 @@ class LLMClient:
             fallback_config.llm_provider = fallback_provider
             try:
                 fallback = LLMClient(fallback_config)
-            except Exception as e:
-                logger.warning("[LLM_CLIENT] fallback LLM config failed: %s", e)
+            except Exception:
+                pass  # fallback 配置失败时不强制要求
 
         return LocalLLMClient(
             model        = config.llm_model,
@@ -83,14 +77,10 @@ class LLMClient:
 
     def generate(self, system: str, user: str,
                  temperature: float | None = None,
-                 max_tokens: int = 2048,
-                 repeat: int = 0) -> str:
+                 max_tokens: int = 2048) -> str:
         """
         Generate a completion. Returns the text content.
         Raises on API errors.
-
-        GCC-0059: repeat>1 时多次调用LLM，选最长有效JSON响应(降低随机性)。
-        GCC-0060: repeat=0 使用config默认值(llm_repeat); debug_prompt打印prompt。
         """
         try:
             import httpx  # noqa: F401
@@ -109,97 +99,14 @@ class LLMClient:
                 ) from None
 
         temp = temperature if temperature is not None else self.temperature
-        # GCC-0060: repeat=0 → 使用config默认值; >0 → 调用点显式指定
-        effective_repeat = repeat if repeat > 0 else self.default_repeat
-        effective_repeat = max(1, min(effective_repeat, 5))  # clamp 1~5
 
-        # GCC-0060: debug_prompt模式 — 打印system+user用于调试
-        if self.debug_prompt:
-            print(f"\n{'='*60}")
-            print(f"[DEBUG-PROMPT] model={self.model} temp={temp} repeat={effective_repeat}")
-            print(f"[SYSTEM] {system[:200]}{'...' if len(system) > 200 else ''}")
-            print(f"[USER] {user[:300]}{'...' if len(user) > 300 else ''}")
-            print(f"{'='*60}\n")
-
-        if effective_repeat == 1:
-            return self._generate_once(system, user, temp, max_tokens)
-
-        # GCC-0059: 多次调用，选最佳
-        candidates: list[str] = []
-        for _ in range(effective_repeat):
-            try:
-                text = self._generate_once(system, user, temp, max_tokens)
-                if text:
-                    candidates.append(text)
-            except Exception as e:
-                logger.warning("[LLM_CLIENT] LLM attempt failed: %s", e)
-                continue
-        if not candidates:
-            raise RuntimeError(f"All {effective_repeat} LLM attempts failed")
-        return self._select_best(candidates)
-
-    def _generate_once(self, system: str, user: str,
-                       temperature: float, max_tokens: int) -> str:
-        """GCC-0165: Single LLM call with exponential backoff retry.
-
-        Retries up to 3 times on transient errors (network, 429, 5xx).
-        Backoff: 2s → 4s → 8s.
-        """
-        import httpx
-        max_retries = 3
-        for attempt in range(max_retries + 1):
-            try:
-                if self.provider == "local":
-                    return self._local_client.generate(
-                        system, user, temperature=temperature, max_tokens=max_tokens)
-                elif self.provider == "anthropic":
-                    return self._call_anthropic(system, user, temperature, max_tokens)
-                else:
-                    return self._call_openai_compat(system, user, temperature, max_tokens)
-            except httpx.HTTPStatusError as e:
-                status = e.response.status_code
-                if status in (429, 500, 502, 503, 529) and attempt < max_retries:
-                    wait = 2 ** (attempt + 1)
-                    logger.warning("[LLM_CLIENT] HTTP %d, retry %d/%d in %ds",
-                                   status, attempt + 1, max_retries, wait)
-                    time.sleep(wait)
-                    continue
-                raise
-            except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout,
-                    httpx.PoolTimeout, httpx.ConnectTimeout) as e:
-                if attempt < max_retries:
-                    wait = 2 ** (attempt + 1)
-                    logger.warning("[LLM_CLIENT] network error, retry %d/%d in %ds: %s",
-                                   attempt + 1, max_retries, wait, e)
-                    time.sleep(wait)
-                    continue
-                raise
-
-    @staticmethod
-    def _select_best(candidates: list[str]) -> str:
-        """GCC-0059: 从多次LLM响应中选最佳 — 优先选可解析JSON且最长的。"""
-        json_valid = []
-        for c in candidates:
-            try:
-                json.loads(c)
-                json_valid.append(c)
-            except (json.JSONDecodeError, TypeError):
-                # 尝试提取嵌入的JSON对象或数组
-                found = False
-                for open_ch, close_ch in [("{", "}"), ("[", "]")]:
-                    start = c.find(open_ch)
-                    end = c.rfind(close_ch) + 1
-                    if start >= 0 and end > start:
-                        try:
-                            json.loads(c[start:end])
-                            json_valid.append(c)
-                            found = True
-                            break
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                # found not used further, just breaks inner loop
-        pool = json_valid if json_valid else candidates
-        return max(pool, key=len)
+        if self.provider == "local":
+            return self._local_client.generate(
+                system, user, temperature=temp, max_tokens=max_tokens)
+        elif self.provider == "anthropic":
+            return self._call_anthropic(system, user, temp, max_tokens)
+        else:
+            return self._call_openai_compat(system, user, temp, max_tokens)
 
     def _call_anthropic(self, system: str, user: str,
                         temperature: float, max_tokens: int) -> str:

@@ -7,12 +7,9 @@ v4.0: + experience graph fields, downstream tracking, card compression,
 from __future__ import annotations
 
 import json
-import logging
 import re
 import sqlite3
 from datetime import datetime, timezone
-
-logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any
 
@@ -322,38 +319,13 @@ class GlobalMemory:
                  "task": r["task"], "created_at": r["created_at"]}
                 for r in rows]
 
-    def key_success_rates(self) -> dict[str, dict]:
-        """v5.010 P1-SkillRL-2: KEY维度成功率监控"""
-        rows = self._conn.execute(
-            "SELECT key, score FROM session_scores WHERE key != ''").fetchall()
-        key_scores: dict[str, list[float]] = {}
-        for r in rows:
-            key_scores.setdefault(r["key"], []).append(r["score"])
-        result = {}
-        for key, scores in key_scores.items():
-            total = len(scores)
-            success = sum(1 for s in scores if s >= 0.6)
-            avg = sum(scores) / total if total else 0
-            result[key] = {
-                "total": total, "success": success,
-                "rate": round(success / total, 3) if total else 0,
-                "avg_score": round(avg, 3),
-                "needs_evolution": total >= 5 and (success / total) < 0.4,
-            }
-        return result
-
     # ── v4.0: Card Compression ──
-    # v5.050 P2-DATA-3: 去重阈值0.70经验值，需200+卡后F1校准
-    # 校准方法: 对比人工标注的重复/非重复卡对，sweep 0.60-0.85 选F1最优
-    DEDUP_WORD_OVERLAP_THRESHOLD = 0.70
 
-    def compress(self, overlap_threshold: float | None = None) -> int:
+    def compress(self, overlap_threshold: float = 0.70) -> int:
         """
         Merge similar cards. Keep highest confidence, deprecate others.
         Returns number of cards deprecated.
         """
-        if overlap_threshold is None:
-            overlap_threshold = self.DEDUP_WORD_OVERLAP_THRESHOLD
         cards = self.get_all(limit=10000)
         if len(cards) < 2:
             return 0
@@ -388,98 +360,6 @@ class GlobalMemory:
 
         return deprecated
 
-    def consolidate_similar(self, cosine_threshold: float = 0.88) -> int:
-        """
-        v5.010 P2-StockMem-1: 相似卡片水平合并。
-        cosine>threshold的卡片聚合：保留最高confidence，合并pitfalls/tags。
-        不删除被合并卡，而是标记supersedes关系。
-        """
-        cards = self.get_all(limit=10000)
-        if len(cards) < 2:
-            return 0
-        cards = [c for c in cards if c.status != CardStatus.DEPRECATED]
-        cards.sort(key=lambda c: c.confidence, reverse=True)
-
-        merged = 0
-        consumed: set[str] = set()
-
-        for i, primary in enumerate(cards):
-            if primary.id in consumed:
-                continue
-            for j in range(i + 1, len(cards)):
-                secondary = cards[j]
-                if secondary.id in consumed:
-                    continue
-                overlap = self._word_overlap(
-                    primary.key_insight, secondary.key_insight)
-                if overlap < cosine_threshold:
-                    continue
-                # 合并 pitfalls
-                existing_pitfalls = set(primary.pitfalls)
-                for p in secondary.pitfalls:
-                    if p not in existing_pitfalls:
-                        primary.pitfalls.append(p)
-                        existing_pitfalls.add(p)
-                # 合并 tags
-                existing_tags = set(primary.tags)
-                for t in secondary.tags:
-                    if t not in existing_tags:
-                        primary.tags.append(t)
-                        existing_tags.add(t)
-                # 合并 related_ids
-                if secondary.id not in primary.related_ids:
-                    primary.related_ids.append(secondary.id)
-                # 取较大的 use_count
-                primary.use_count = max(primary.use_count, secondary.use_count)
-                # 标记被合并卡
-                secondary.status = CardStatus.DEPRECATED
-                secondary.supersedes_id = primary.id
-                self.store(secondary)
-                consumed.add(secondary.id)
-                merged += 1
-
-            if merged > 0:
-                self.store(primary)
-
-        return merged
-
-    def diversity_report(self) -> dict:
-        """
-        v5.010 P2-THGNN-1: DB多样性监控。
-        按exp_type统计counts/ratios/entropy，entropy<0.8时警告mode_collapse_risk。
-        """
-        import math
-        cards = self.get_all(limit=10000)
-        cards = [c for c in cards if c.status != CardStatus.DEPRECATED]
-        total = len(cards)
-        if total == 0:
-            return {"total": 0, "by_type": {}, "ratios": {},
-                    "entropy": 0.0, "mode_collapse_risk": True}
-
-        by_type: dict[str, int] = {}
-        for c in cards:
-            by_type[c.exp_type.value] = by_type.get(c.exp_type.value, 0) + 1
-
-        ratios = {t: round(cnt / total, 3) for t, cnt in by_type.items()}
-
-        # Shannon entropy (normalized by log of type count)
-        entropy = 0.0
-        n_types = len(by_type)
-        if n_types > 1:
-            for cnt in by_type.values():
-                p = cnt / total
-                if p > 0:
-                    entropy -= p * math.log2(p)
-            entropy = round(entropy / math.log2(n_types), 3)
-
-        return {
-            "total": total,
-            "by_type": by_type,
-            "ratios": ratios,
-            "entropy": entropy,
-            "mode_collapse_risk": entropy < 0.8,
-        }
-
     @staticmethod
     def _word_overlap(a: str, b: str) -> float:
         wa = set(a.lower().split())
@@ -495,30 +375,9 @@ class GlobalMemory:
             "SELECT * FROM experiences WHERE id=?", (exp_id,)).fetchone()
         return self._to_card(row) if row else None
 
-    def search(self, keywords: list[str] | None = None, limit: int = 10,
+    def search(self, keywords: list[str], limit: int = 10,
                project: str | None = None,
-               exp_type: ExperienceType | None = None,
-               **kwargs) -> list[ExperienceCard]:
-        # v5.100: 旧参数兼容降级 (query→keywords, top_k→limit, key→get_by_key)
-        if "query" in kwargs:
-            q = kwargs.pop("query")
-            if keywords is None:
-                keywords = [q] if q else []
-        if "top_k" in kwargs:
-            limit = int(kwargs.pop("top_k"))
-        if "key" in kwargs:
-            k = kwargs.pop("key")
-            if k:
-                return self.get_by_key(k)[:limit]
-        if kwargs:
-            import warnings
-            warnings.warn(
-                f"GlobalMemory.search() 忽略未知参数: {list(kwargs.keys())}。"
-                f" 正确签名: search(keywords, limit, project, exp_type)",
-                stacklevel=2,
-            )
-        if keywords is None:
-            keywords = []
+               exp_type: ExperienceType | None = None) -> list[ExperienceCard]:
         conds = []
         params: list[Any] = []
         for kw in keywords:
@@ -583,91 +442,13 @@ class GlobalMemory:
         avg_downstream = self._conn.execute(
             "SELECT AVG(downstream_avg) FROM experiences WHERE downstream_avg > 0"
         ).fetchone()
-        # v5.050 P2-DATA-6: Faithfulness过滤率统计
-        faith_stats = self._faithfulness_stats()
-
         return {
             "total": total,
             "by_type": by_type,
             "by_status": by_status,
             "avg_confidence": round(avg[0] or 0, 3),
             "avg_downstream_impact": round((avg_downstream[0] or 0), 3),
-            **faith_stats,
         }
-
-    def _faithfulness_stats(self) -> dict:
-        """v5.050 P2-DATA-6: Faithfulness过滤率仪表板数据."""
-        try:
-            total = self._conn.execute(
-                "SELECT COUNT(*) FROM experiences").fetchone()[0]
-            flagged = self._conn.execute(
-                "SELECT COUNT(*) FROM experiences WHERE status='flagged'"
-            ).fetchone()[0]
-            checked = self._conn.execute(
-                "SELECT COUNT(*) FROM experiences WHERE faithfulness_checked=1"
-            ).fetchone()[0]
-            avg_faith = self._conn.execute(
-                "SELECT AVG(faithfulness_score) FROM experiences "
-                "WHERE faithfulness_checked=1"
-            ).fetchone()[0]
-            low_sf = self._conn.execute(
-                "SELECT COUNT(*) FROM experiences "
-                "WHERE faithfulness_score < 0.5 AND faithfulness_checked=1"
-            ).fetchone()[0]
-            return {
-                "faithfulness_total": total,
-                "faithfulness_flagged": flagged,
-                "faithfulness_checked": checked,
-                "faithfulness_avg": round(avg_faith or 0, 3),
-                "faithfulness_low_count": low_sf,
-                "faithfulness_flagged_pct": round(
-                    flagged / max(total, 1) * 100, 1),
-            }
-        except Exception as e:
-            logger.warning("[EXPERIENCE_STORE] faithfulness stats query failed: %s", e)
-            return {}
-
-    def check_consistency(self, overlap_threshold: float = 0.40) -> list[dict]:
-        """GCC-0167: 跨卡一致性检验 — 检测key_insight矛盾的卡片对。
-
-        两张卡的key_insight词汇重叠度>threshold但exp_type一正一负(success vs failure)
-        说明对同一现象有矛盾结论，需要人工审核。
-
-        Returns: [{"card_a": id, "card_b": id, "overlap": float, "reason": str}, ...]
-        """
-        cards = self.get_all(limit=2000)
-        active = [c for c in cards if c.status != CardStatus.DEPRECATED]
-        conflicts = []
-
-        positive = {ExperienceType.SUCCESS, ExperienceType.OPTIMIZATION}
-        negative = {ExperienceType.FAILURE, ExperienceType.PITFALL}
-
-        for i, a in enumerate(active):
-            if not a.key_insight:
-                continue
-            a_pos = a.exp_type in positive
-            a_neg = a.exp_type in negative
-            if not a_pos and not a_neg:
-                continue
-            for b in active[i + 1:]:
-                if not b.key_insight:
-                    continue
-                b_pos = b.exp_type in positive
-                b_neg = b.exp_type in negative
-                # 只检测方向相反的卡片对
-                if not ((a_pos and b_neg) or (a_neg and b_pos)):
-                    continue
-                overlap = self._word_overlap(a.key_insight, b.key_insight)
-                if overlap >= overlap_threshold:
-                    reason = (f"矛盾: '{a.key_insight[:50]}' ({a.exp_type.value}) "
-                              f"vs '{b.key_insight[:50]}' ({b.exp_type.value})")
-                    conflicts.append({
-                        "card_a": a.id, "card_b": b.id,
-                        "overlap": round(overlap, 3), "reason": reason,
-                    })
-                    logger.warning("[EXPERIENCE_STORE] consistency conflict: %s", reason)
-
-        return conflicts
 
     # ── Export / Import ──
 

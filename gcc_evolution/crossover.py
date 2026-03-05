@@ -7,11 +7,8 @@ Inspired by QuantaAlpha's trajectory crossover.
 from __future__ import annotations
 
 import json
-import logging
 
 from .models import ExperienceCard, ExperienceType
-
-logger = logging.getLogger(__name__)
 
 
 CROSSOVER_SYSTEM = """You are the trajectory crossover engine for GCC v4.05.
@@ -53,10 +50,11 @@ class Crossover:
         """
         Generate a crossover card from multiple success cards.
 
-        Only runs when there are 2+ success cards (GCC-0170: same session OK).
+        Only runs when there are 2+ success cards from different sessions.
         """
-        # GCC-0170: 放宽触发条件 — 2+张卡即可（不再强制不同session）
-        if len(success_cards) < 2:
+        # Need at least 2 different sessions
+        sessions = set(c.source_session for c in success_cards if c.source_session)
+        if len(sessions) < 2:
             return None
 
         if self.llm:
@@ -85,7 +83,7 @@ class Crossover:
         )
 
         try:
-            raw = self.llm.generate(system=CROSSOVER_SYSTEM, user=prompt, temperature=0.3, repeat=2)
+            raw = self.llm.generate(system=CROSSOVER_SYSTEM, user=prompt, temperature=0.3)
             text = raw.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -104,8 +102,7 @@ class Crossover:
                 key=key,
                 tags=["crossover", "best_practice"],
             )
-        except Exception as e:
-            logger.warning("[CROSSOVER] LLM crossover failed, falling back to rules: %s", e)
+        except Exception:
             return self._crossover_rules(key, task, cards)
 
     def _crossover_rules(self, key, task, cards) -> ExperienceCard:
