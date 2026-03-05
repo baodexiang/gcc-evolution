@@ -1,0 +1,229 @@
+{
+  "version": "2.1",
+  "structure": "by-key",
+  "last_updated": "2026-02-26T00:00:00Z",
+  "archive_closed_count": 64,
+  "notes": "活跃改善按KEY-001~KEY-007分组。CLOSED条目不再展示。",
+  "deferred": [],
+  "keys": {
+    "KEY-001": {
+      "title": "Vision来过滤外挂买卖信号",
+      "status": "IN_PROGRESS",
+      "phase": "Phase4完成(加密ACTIVE/股票OBSERVE); Phase5(HMM)待启动",
+      "observations": [
+        "【观测断路】log_analyzer日报n_gate=0 state=无数据，但state/n_structure_state.json正常(15品种ACTIVE)。需修观测路径才能量化效果",
+        "【来回翻转】ZEC/AMD跨K线翻转(-\u0000.03)根因是L1趋势稳定性，bar_freeze已管住单K线。需KEY-002 YAML收紧或L1改进"
+      ],
+      "sub_items": []
+    },
+    "KEY-002": {
+      "title": "全系统参数三类治理 — 动态调节/品种分化/保持固定",
+      "status": "IN_PROGRESS",
+      "phase": "三类参数治理体系建立, 各3阶段实施",
+      "observations": [],
+      "sub_items": []
+    },
+    "KEY-003": {
+      "title": "股票价值分析模块MVP",
+      "status": "TESTING",
+      "phase": "T01-T10全完成,后5名限买1次/天+仓位上限4",
+      "observations": [
+        "BUY拦截=0(今日无股票BUY信号触发,非故障)"
+      ],
+      "sub_items": []
+    },
+    "KEY-004": {
+      "title": "外挂品质治理与评估体系",
+      "status": "CLOSED",
+      "phase": "T01-T07完成; T08-T09因子观测台合并入KEY-007(KNN进化)",
+      "observations": [
+        "【CLOSED 2026-02-24】全部外挂相关改善合并入KEY-007(外挂因子化KNN进化)，不再单独跟踪",
+        "【历史】唐纳奇修复commit 2fda667; EMA过滤73%有效; 治理消费T01-T07已完成"
+      ],
+      "sub_items": []
+    },
+    "KEY-007": {
+      "title": "股票交易KNN改善引擎 — 历史相似度验证+gcc-evo进化闭环",
+      "status": "IN_PROGRESS",
+      "phase": "核心模块+8外挂集成+3项P0增强完成; Phase1运行中",
+      "observations": [
+        "【合并来源】KEY-004 T08因子观测台 + T09 GCC-EVO对齐 + SYS-015/016/025/026量价过滤 → 统一用KNN历史相似度实现",
+        "【已有基础】vision_pre_filter.py KNN 72.9%准确率; factor_db.py已记录5外挂信号; 8个外挂触发点已确认行号",
+        "【P0增强】距离反比加权投票 + 特征维度加权(indicator×3/shape×1) + Regime分区查询(bull/bear/sideways)"
+      ],
+      "sub_items": [
+        {
+          "id": "KEY-007-S1",
+          "title": "plugin_knn.py核心模块(PluginKNNDB+8特征提取器+知识卡)",
+          "status": "COMPLETED",
+          "note": "PluginKNNDB + 8提取器 + 知识卡规则融合(70%KNN+30%KB) + 安全条件解析器"
+        },
+        {
+          "id": "KEY-007-S2",
+          "title": "8外挂集成KNN记录+查询+regime",
+          "status": "COMPLETED",
+          "note": "price_scan_engine 7个 + llm_server L2-MACD 1个, 全部传regime"
+        },
+        {
+          "id": "KEY-007-S3",
+          "title": "KNN 3项P0增强(加权投票+维度权重+Regime分区)",
+          "status": "COMPLETED",
+          "note": "距离反比加权 + indicator×3/shape×1 + bull/bear/sideways分区优先查询"
+        },
+        {
+          "id": "KEY-007-S4",
+          "title": "收益回填机制(10bar后验证)",
+          "status": "IN_PROGRESS",
+          "note": "backfill_returns()已实现, 待接入4h定时任务"
+        },
+        {
+          "id": "KEY-007-S5",
+          "title": "Bootstrap历史数据(yfinance滑窗)",
+          "status": "COMPLETED",
+          "note": "1yr/2yr对比完成, 14品种32000+样本, 美股55-61%WR"
+        },
+        {
+          "id": "KEY-007-S6",
+          "title": "KNN准确率追踪+自动bypass",
+          "status": "COMPLETED",
+          "note": "低准确率外挂×品种自动bypass, 阈值0.55"
+        },
+        {
+          "id": "KEY-007-S7",
+          "title": "KNN历史数据协助Vision过滤 + 双KNN纠正闭环",
+          "status": "CLOSED",
+          "note": "已完成(2026-02-24): (1)backfill→S8已完成; (2)_get_plugin_knn_vote+combine_filter_bias第三参数(矛盾时2:1投票); (3)_pknn_cross_validate_knn每4h品种级对比→knn_cross_validation.json"
+        },
+        {
+          "id": "KEY-007-S8",
+          "title": "KNN历史数据协助外挂输出 — 回填闭环+准确率纠正+Phase2升级",
+          "status": "CLOSED",
+          "note": "已完成(2026-02-24 commit 3ae1d75): T1=_pknn_get_future_price+4h定时backfill; T2=_update_accuracy回填后重算; T3=Phase2逐key启用(样本≥30+acc<55%→抑制). 验证: grep [KEY-007][BACKFILL]/[ACCURACY]/[Phase2] server.log"
+        },
+        {
+          "id": "KEY-007-S9",
+          "title": "论文+知识卡协助Vision过滤 — 知识注入+Prompt进化+纠正闭环",
+          "status": "FOUND",
+          "note": "3层知识注入: L1=Vision Prompt进化(92篇论文+1130张知识卡→提炼新形态/阶段规则→更新UNIFIED_VISION_PROMPT); L2=Anchor知识增强(论文中验证的宏观指标→human_anchors.json权重调整); L3=filter_gate规则扩展(知识卡中可量化的过滤条件→补充combine_filter_bias逻辑). 纠正周期: Prompt=每月/重大论文时; Anchor权重=每周; filter_gate=每2周. 当前: Prompt固定(形态+Wyckoff), Anchor仅direction+confidence, 知识卡只服务Plugin KNN不服务Vision"
+        },
+        {
+          "id": "KEY-007-S10",
+          "title": "论文+知识卡协助外挂工作 — 规则补全+特征扩展+纠正闭环",
+          "status": "FOUND",
+          "note": "现状: 8外挂仅5个有知识卡规则(共10条), 3个(supertrend_av2/brooks_pa/l2_macd)=0规则; 92篇论文130+篇相关但仅提炼10条. 3层注入: L1=规则补全(论文→plugin_knn_knowledge_rules.json, 优先补3个空白外挂); L2=特征扩展(论文验证的新指标→extract_xxx_features增加维度); L3=知识卡条件验证(规则命中率追踪→淘汰低效规则+升级高效规则权重). 纠正周期: 规则补全=每2周/research后; 特征扩展=每月; 条件验证=每周(与S8准确率同步)"
+        },
+        {
+          "id": "KEY-007-S11",
+          "title": "微软量化改善 — Trading System Evolution v2 (自适应加权+KNN反哺+MAB调度+反馈闭环)",
+          "status": "IN_PROGRESS",
+          "note": "基于Trading_System_Evolution_v2.docx改善方案，4阶段实施。核心发现: L1实际用决策矩阵非加权求和，需适配。",
+          "sub_tasks": [
+            {
+              "id": "KEY-007-S11-P1",
+              "title": "Phase 1: MAB进化调度器 + trade_record追加l1_modules字段",
+              "status": "FOUND",
+              "note": "零风险。(1)新建modules/evolution_mab.py, Thompson Sampling选进化方向, 集成gcc-evo mab命令; (2)compute_l1_five_module_v3300()返回值追加l1_modules/adaptive_weights字段, _append_trade_record()记录各模块信号"
+            },
+            {
+              "id": "KEY-007-S11-P2",
+              "title": "Phase 2: KNN准确率→confidence调节器 (不改权重)",
+              "status": "FOUND",
+              "note": "低风险。KNN高准确率品种提升Tech/X4模块confidence, 低准确率品种降低。在compute_l1_decision_matrix_v3300中实现, 不改权重结构。读plugin_knn_accuracy.json+knn_accuracy_map.json"
+            },
+            {
+              "id": "KEY-007-S11-P3",
+              "title": "Phase 3: 自适应投票Shadow Mode (并行观察)",
+              "status": "FOUND",
+              "note": "中风险。新建modules/adaptive_voting.py, Beta分布+Thompson Sampling。与现有决策矩阵并行运行, 只记日志不替换决策。trade平仓后通过_on_trade_closed钩子更新Beta分布。依赖Phase 1的l1_modules字段"
+            },
+            {
+              "id": "KEY-007-S11-P4",
+              "title": "Phase 4: Shadow数据验证→考虑替换决策矩阵",
+              "status": "FOUND",
+              "note": "高风险。Phase 3 Shadow观察≥30天+胜率差异显著后, 评估是否替换compute_l1_decision_matrix_v3300为加权投票。需充分验证, 不可提前启动"
+            }
+          ]
+        }
+      ],
+      "description": "KNN作为股票交易专属改善工具，遵循gcc-evo工业化流程：信号验证→经验积累→蒸馏进化→门控淘汰。核心：用历史相似场景验证外挂信号可靠性，通过gcc-evo管线持续优化特征权重和K值。"
+    },
+    "KEY-005": {
+      "title": "市场行为学增强层 — Agentic Nowcasting核心驱动(美股)",
+      "status": "TESTING",
+      "phase": "论文驱动重构: Nowcasting为核心, 现有模块为辅助",
+      "observations": [
+        "【核心论文】arXiv:2601.11958 — LLM自主搜索→评分→选赢家, Sharpe 2.43",
+        "【核心洞察】好消息是信号/坏消息是噪声 → BUY天然优于SELL → 不对称门槛",
+        "【两池架构】股票池(当前持仓+高频交易) + Watchlist池(观察+Nowcast评分筛选入池)"
+      ],
+      "sub_items": []
+    },
+    "KEY-006": {
+      "title": "Brooks Vision — Vision雷达先看图+外挂确认+量价过滤",
+      "status": "CLOSED",
+      "phase": "全部完成，已集成为扫描引擎正式P0信号源",
+      "observations": [
+        "【历史】T03-T08三模块边界治理已全部COMPLETED(归档)",
+        "【新方向】Vision(GPT-5.2)当雷达先看图→外挂确认→量+大师过滤→纯观察不交易",
+        "【成本】~$4/天, 14品种×96次/天×$0.003/次"
+      ],
+      "sub_items": [
+        {
+          "id": "KEY-006-S1",
+          "title": "Vision Radar脚本核心框架 (radar扫描+记录)",
+          "status": "COMPLETED",
+          "note": "vision_radar.py 独立脚本, --loop/--once/--report/--symbol, JSONL记录"
+        },
+        {
+          "id": "KEY-006-S2",
+          "title": "外挂确认层接入 (chan_bs+hoffman+dp+knn)",
+          "status": "COMPLETED",
+          "note": "Vision发现BUY/SELL时触发4外挂确认, 节省计算"
+        },
+        {
+          "id": "KEY-006-S3",
+          "title": "量+大师过滤层接入",
+          "status": "COMPLETED",
+          "note": "VolumeAnalyzer SQS+filter + MasterValidationHub三大师评估"
+        },
+        {
+          "id": "KEY-006-S4",
+          "title": "事后验价+每日对比报告",
+          "status": "COMPLETED",
+          "note": "4h/12h回填验价 + --report日报(胜率/品种/Radar独有vs两者一致)"
+        },
+        {
+          "id": "KEY-006-S5",
+          "title": "24h观察数据分析+结论",
+          "status": "COMPLETED",
+          "note": "需运行24h后分析Radar信号质量, 对比现有系统 | Brooks Vision已正式上线运行，观察期通过"
+        }
+      ]
+    },
+    "KEY-008": {
+      "title": "GCC-Evo文档与论文审计 — 21篇引用论文审查+框架完善+开源准备",
+      "status": "IN_PROGRESS",
+      "phase": "17项GCC任务已归入pipeline(14 closed + 1 deferred + 3 pending) + GCC-0175新论文",
+      "observations": [],
+      "sub_items": [],
+      "note": "sub_items已迁移至pipeline/tasks.json GCC任务体系"
+    },
+    "KEY-009": {
+      "title": "三线互补准确率审计与动态调整",
+      "status": "IN_PROGRESS",
+      "phase": "三条管线准确率持续监控+偏离时动态调节",
+      "observations": [],
+      "sub_items": []
+    },
+    "KEY-010": {
+      "title": "双层GCC-EVO进化系统",
+      "status": "IN_PROGRESS",
+      "phase": "模块级+系统级五层进化监控 + 全系统代码审计",
+      "observations": [
+        "需求来源: .GCC/improvement/03042026/dual layer evo requirements v2.pdf",
+        "GCC-0202已完成系统级评分+协作检测+记忆解析+进化tab(S01-S41)"
+      ],
+      "sub_items": []
+    }
+  }
+}

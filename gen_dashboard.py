@@ -80,6 +80,29 @@ if not all_improvements:
         except Exception as e:
             print(f"  skip improvements.json: {e}")
 
+## Scan .GCC/skill/cards/ for structured JSON knowledge cards
+card_dir = GCC_DIR / "skill" / "cards"
+if card_dir.exists():
+    seen_ids = {c["id"] for c in all_cards}
+    for jf in sorted(card_dir.rglob("*.json")):
+        try:
+            d = json.loads(jf.read_text(encoding="utf-8", errors="ignore"))
+            cid = d.get("id") or jf.stem
+            if cid in seen_ids:
+                continue
+            seen_ids.add(cid)
+            # Extract category from parent directory name
+            cat = jf.parent.name if jf.parent != card_dir else ""
+            all_cards.append({
+                "id": cid,
+                "key_id": cat,
+                "title": f"{cat} — {d.get('title', jf.stem)}" if cat else d.get("title", jf.stem),
+                "card_type": "knowledge",
+                "layer_priority": 2,
+            })
+        except Exception:
+            pass
+
 if all_improvements:
     inject_lines.append(f"DATA.improvements = {json.dumps(all_improvements, ensure_ascii=False)};")
 if all_cards:
