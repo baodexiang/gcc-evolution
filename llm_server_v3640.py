@@ -49601,15 +49601,11 @@ def check_scalp_signal_allowed(symbol: str, signal: str, signal_type: str) -> tu
     Returns:
         (allowed: bool, reason: str)
     """
-    # v3.581: P0-Tracking (移动止盈) 不受趋势限制
-    P0_TRACKING_TYPES = ["移动止盈", "P0-Tracking", "trailing_stop", "trailing"]
-    if any(t in signal_type for t in P0_TRACKING_TYPES):
-        print(f"[v3.581] P0-Tracking不受趋势限制: {symbol} {signal} ({signal_type})")
-        return True, f"P0-Tracking不受趋势限制"
-
-    # v3.660: BrooksVision(4H形态信号)不受剥头皮每日偏向限制
-    if signal_type == "BrooksVision":
-        return True, f"BrooksVision(4H)不受每日偏向限制"
+    # v3.660: 剥头皮偏向过滤只限制剥头皮策略本身
+    # 所有外挂/L2信号(BrooksVision/ChanBS/SuperTrend/N字结构/移动止损止盈)不受限制
+    _SCALP_ONLY_TYPES = ["Chandelier+ZLSMA"]
+    if signal_type not in _SCALP_ONLY_TYPES:
+        return True, f"{signal_type}不受每日偏向限制"
 
     daily_bias = get_scalp_daily_bias(symbol)
     bias = daily_bias.get("bias", "BOTH")
