@@ -8,15 +8,9 @@ Setup configuration for PyPI distribution.
 from setuptools import setup, find_packages
 from pathlib import Path
 
-# Read version from __init__.py
-version_file = Path(__file__).parent.parent / ".GCC" / "gcc_evo.py"
-version = "5.295"  # Fallback version
-if version_file.exists():
-    with open(version_file) as f:
-        for line in f:
-            if 'gcc-evo v' in line:
-                version = line.split('v')[-1].split()[0]
-                break
+# Pin release version for this source package.
+# Do not infer from external files to avoid accidental parse errors.
+version = "5.295"
 
 # Read long description from README
 readme_file = Path(__file__).parent / "README.md"
