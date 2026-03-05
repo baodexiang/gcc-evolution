@@ -49607,6 +49607,10 @@ def check_scalp_signal_allowed(symbol: str, signal: str, signal_type: str) -> tu
         print(f"[v3.581] P0-Tracking不受趋势限制: {symbol} {signal} ({signal_type})")
         return True, f"P0-Tracking不受趋势限制"
 
+    # v3.660: BrooksVision(4H形态信号)不受剥头皮每日偏向限制
+    if signal_type == "BrooksVision":
+        return True, f"BrooksVision(4H)不受每日偏向限制"
+
     daily_bias = get_scalp_daily_bias(symbol)
     bias = daily_bias.get("bias", "BOTH")
     trend = daily_bias.get("trend", "SIDE")
