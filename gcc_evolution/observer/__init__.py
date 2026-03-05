@@ -14,6 +14,6 @@ GCC v5.295 — L6 Observer Package
 
 from .event_bus import EventBus, GCCEvent
 from .layer_emitter import LayerEmitter
-from .run_tracer import RunTracer
+from .run_tracer import Tracer as RunTracer, Tracer
 
-__all__ = ["EventBus", "GCCEvent", "LayerEmitter", "RunTracer"]
+__all__ = ["EventBus", "GCCEvent", "LayerEmitter", "RunTracer", "Tracer"]

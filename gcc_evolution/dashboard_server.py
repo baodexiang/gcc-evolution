@@ -19,7 +19,7 @@ import json
 import logging
 import queue
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
 
@@ -245,7 +245,7 @@ class DashboardServer:
         """启动服务（后台线程）。返回是否成功。"""
         try:
             handler = _make_handler(self._clients, self._bus, self._tracer)
-            self._server = HTTPServer(("127.0.0.1", self.port), handler)
+            self._server = ThreadingHTTPServer(("127.0.0.1", self.port), handler)
             self._thread = threading.Thread(
                 target=self._server.serve_forever,
                 name="GCC-Dashboard",

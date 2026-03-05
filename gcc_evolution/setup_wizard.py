@@ -9,7 +9,6 @@ GCC v5.295 — L0 Setup Wizard
 """
 from __future__ import annotations
 
-import sys
 from typing import Optional
 
 from .session_config import SessionConfig

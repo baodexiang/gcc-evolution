@@ -65,7 +65,7 @@ class EventBus:
     _lock = threading.Lock()
 
     def __init__(self):
-        self._queue: queue.Queue[GCCEvent] = queue.Queue()
+        self._queue: queue.Queue[GCCEvent] = queue.Queue(maxsize=2000)
         self._buffer: list[GCCEvent] = []
         self._buffer_lock = threading.Lock()
         self._callbacks: list[Callable[[GCCEvent], None]] = []
@@ -226,8 +226,20 @@ class EventBus:
         except Exception as ex:
             logger.warning("[EventBus] persist failed: %s", ex)
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 2.0) -> None:
+        """停止 EventBus，等待写线程 flush 剩余事件。"""
         self._running = False
+        if self._writer_thread and self._writer_thread.is_alive():
+            self._writer_thread.join(timeout=timeout)
+        # 强制 flush 队列剩余
+        remaining: list[GCCEvent] = []
+        while True:
+            try:
+                remaining.append(self._queue.get_nowait())
+            except queue.Empty:
+                break
+        if remaining:
+            self._persist(remaining)
 
     def clear(self) -> None:
         """清空内存缓冲 (测试用)。"""
