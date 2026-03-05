@@ -2607,7 +2607,7 @@ def _build_result(now_str, hours, tasks, summary_metrics,
     _ack_rules = []
     try:
         if _ack_path.exists():
-            _ack_data = json.loads(_ack_path.read_text())
+            _ack_data = json.loads(_ack_path.read_text(encoding="utf-8"))
             _now_iso = datetime.now(NY_TZ).isoformat()
             _ack_rules = [a for a in _ack_data.get("acks", [])
                           if a.get("expires", "9999") > _now_iso]

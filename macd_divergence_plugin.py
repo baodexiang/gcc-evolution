@@ -1150,6 +1150,33 @@ def macd_acc_price_backfill():
     except Exception:
         return 0
 
+    def _coerce_ts(raw_ts):
+        if isinstance(raw_ts, (int, float)):
+            return float(raw_ts)
+        if isinstance(raw_ts, str):
+            s = raw_ts.strip()
+            if not s:
+                return 0.0
+            try:
+                return float(s)
+            except Exception:
+                pass
+            try:
+                return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                return 0.0
+        return 0.0
+
+    def _coerce_price(raw_price):
+        if isinstance(raw_price, (int, float)):
+            return float(raw_price)
+        if isinstance(raw_price, str):
+            try:
+                return float(raw_price.strip())
+            except Exception:
+                return 0.0
+        return 0.0
+
     updated_lines = []
     for line in lines:
         line = line.strip()
@@ -1167,7 +1194,7 @@ def macd_acc_price_backfill():
             updated_lines.append(json.dumps(r, ensure_ascii=False) + "\n")
             continue
 
-        sig_ts = r.get("ts", 0)
+        sig_ts = _coerce_ts(r.get("ts", 0))
         if now_ts - sig_ts < 4 * 3600:
             # 还没到4h, 跳过
             updated_lines.append(json.dumps(r, ensure_ascii=False) + "\n")
@@ -1175,6 +1202,7 @@ def macd_acc_price_backfill():
 
         # 获取当前价格
         sym = r.get("symbol", "")
+        record_changed = False
         try:
             import yfinance as yf
             crypto_map = {"BTCUSDC": "BTC-USD", "ETHUSDC": "ETH-USD",
@@ -1185,17 +1213,17 @@ def macd_acc_price_backfill():
             if hist is not None and not hist.empty:
                 current_price = float(hist["Close"].iloc[-1])
                 r["price_4h_later"] = round(current_price, 4)
+                record_changed = True
 
-                sig_price = r.get("price", 0)
+                sig_price = _coerce_price(r.get("price_at_signal", r.get("price", 0)))
                 if sig_price > 0:
                     pct = (current_price - sig_price) / sig_price
-                    direction = r.get("direction", "BUY")
+                    direction = str(r.get("direction", "BUY")).upper()
                     if direction == "BUY":
                         r["result"] = "CORRECT" if pct > 0.005 else ("INCORRECT" if pct < -0.005 else "NEUTRAL")
                     else:
                         r["result"] = "CORRECT" if pct < -0.005 else ("INCORRECT" if pct > 0.005 else "NEUTRAL")
                     r["pct_change"] = round(pct * 100, 2)
-                    changed += 1
                     _gcc173_log(
                         f"[GCC-0173][MACD_EVAL] {sym} {direction} "
                         f"→ {r['result']} (信号价{sig_price:.2f} 4H后{current_price:.2f} "
@@ -1203,6 +1231,8 @@ def macd_acc_price_backfill():
         except Exception as e:
             _gcc173_log(f"[GCC-0173][MACD_EVAL] {sym} 价格获取失败: {e}")
 
+        if record_changed:
+            changed += 1
         updated_lines.append(json.dumps(r, ensure_ascii=False) + "\n")
 
     if changed > 0:
