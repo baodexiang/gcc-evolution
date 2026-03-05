@@ -246,6 +246,8 @@ class DashboardServer:
         try:
             handler = _make_handler(self._clients, self._bus, self._tracer)
             self._server = ThreadingHTTPServer(("127.0.0.1", self.port), handler)
+            # SSE 长连接线程设为 daemon，stop() 时不阻塞等待其退出
+            self._server.daemon_threads = True
             self._thread = threading.Thread(
                 target=self._server.serve_forever,
                 name="GCC-Dashboard",
@@ -260,7 +262,8 @@ class DashboardServer:
 
     def stop(self) -> None:
         if self._server:
-            self._server.shutdown()
+            self._server.shutdown()    # 停止 serve_forever 循环
+            self._server.server_close()  # 释放监听 socket，端口可复用
             self._server = None
 
     @property

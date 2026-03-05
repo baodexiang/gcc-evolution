@@ -70,7 +70,6 @@ class EventBus:
         self._buffer_lock = threading.Lock()
         self._callbacks: list[Callable[[GCCEvent], None]] = []
         self._cb_lock = threading.Lock()
-        self._flush_count = 0
         self._running = False
         self._writer_thread: Optional[threading.Thread] = None
         self._start_writer()
