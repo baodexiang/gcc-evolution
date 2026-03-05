@@ -49196,6 +49196,95 @@ def key009_reject():
 
 
 # =========================================================
+# KEY-010: 双层GCC-EVO进化 Dashboard
+# =========================================================
+@app.route("/key010", methods=["GET"])
+def key010_dashboard():
+    """KEY-010 双层进化 dashboard — 模块级评分 + 系统级进化状态"""
+    import glob as _glob
+    import time as _t10
+
+    # ── 读取7个模块审计结果 ──
+    modules = {}
+    for _mp in _glob.glob(os.path.join("state", "module_audit_*.json")):
+        try:
+            _md = json.loads(open(_mp, encoding="utf-8").read())
+            modules[_md.get("module", "")] = _md
+        except Exception:
+            pass
+
+    # ── 读取系统级 system_evo (来自 key009_audit.json) ──
+    system_evo = {}
+    benchmark = {}
+    try:
+        _k9_path = os.path.join("state", "key009_audit.json")
+        if os.path.exists(_k9_path) and (_t10.time() - os.path.getmtime(_k9_path)) < 3600:
+            _k9 = json.loads(open(_k9_path, encoding="utf-8").read())
+            system_evo = _k9.get("24h", {}).get("system_evo", {})
+    except Exception:
+        pass
+
+    # ── 读取 human_override.json ──
+    human_override = {"freeze_module_evo": [], "freeze_system_evo": False,
+                      "force_disable_modules": [], "force_module_params": {}, "override_reason": ""}
+    try:
+        _ov_path = os.path.join("state", "human_override.json")
+        if os.path.exists(_ov_path):
+            human_override = json.loads(open(_ov_path, encoding="utf-8").read())
+    except Exception:
+        pass
+
+    # ── 读取 GCC SkillBank 记忆历史 ──
+    memory = []
+    try:
+        _sb_path = os.path.join(".GCC", "skillbank.jsonl")
+        if not os.path.exists(_sb_path):
+            _sb_path = os.path.join("state", "skillbank.jsonl")
+        if os.path.exists(_sb_path):
+            for _line in open(_sb_path, encoding="utf-8").read().splitlines()[-30:]:
+                try:
+                    _sk = json.loads(_line)
+                    if _sk.get("source") in ("module_evo", "system_evo", "retrospective"):
+                        memory.append({"date": _sk.get("created_at", ""), "title": _sk.get("name", ""),
+                                       "status": _sk.get("status", "verified")})
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    _payload = {
+        "generated_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET"),
+        "market_regime": system_evo.get("trend", "—"),
+        "modules": modules,
+        "system_evo": system_evo,
+        "benchmark": benchmark,
+        "memory": memory,
+        "human_override": human_override,
+    }
+
+    try:
+        _tpl = open("key010_dashboard.html", encoding="utf-8").read()
+        _inject = f"<script>window.KEY010_DATA = {json.dumps(_payload, ensure_ascii=False)};</script>"
+        return _tpl.replace("</head>", _inject + "\n</head>")
+    except Exception as _e:
+        return jsonify(_payload)
+
+
+@app.route("/key010/json", methods=["GET"])
+def key010_json():
+    """KEY-010 模块审计数据 JSON API"""
+    import glob as _glob10
+    modules = {}
+    for _mp in _glob10.glob(os.path.join("state", "module_audit_*.json")):
+        try:
+            _md = json.loads(open(_mp, encoding="utf-8").read())
+            modules[_md.get("module", "")] = _md
+        except Exception:
+            pass
+    return jsonify({"modules": modules, "module_count": len(modules)})
+
+
+# =========================================================
 # v3.493: 手动刷新L1趋势判断端点
 # =========================================================
 @app.route("/refresh_l1", methods=["GET", "POST"])
@@ -51715,6 +51804,33 @@ if __name__ == "__main__":
         print("[BOOT] KEY-009审计后台线程已启动 (每5分钟刷新dashboard)")
     except Exception as _k009_boot_err:
         print(f"[BOOT][WARN] KEY-009审计后台线程启动失败: {_k009_boot_err}")
+
+    # KEY-010 模块级审计后台线程 (每5分钟刷新 module_audit_*.json)
+    try:
+        import threading as _k010_threading
+
+        def _key010_audit_loop():
+            import time as _k010_time
+            _k010_time.sleep(150)  # 启动延迟2.5分钟（错开 KEY-009 的120s）
+            _k010_interval = 300   # 5分钟
+            while True:
+                try:
+                    import subprocess as _k010_sp
+                    _k010_sp.run(
+                        ["python", "module_auditor.py"],
+                        cwd=str(os.path.dirname(os.path.abspath(__file__))),
+                        timeout=120, capture_output=True,
+                    )
+                    log_to_server("[KEY-010][AUDIT] 模块级审计已刷新")
+                except Exception as _k010e:
+                    log_to_server(f"[KEY-010][AUDIT] 刷新失败: {_k010e}")
+                _k010_time.sleep(_k010_interval)
+
+        _k010_thread = _k010_threading.Thread(target=_key010_audit_loop, daemon=True, name="KEY010-Audit")
+        _k010_thread.start()
+        print("[BOOT] KEY-010审计后台线程已启动 (每5分钟刷新 module_audit_*.json)")
+    except Exception as _k010_boot_err:
+        print(f"[BOOT][WARN] KEY-010审计后台线程启动失败: {_k010_boot_err}")
 
     port = int(os.getenv("PORT", "6001"))
     print(f"[BOOT] AIPRO_VERSION={AIPRO_VERSION}, listening on 0.0.0.0:{port}")

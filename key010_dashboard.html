@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="refresh" content="300">
+<title>KEY-010 双层进化 Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#f6f8fa;color:#1f2328;padding:20px;max-width:1400px;margin:0 auto}
+h1{font-size:1.4em;color:#0969da;margin-bottom:4px}
+h2{font-size:1.05em;color:#0969da;margin:20px 0 10px;padding-bottom:6px;border-bottom:2px solid #d0d7de;display:flex;align-items:center;gap:8px}
+.subtitle{color:#656d76;font-size:0.85em;margin-bottom:16px}
+.section{background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.04)}
+/* 顶部摘要卡片 */
+.summary{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.card{background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:12px 16px;flex:1;min-width:120px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.card .label{color:#656d76;font-size:0.7em;text-transform:uppercase;letter-spacing:.5px}
+.card .value{font-size:1.6em;font-weight:700;margin-top:2px}
+.card .sub{color:#656d76;font-size:0.72em;margin-top:3px}
+.green{color:#1a7f37}.red{color:#cf222e}.yellow{color:#9a6700}.blue{color:#0969da}.gray{color:#656d76}
+/* 进度条 */
+.bar-wrap{height:8px;background:#eaeef2;border-radius:4px;overflow:hidden;margin:4px 0}
+.bar-inner{height:100%;border-radius:4px;transition:width .3s}
+/* 模块表格 */
+table{width:100%;border-collapse:collapse;font-size:0.86em}
+th{background:#f6f8fa;color:#656d76;font-size:0.7em;text-transform:uppercase;padding:6px 12px;text-align:left;border-bottom:2px solid #d0d7de}
+td{padding:8px 12px;border-top:1px solid #eaeef2;vertical-align:middle}
+tr:hover{background:#f6f8fa80}
+/* 评分标签 */
+.score-tag{display:inline-flex;align-items:center;gap:4px;font-weight:700;font-size:0.95em}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex-shrink:0}
+.dot-green{background:#1a7f37}.dot-yellow{background:#9a6700}.dot-red{background:#cf222e}
+/* 状态徽章 */
+.badge{display:inline-block;padding:2px 9px;border-radius:12px;font-size:0.72em;font-weight:600}
+.badge-ok{background:#dafbe1;color:#1a7f37}
+.badge-warn{background:#fff8c5;color:#9a6700}
+.badge-p0{background:#ffebe9;color:#cf222e}
+.badge-obs{background:#ddf4ff;color:#0550ae}
+.badge-run{background:#f0f0ff;color:#5b35d5}
+/* 基准达标 */
+.bench-row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.bench-item{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:6px 12px;font-size:0.82em;min-width:140px}
+.bench-item .bk{color:#656d76;font-size:0.75em}
+.bench-item .bv{font-weight:700;font-size:1.05em}
+.bench-item.pass{border-left:3px solid #1a7f37}
+.bench-item.fail{border-left:3px solid #cf222e}
+.bench-item.na{border-left:3px solid #d0d7de}
+/* 协作问题 */
+.collab-item{padding:5px 0;border-bottom:1px solid #eaeef2;font-size:0.82em;display:flex;align-items:flex-start;gap:6px}
+.collab-item:last-child{border-bottom:none}
+.collab-icon{color:#bc4c00;flex-shrink:0}
+/* 记忆历史 */
+.mem-item{padding:7px 0;border-bottom:1px solid #eaeef2;font-size:0.82em;display:grid;grid-template-columns:90px 1fr 80px;gap:8px;align-items:start}
+.mem-item:last-child{border-bottom:none}
+.mem-date{color:#656d76;font-size:0.8em}
+.mem-status{text-align:right}
+/* 人工干预 */
+.override-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eaeef2;font-size:0.84em}
+.override-row:last-child{border-bottom:none}
+.override-key{color:#656d76;font-size:0.78em;font-family:monospace}
+/* 验证倒计时 */
+.verify-bar{display:flex;align-items:center;gap:6px;font-size:0.78em;color:#656d76}
+.verify-progress{flex:1;height:6px;background:#eaeef2;border-radius:3px;overflow:hidden}
+.verify-fill{height:100%;border-radius:3px;background:#0969da}
+/* 趋势箭头 */
+.trend-up{color:#1a7f37;font-weight:700}
+.trend-down{color:#cf222e;font-weight:700}
+.trend-flat{color:#656d76}
+footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px;padding-top:12px;border-top:1px solid #eaeef2}
+.refresh-btn{background:#0969da;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:0.8em;cursor:pointer;margin-left:8px}
+.refresh-btn:hover{background:#0550ae}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.two-col{grid-template-columns:1fr}}
+.empty{color:#afb8c1;font-size:0.85em;padding:12px 0;text-align:center}
+</style>
+</head>
+<body>
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+  <h1>KEY-010 双层GCC-EVO进化监控</h1>
+  <div style="font-size:0.78em;color:#656d76">
+    <span id="lastUpdated">—</span>
+    <button class="refresh-btn" onclick="location.reload()">刷新</button>
+  </div>
+</div>
+<p class="subtitle" id="marketEnv">市场环境: — &nbsp;|&nbsp; 自动每5分钟刷新</p>
+
+<!-- 顶部摘要 -->
+<div class="summary" id="summaryCards">
+  <div class="card"><div class="label">系统整体评分</div><div class="value gray" id="sysScore">—</div><div class="sub" id="sysTrend">—</div></div>
+  <div class="card"><div class="label">模块平均评分</div><div class="value gray" id="modAvg">—</div><div class="sub" id="modCount">0/7 模块</div></div>
+  <div class="card"><div class="label">P0 问题模块</div><div class="value gray" id="p0Count">—</div><div class="sub">需立即关注</div></div>
+  <div class="card"><div class="label">改善中</div><div class="value gray" id="improvingCount">—</div><div class="sub">待验证</div></div>
+  <div class="card"><div class="label">GCC记忆写入</div><div class="value gray" id="memCount">—</div><div class="sub">条经验</div></div>
+</div>
+
+<!-- ═══ 系统级进化 ═══ -->
+<h2>【系统级进化】</h2>
+<div class="section">
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">
+    <div>
+      <div style="font-size:0.78em;color:#656d76">系统整体评分</div>
+      <div style="font-size:2em;font-weight:700" id="sysScoreBig">—</div>
+    </div>
+    <div style="flex:1">
+      <div class="bar-wrap"><div class="bar-inner" id="sysScoreBar" style="width:0%;background:#9a6700"></div></div>
+      <div style="font-size:0.72em;color:#656d76;margin-top:2px">趋势: <span id="sysTrendIcon">—</span></div>
+    </div>
+  </div>
+
+  <!-- 基准达标 -->
+  <div style="font-size:0.82em;color:#656d76;margin-bottom:6px">基准达标状态:</div>
+  <div class="bench-row" id="benchRow">
+    <div class="bench-item na"><div class="bk">CAGR</div><div class="bv">—</div><div class="bk">目标 &gt;9%</div></div>
+    <div class="bench-item na"><div class="bk">Sharpe</div><div class="bv">—</div><div class="bk">目标 &gt;2.0</div></div>
+    <div class="bench-item na"><div class="bk">最大回撤</div><div class="bv">—</div><div class="bk">目标 &lt;15%</div></div>
+    <div class="bench-item na"><div class="bk">Profit Factor</div><div class="bv">—</div><div class="bk">目标 &gt;1.75</div></div>
+  </div>
+
+  <!-- 协作问题 -->
+  <div style="font-size:0.82em;color:#656d76;margin:12px 0 6px">协作问题:</div>
+  <div id="collabList"><div class="empty">无协作问题</div></div>
+
+  <!-- 系统级验证倒计时 -->
+  <div style="margin-top:12px;font-size:0.82em;color:#656d76">系统级验证倒计时:</div>
+  <div class="verify-bar" id="sysVerifyBar">
+    <span id="sysVerifyDays">—</span>
+    <div class="verify-progress"><div class="verify-fill" id="sysVerifyFill" style="width:0%"></div></div>
+    <span id="sysVerifyTotal">/ 14天</span>
+  </div>
+</div>
+
+<!-- ═══ 模块级进化 ═══ -->
+<h2>【模块级进化】</h2>
+<div class="section" style="padding:0;overflow:hidden">
+  <table>
+    <thead>
+      <tr>
+        <th>模块</th>
+        <th>评分</th>
+        <th>趋势</th>
+        <th>状态</th>
+        <th>主要问题</th>
+        <th>待验证</th>
+      </tr>
+    </thead>
+    <tbody id="moduleTable">
+      <tr><td colspan="6" class="empty" style="padding:20px">加载中…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ═══ GCC记忆写入历史 ═══ -->
+<h2>【GCC 记忆写入历史】</h2>
+<div class="section">
+  <div id="memList"><div class="empty">暂无写入历史</div></div>
+</div>
+
+<!-- ═══ 人工干预 ═══ -->
+<h2>【人工干预】</h2>
+<div class="section">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <span style="font-size:0.85em;font-weight:600">当前状态: <span id="overrideStatus" class="badge badge-ok">自动进化运行中</span></span>
+  </div>
+  <div id="overrideDetails">
+    <div class="override-row"><span>freeze_module_evo</span><span class="override-key" id="ov-freeze-module">[]</span></div>
+    <div class="override-row"><span>freeze_system_evo</span><span class="override-key" id="ov-freeze-system">false</span></div>
+    <div class="override-row"><span>force_disable_modules</span><span class="override-key" id="ov-disable">[]</span></div>
+    <div class="override-row"><span>force_module_params</span><span class="override-key" id="ov-params">{}</span></div>
+    <div class="override-row"><span>override_reason</span><span class="override-key" id="ov-reason">""</span></div>
+  </div>
+</div>
+
+<footer>KEY-010 双层GCC-EVO进化系统 &nbsp;|&nbsp; 模块级(第1-3层)已实现 &nbsp;|&nbsp; 验证层(第4-5层)待实现</footer>
+
+<script>
+// ── 数据注入点 (Flask route 在 </head> 前注入 window.KEY010_DATA) ──
+const MODULES_ORDER = [
+  {id:'scan_engine',     name:'扫描引擎'},
+  {id:'l1_main',         name:'主程序 L1'},
+  {id:'l2_main',         name:'主程序 L2'},
+  {id:'l2_macd_small',   name:'L2小周期MACD'},
+  {id:'brooks_vision',   name:'BrooksVision'},
+  {id:'vision_baseline', name:'Vision过滤'},
+  {id:'position_control',name:'仓位控制'},
+];
+
+function scoreColor(s) {
+  if (s === null || s === undefined) return 'gray';
+  if (s >= 0.75) return 'green';
+  if (s >= 0.50) return 'yellow';
+  return 'red';
+}
+function scoreDot(s) {
+  const c = scoreColor(s);
+  return `<span class="dot dot-${c}"></span>`;
+}
+function trendIcon(t) {
+  if (!t || t === 'STABLE' || t === 'UNKNOWN') return '<span class="trend-flat">→</span>';
+  if (t === 'IMPROVING') return '<span class="trend-up">↑</span>';
+  if (t === 'DECLINING') return '<span class="trend-down">↓</span>';
+  return '<span class="trend-flat">→</span>';
+}
+function verifyCountdown(due_date) {
+  if (!due_date) return {days: null, pct: 0};
+  const now = new Date();
+  const due = new Date(due_date);
+  const total = 7 * 24 * 3600 * 1000;
+  const remaining = due - now;
+  const elapsed = total - remaining;
+  const pct = Math.max(0, Math.min(100, (elapsed / total) * 100));
+  const daysLeft = Math.max(0, Math.ceil(remaining / (24*3600*1000)));
+  return {days: daysLeft, pct: Math.round(pct)};
+}
+
+function render(data) {
+  const modules = data.modules || {};
+  const sysEvo  = data.system_evo || {};
+  const bench    = data.benchmark  || {};
+  const memory   = data.memory     || [];
+  const override = data.human_override || {};
+
+  // ── 环境 ──
+  document.getElementById('lastUpdated').textContent = data.generated_at || new Date().toLocaleString('zh-CN');
+  document.getElementById('marketEnv').textContent =
+    '市场环境: ' + (data.market_regime || '—') + '  |  自动每5分钟刷新';
+
+  // ── 系统级评分 ──
+  const sysScore = sysEvo.score != null ? sysEvo.score : null;
+  const sysScoreNorm = sysScore != null ? sysScore / 100 : null;
+  const sysColorClass = scoreColor(sysScoreNorm);
+  const sysScoreEl = document.getElementById('sysScore');
+  const sysScoreBig = document.getElementById('sysScoreBig');
+  sysScoreEl.textContent = sysScore != null ? sysScore.toFixed(1) : '—';
+  sysScoreEl.className = 'value ' + sysColorClass;
+  sysScoreBig.textContent = sysScore != null ? sysScore.toFixed(1) : '—';
+  sysScoreBig.className = sysColorClass;
+  document.getElementById('sysTrend').textContent = sysEvo.trend || '—';
+  document.getElementById('sysScoreBar').style.width = (sysScore || 0) + '%';
+  document.getElementById('sysScoreBar').style.background =
+    sysColorClass === 'green' ? '#1a7f37' : sysColorClass === 'red' ? '#cf222e' : '#9a6700';
+  document.getElementById('sysTrendIcon').innerHTML = trendIcon(sysEvo.trend);
+
+  // ── 模块平均 ──
+  const modResults = MODULES_ORDER.map(m => modules[m.id]).filter(Boolean);
+  const modScores = modResults.map(m => m.score).filter(s => s != null);
+  const modAvg = modScores.length ? (modScores.reduce((a,b)=>a+b,0)/modScores.length) : null;
+  const p0Mods = modResults.filter(m => (m.bottleneck?.issues||[]).some(i=>i.severity==='P0')).length;
+  const improvingMods = modResults.filter(m => m.gcc_memory_written === false && (m.bottleneck?.issues||[]).length > 0).length;
+
+  const modAvgEl = document.getElementById('modAvg');
+  modAvgEl.textContent = modAvg != null ? modAvg.toFixed(2) : '—';
+  modAvgEl.className = 'value ' + scoreColor(modAvg);
+  document.getElementById('modCount').textContent = modResults.length + '/7 模块已加载';
+  document.getElementById('p0Count').textContent = p0Mods;
+  document.getElementById('p0Count').className = 'value ' + (p0Mods > 0 ? 'red' : 'green');
+  document.getElementById('improvingCount').textContent = improvingMods;
+  document.getElementById('memCount').textContent = memory.length;
+
+  // ── 基准达标 ──
+  const benchItems = [
+    {key:'cagr',         label:'CAGR',          target:0.09, fmt: v=>v!=null?(v*100).toFixed(1)+'%':'—', higher:true},
+    {key:'sharpe',       label:'Sharpe',         target:2.0,  fmt: v=>v!=null?v.toFixed(2):'—',          higher:true},
+    {key:'max_drawdown', label:'最大回撤',        target:0.15, fmt: v=>v!=null?(v*100).toFixed(1)+'%':'—', higher:false},
+    {key:'profit_factor',label:'Profit Factor',  target:1.75, fmt: v=>v!=null?v.toFixed(2):'—',          higher:true},
+  ];
+  const benchRow = document.getElementById('benchRow');
+  benchRow.innerHTML = benchItems.map(item => {
+    const val = bench[item.key] ?? null;
+    const pass = val != null && (item.higher ? val >= item.target : val <= item.target);
+    const cls = val == null ? 'na' : (pass ? 'pass' : 'fail');
+    const valColor = val == null ? 'gray' : (pass ? 'green' : 'red');
+    return `<div class="bench-item ${cls}">
+      <div class="bk">${item.label}</div>
+      <div class="bv ${valColor}">${item.fmt(val)}</div>
+      <div class="bk">目标 ${item.higher?'>':'<'}${item.key==='cagr'?'9%':item.key==='sharpe'?'2.0':item.key==='max_drawdown'?'15%':'1.75'}</div>
+    </div>`;
+  }).join('');
+
+  // ── 协作问题 ──
+  const collabList = document.getElementById('collabList');
+  const issues = sysEvo.collab_issues || [];
+  if (!issues.length) {
+    collabList.innerHTML = '<div class="empty">无协作问题</div>';
+  } else {
+    collabList.innerHTML = issues.map(iss =>
+      `<div class="collab-item"><span class="collab-icon">△</span><span>${typeof iss === 'string' ? iss : iss.desc || JSON.stringify(iss)}</span></div>`
+    ).join('');
+  }
+
+  // ── 系统验证倒计时（14天）──
+  const sysVD = bench.verification_due || null;
+  if (sysVD) {
+    const cv = verifyCountdown(sysVD);
+    document.getElementById('sysVerifyDays').textContent = cv.days + '天剩余';
+    document.getElementById('sysVerifyFill').style.width = cv.pct + '%';
+    document.getElementById('sysVerifyTotal').textContent = '/ 14天';
+  }
+
+  // ── 模块表格 ──
+  const tbody = document.getElementById('moduleTable');
+  if (!modResults.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty" style="padding:16px">未找到模块审计数据，请先运行 module_auditor.py</td></tr>';
+  } else {
+    tbody.innerHTML = MODULES_ORDER.map(({id, name}) => {
+      const m = modules[id];
+      if (!m) return `<tr><td>${name}</td><td colspan="5" class="gray" style="font-size:0.8em">无数据</td></tr>`;
+      const s = m.score;
+      const c = scoreColor(s);
+      const issues = m.bottleneck?.issues || [];
+      const p0 = issues.find(i => i.severity === 'P0');
+      const warn = issues.find(i => i.severity === 'WARN');
+      const topIssue = p0 || warn;
+      const statusBadge = p0 ? '<span class="badge badge-p0">P0暂停</span>'
+                        : warn ? '<span class="badge badge-warn">改善中</span>'
+                        : '<span class="badge badge-ok">正常</span>';
+      const cv = verifyCountdown(m.verification_due);
+      const verifyHtml = m.gcc_memory_written
+        ? '<span class="badge badge-ok">已写入记忆</span>'
+        : issues.length
+        ? `<div class="verify-bar"><span>${cv.days != null ? cv.days+'天' : '—'}</span><div class="verify-progress"><div class="verify-fill" style="width:${cv.pct}%"></div></div><span>/7天</span></div>`
+        : '<span class="gray">—</span>';
+      const issueText = topIssue
+        ? `<span class="${topIssue.severity==='P0'?'red':'yellow'}" style="font-size:0.85em">${topIssue.desc}: ${typeof topIssue.value === 'number' ? (topIssue.value > 1 ? topIssue.value : (topIssue.value*100).toFixed(0)+'%') : topIssue.value}</span>`
+        : '<span class="gray" style="font-size:0.85em">—</span>';
+      return `<tr>
+        <td><strong>${name}</strong></td>
+        <td><span class="score-tag">${scoreDot(s)}<span class="${c}">${s != null ? s.toFixed(2) : '—'}</span></span></td>
+        <td>${trendIcon(m.trend)}</td>
+        <td>${statusBadge}</td>
+        <td>${issueText}</td>
+        <td>${verifyHtml}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── GCC 记忆历史 ──
+  const memList = document.getElementById('memList');
+  if (!memory.length) {
+    memList.innerHTML = '<div class="empty">暂无写入历史</div>';
+  } else {
+    memList.innerHTML = memory.slice().reverse().slice(0, 20).map(m => {
+      const status = m.status === 'verified' ? '<span class="badge badge-ok">✓已验证</span>'
+                   : m.status === 'rolled_back' ? '<span class="badge badge-p0">✗已回滚</span>'
+                   : '<span class="badge badge-obs">⏳验证中</span>';
+      return `<div class="mem-item">
+        <span class="mem-date">${(m.date||'').slice(0,10)}</span>
+        <span>${m.title || m.content || '—'}</span>
+        <span class="mem-status">${status}</span>
+      </div>`;
+    }).join('');
+  }
+
+  // ── 人工干预 ──
+  const ov = override.human_override || override;
+  const frozen = (ov.freeze_module_evo||[]).length > 0 || ov.freeze_system_evo;
+  const ovStatusEl = document.getElementById('overrideStatus');
+  ovStatusEl.textContent = frozen ? '人工覆盖中' : '自动进化运行中';
+  ovStatusEl.className = 'badge ' + (frozen ? 'badge-p0' : 'badge-ok');
+  document.getElementById('ov-freeze-module').textContent = JSON.stringify(ov.freeze_module_evo || []);
+  document.getElementById('ov-freeze-system').textContent = String(ov.freeze_system_evo || false);
+  document.getElementById('ov-disable').textContent = JSON.stringify(ov.force_disable_modules || []);
+  document.getElementById('ov-params').textContent = JSON.stringify(ov.force_module_params || {});
+  document.getElementById('ov-reason').textContent = JSON.stringify(ov.override_reason || '');
+}
+
+// 从 Flask 注入的 window.KEY010_DATA 加载
+if (typeof window.KEY010_DATA !== 'undefined') {
+  render(window.KEY010_DATA);
+} else {
+  document.getElementById('moduleTable').innerHTML =
+    '<tr><td colspan="6" class="empty" style="padding:20px">等待数据注入… (Flask route /key010)</td></tr>';
+}
+document.getElementById('lastUpdated').textContent = new Date().toLocaleString('zh-CN');
+</script>
+</body>
+</html>
