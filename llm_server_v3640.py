@@ -168,13 +168,13 @@ class CryptoConfig:
             "exchange": "coinbase",
             "long_bot_uuid": "48772ca6-dd8d-48c6-9414-0be4cc065fe9",
             "short_bot_uuid": "96a34d97-7cc9-4a6d-895f-ce71580a0e8a",
-            "unit_size": 5.0,
+            "unit_size": 10.0,
         },
         "SOLUSDC": {
             "exchange": "coinbase",
             "long_bot_uuid": "69d2e27c-bbf9-4a7a-8e54-f989e0a4d346",
             "short_bot_uuid": "dd6ae8bc-9ab7-4e44-ae31-b8bada86015e",
-            "unit_size": 10.0,
+            "unit_size": 15.0,
         },
         "ETHUSDC": {
             "exchange": "coinbase",
@@ -186,7 +186,7 @@ class CryptoConfig:
             "exchange": "coinbase",
             "long_bot_uuid": "10e7cf41-e500-41a8-849f-7241d67ef176",
             "short_bot_uuid": "17c81f8f-1b23-4b52-90fe-a5d584a4f406",
-            "unit_size": 0.025,
+            "unit_size": 0.02,
         },
     }
     
@@ -52283,6 +52283,22 @@ def _autosave_worker():
                             log_to_server(f"[GCC-0173][BACKFILL] MACD回填异常: {_e_macd}")
                 except Exception as _e_macds:
                     log_to_server(f"[GCC-0173][BACKFILL] MACD调度异常: {_e_macds}")
+
+                # GCC-0172: BV形态准确率回填 (每4h，与GCC-0171/0173保持一致)
+                try:
+                    if not hasattr(_autosave_worker, "_bv_backfill_last_ts"):
+                        _autosave_worker._bv_backfill_last_ts = 0.0
+                    if _time_bf.time() - _autosave_worker._bv_backfill_last_ts >= 4 * 3600:
+                        _autosave_worker._bv_backfill_last_ts = _time_bf.time()
+                        try:
+                            import brooks_vision as _bv_mod
+                            _bv_mod._BV_ACC_LAST_RUN = 0.0  # 清除5min冷却，确保autosave触发
+                            _bv_mod.bv_acc_backfill()
+                            log_to_server("[GCC-0172][BACKFILL] BV形态准确率回填完成")
+                        except Exception as _e_bv:
+                            log_to_server(f"[GCC-0172][BACKFILL] BV回填异常: {_e_bv}")
+                except Exception as _e_bvs:
+                    log_to_server(f"[GCC-0172][BACKFILL] BV调度异常: {_e_bvs}")
 
                 # GCC-0172: BV准确率2周自动审查 (每2周周日纽约8AM, 从2026-03-02起算)
                 try:
