@@ -16637,50 +16637,7 @@ def compute_l1_three_way_signal_v2900(
             print(f"[v3.581] Vision x4比较异常: {e}")
     # ========= v3.581 END =========
 
-    # ========= v3.581: Vision比较邮件通知 =========
-    if vision_result:
-        try:
-            # 获取Vision当前周期数据
-            v_current = vision_result.get("current", {})
-            v_current_direction = v_current.get("direction", "N/A").upper() if v_current else "N/A"
-            v_current_regime = v_current.get("regime", "N/A").upper() if v_current else "N/A"
-            v_current_confidence = float(v_current.get("confidence", 0)) if v_current else 0
-
-            # 获取Vision x4数据
-            v_x4 = vision_result.get("x4", {})
-            v_x4_direction = v_x4.get("direction", "N/A").upper() if v_x4 else "N/A"
-            v_x4_regime = v_x4.get("regime", "N/A").upper() if v_x4 else "N/A"
-            v_x4_confidence = float(v_x4.get("confidence", 0)) if v_x4 else 0
-
-            # 获取L1数据
-            l1_current = market_regime.get("current_trend", fm_current_trend)
-            l1_current_regime = "TRENDING" if l1_current in ["UP", "DOWN"] else "RANGING"
-
-            # v3.630: 如果发生了准确率覆盖，使用覆盖前的值
-            if market_regime.get("accuracy_override"):
-                l1_current = market_regime.get("accuracy_override_from", l1_current)
-                l1_current_regime = "TRENDING" if l1_current in ["UP", "DOWN"] else "RANGING"
-
-            l1_big = fm_big_trend_for_regime
-
-            # 发送邮件 (v3.630: 含准确率覆盖信息)
-            send_vision_comparison_email_v3581(
-                symbol=symbol,
-                l1_current_trend=l1_current,
-                l1_current_regime=l1_current_regime,
-                l1_big_trend=l1_big,
-                vision_current_direction=v_current_direction,
-                vision_current_regime=v_current_regime,
-                vision_current_confidence=v_current_confidence,
-                vision_x4_direction=v_x4_direction,
-                vision_x4_regime=v_x4_regime,
-                vision_x4_confidence=v_x4_confidence,
-                override_applied=accuracy_override_applied,
-                override_from=market_regime.get("accuracy_override_from"),
-                override_to=market_regime.get("accuracy_override_to"),
-            )
-        except Exception as e:
-            print(f"[v3.581] Vision比较邮件发送失败: {e}")
+    # ========= v3.581: Vision比较邮件通知 (已停用 — Vision不再判断当前趋势) =========
     # ========= v3.581 END =========
 
     # v3.570: 记录市场状态判断(含Vision结果，移至五模块覆盖+Vision分析之后)
