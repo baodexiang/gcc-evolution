@@ -1,36 +1,35 @@
 """
 SkillBank Commercial Library (Enterprise Only)
 
-⚠️  This module requires an enterprise license.
-Community version available: See gcc-evo.dev/pricing
-
-Commercial skill library containing:
-  • Industry-specific patterns
-  • Domain-expert knowledge cards
-  • Vertically-optimized strategies
+Community: returns empty results with upgrade prompt.
+Enterprise: full commercial skill library with industry-specific patterns.
 """
 
-from . import EnterpriseRequired
+from . import upgrade_prompt
 
 
 def load_skillbank(*args, **kwargs):
     """Load commercial SkillBank content."""
-    raise EnterpriseRequired("load_skillbank", tier="Pro")
+    upgrade_prompt("load_skillbank", tier="Pro", fallback="Using community skill cards instead")
+    return []
 
 
 def vertical_skillbank(*args, **kwargs):
     """Load vertical-specific SkillBank (crypto, stocks, forex, etc)."""
-    raise EnterpriseRequired("vertical_skillbank", tier="Enterprise")
+    upgrade_prompt("vertical_skillbank", tier="Enterprise", fallback="No vertical skills available")
+    return []
 
 
 def custom_skillbank(*args, **kwargs):
     """Deploy custom SkillBank for enterprise customer."""
-    raise EnterpriseRequired("custom_skillbank", tier="Enterprise")
+    upgrade_prompt("custom_skillbank", tier="Enterprise", fallback="No custom skills available")
+    return []
 
 
 def skillbank_version(*args, **kwargs):
     """Get current SkillBank version and update manifest."""
-    raise EnterpriseRequired("skillbank_version", tier="Pro")
+    upgrade_prompt("skillbank_version", tier="Pro", fallback="Version info unavailable")
+    return {"version": "community", "tier": "free"}
 
 
 __all__ = [

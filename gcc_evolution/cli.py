@@ -1,0 +1,466 @@
+"""
+gcc-evo CLI — Command-line interface for the self-evolution engine.
+
+Usage:
+    gcc-evo version
+    gcc-evo init [--project NAME]
+    gcc-evo loop TASK_ID [--once] [--provider PROVIDER]
+    gcc-evo pipe task TITLE -k KEY -m MODULE -p PRIORITY
+    gcc-evo pipe list
+    gcc-evo pipe status TASK_ID
+    gcc-evo memory compact
+    gcc-evo memory export [--output PATH]
+    gcc-evo health
+"""
+
+import sys
+import json
+import argparse
+from pathlib import Path
+from datetime import datetime
+
+
+def _print_banner():
+    from . import __version__
+    print(f"gcc-evo v{__version__} — AI Self-Evolution Engine")
+
+
+def cmd_version(args):
+    """Show version and environment info."""
+    from . import __version__
+    print(f"gcc-evo v{__version__}")
+    print(f"Python {sys.version.split()[0]}")
+    print(f"Platform: {sys.platform}")
+
+    # Check available layers
+    layers = []
+    try:
+        from . import L1_memory
+        layers.append("L1:Memory")
+    except ImportError:
+        pass
+    try:
+        from . import L2_retrieval
+        layers.append("L2:Retrieval")
+    except ImportError:
+        pass
+    try:
+        from . import L3_distillation
+        layers.append("L3:Distillation")
+    except ImportError:
+        pass
+    try:
+        from . import L4_decision
+        layers.append("L4:Decision")
+    except ImportError:
+        pass
+    try:
+        from . import L5_orchestration
+        layers.append("L5:Orchestration")
+    except ImportError:
+        pass
+    try:
+        from . import direction_anchor
+        layers.append("Anchor")
+    except ImportError:
+        pass
+
+    print(f"Layers: {', '.join(layers)}")
+
+    # Check enterprise
+    try:
+        from .enterprise import knn_evolution
+        print("Enterprise: available (license required)")
+    except Exception:
+        print("Enterprise: not loaded")
+
+
+def cmd_init(args):
+    """Initialize project structure."""
+    project_name = args.project or "gcc-evo-project"
+    base = Path.cwd() / project_name if args.project else Path.cwd()
+
+    dirs = [
+        base / ".GCC",
+        base / ".GCC" / "handoffs",
+        base / ".GCC" / "pipeline",
+        base / "state",
+        base / "state" / "audit",
+        base / "logs",
+    ]
+
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+
+    # evolution.yaml template
+    config_path = base / ".GCC" / "evolution.yaml"
+    if not config_path.exists():
+        config_path.write_text(
+            "# gcc-evo configuration\n"
+            "version: '5.295'\n"
+            "project: '{}'\n"
+            "loop_interval: 300  # seconds\n"
+            "skeptic_threshold: 0.75\n"
+            "memory_ttl: 7  # days\n"
+            "providers:\n"
+            "  # Uncomment and set your API keys\n"
+            "  # anthropic: sk-ant-...\n"
+            "  # openai: sk-...\n"
+            "  # gemini: ...\n"
+            "  # deepseek: ...\n".format(project_name),
+            encoding="utf-8",
+        )
+
+    # pipeline tasks.json
+    tasks_path = base / ".GCC" / "pipeline" / "tasks.json"
+    if not tasks_path.exists():
+        tasks_path.write_text(
+            json.dumps({"version": "1.0", "counter": 0, "tasks": []}, indent=2),
+            encoding="utf-8",
+        )
+
+    if args.project:
+        print(f"Initialized project: {project_name}/")
+    else:
+        print("Initialized gcc-evo in current directory")
+    print(f"  .GCC/evolution.yaml  — configuration")
+    print(f"  .GCC/pipeline/       — task management")
+    print(f"  state/               — runtime state")
+    print(f"  logs/                — execution logs")
+    print()
+    print("Next: gcc-evo pipe task 'My first task' -k KEY-001 -m core -p P1")
+
+
+def cmd_loop(args):
+    """Run the 6-step self-improvement loop."""
+    task_id = args.task_id
+    once = args.once
+    provider = args.provider
+
+    print(f"Loop: {task_id} | provider={provider or 'default'} | once={once}")
+
+    from .L1_memory import SensoryMemory, ShortTermMemory, LongTermMemory, JSONStorage
+    from .L2_retrieval import HybridRetriever
+    from .L3_distillation import ExperienceDistiller
+    from .L4_decision import SkepticValidator
+    from .L5_orchestration import SelfImprovementLoop
+
+    # Ensure state directory exists
+    state_dir = Path("state")
+    state_dir.mkdir(exist_ok=True)
+
+    # Initialize layers
+    sensory = SensoryMemory()
+    short_term = ShortTermMemory(window_size=50)
+    storage = JSONStorage(str(state_dir / "long_term.json"))
+    long_term = LongTermMemory(storage=storage)
+    retriever = HybridRetriever()
+    distiller = ExperienceDistiller(min_confidence=0.7)
+    skeptic = SkepticValidator()
+
+    iteration = 0
+    while True:
+        iteration += 1
+        ts = datetime.utcnow().strftime("%H:%M:%S")
+        print(f"\n{'='*50}")
+        print(f"[{ts}] Iteration {iteration} — {task_id}")
+        print(f"{'='*50}")
+
+        # Step 1: Observe
+        print("[1/6] Observe... collecting data")
+        observation = {
+            "task_id": task_id,
+            "iteration": iteration,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        sensory.store("current_observation", observation)
+        short_term.store("observations", observation)
+
+        # Step 2: Analyze
+        print("[2/6] Analyze... detecting patterns")
+        docs = [
+            {"id": f"obs-{iteration}", "text": json.dumps(observation),
+             "created_at": datetime.utcnow().isoformat()}
+        ]
+        retriever.index(docs)
+        analysis = retriever.retrieve(task_id, top_k=3)
+
+        # Step 3: Hypothesize
+        print("[3/6] Hypothesize... generating improvement ideas")
+        hypothesis = {
+            "signal": "IMPROVE",
+            "action": "OPTIMIZE",
+            "confidence": 0.8,
+            "conditions": ["+pattern_detected"],
+            "reasoning": f"Iteration {iteration}: system running, collecting baseline data",
+        }
+
+        # Step 4: Verify (Skeptic Gate)
+        print("[4/6] Verify... skeptic validation")
+        validation = skeptic.validate(hypothesis)
+        status = "PASS" if validation.is_valid else "BLOCKED"
+        print(f"       Skeptic: {status} (confidence={validation.confidence:.2f})")
+        if validation.issues:
+            for issue in validation.issues:
+                print(f"       Issue: {issue}")
+
+        # Step 5: Distill
+        print("[5/6] Distill... extracting experience")
+        distiller.add_experience({
+            "conditions": {"task": task_id, "iteration": iteration},
+            "outcome": {"success": validation.is_valid, "action": "baseline"},
+        })
+        cards = distiller.distill()
+        if cards:
+            for card in cards:
+                print(f"       New card: {card.card_id} ({card.confidence:.1%})")
+                long_term.store(card.card_id, {
+                    "title": card.title,
+                    "confidence": card.confidence,
+                    "summary": card.summary,
+                })
+
+        # Step 6: Report
+        print("[6/6] Report... generating summary")
+        report = {
+            "task_id": task_id,
+            "iteration": iteration,
+            "skeptic_pass": validation.is_valid,
+            "cards_generated": len(cards),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        print(f"       Result: iteration={iteration}, skeptic={status}, cards={len(cards)}")
+
+        # Save report
+        report_path = state_dir / "audit"
+        report_path.mkdir(exist_ok=True)
+        with open(report_path / f"{task_id}_log.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(report) + "\n")
+
+        if once:
+            print(f"\n[Done] Single iteration complete for {task_id}")
+            break
+        else:
+            import time
+            print(f"\nNext iteration in 300s...")
+            time.sleep(300)
+
+
+def cmd_pipe_task(args):
+    """Create a new pipeline task."""
+    tasks_path = Path(".GCC/pipeline/tasks.json")
+    if not tasks_path.exists():
+        print("Error: .GCC/pipeline/tasks.json not found. Run 'gcc-evo init' first.")
+        sys.exit(1)
+
+    data = json.loads(tasks_path.read_text(encoding="utf-8"))
+    counter = data.get("counter", 0) + 1
+    task_id = f"GCC-{counter:04d}"
+
+    task = {
+        "task_id": task_id,
+        "title": args.title,
+        "key": args.key,
+        "module": args.module,
+        "priority": args.priority,
+        "stage": "pending",
+        "created_at": datetime.utcnow().isoformat(),
+        "steps": [],
+    }
+
+    data["counter"] = counter
+    data["tasks"].append(task)
+    tasks_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"Created: {task_id} — {args.title}")
+    print(f"  Key: {args.key} | Module: {args.module} | Priority: {args.priority}")
+
+
+def cmd_pipe_list(args):
+    """List all pipeline tasks."""
+    tasks_path = Path(".GCC/pipeline/tasks.json")
+    if not tasks_path.exists():
+        print("No tasks found. Run 'gcc-evo init' first.")
+        return
+
+    data = json.loads(tasks_path.read_text(encoding="utf-8"))
+    tasks = data.get("tasks", [])
+
+    if not tasks:
+        print("No tasks yet. Create one: gcc-evo pipe task 'Title' -k KEY-001 -m module -p P1")
+        return
+
+    print(f"{'ID':<12} {'Stage':<12} {'Priority':<6} {'Title'}")
+    print("-" * 60)
+    for t in tasks[-20:]:  # Show last 20
+        print(f"{t['task_id']:<12} {t.get('stage','?'):<12} {t.get('priority','?'):<6} {t['title'][:40]}")
+
+    print(f"\nTotal: {len(tasks)} tasks")
+
+
+def cmd_pipe_status(args):
+    """Show task status details."""
+    tasks_path = Path(".GCC/pipeline/tasks.json")
+    if not tasks_path.exists():
+        print("No tasks found.")
+        return
+
+    data = json.loads(tasks_path.read_text(encoding="utf-8"))
+    for t in data.get("tasks", []):
+        if t["task_id"] == args.task_id:
+            print(json.dumps(t, indent=2, ensure_ascii=False))
+            return
+
+    print(f"Task {args.task_id} not found.")
+
+
+def cmd_memory_compact(args):
+    """Compact memory tiers."""
+    state_dir = Path("state")
+    lt_path = state_dir / "long_term.json"
+
+    if not lt_path.exists():
+        print("No long-term memory to compact.")
+        return
+
+    data = json.loads(lt_path.read_text(encoding="utf-8"))
+    count = len(data)
+    print(f"Long-term memory: {count} entries")
+    print("Compaction complete (no-op in community version).")
+
+
+def cmd_memory_export(args):
+    """Export memory state."""
+    state_dir = Path("state")
+    output = args.output or f"gcc_evo_export_{datetime.utcnow().strftime('%Y%m%d')}.json"
+
+    export = {}
+    for f in state_dir.glob("*.json"):
+        try:
+            export[f.name] = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    Path(output).write_text(json.dumps(export, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"Exported {len(export)} files to {output}")
+
+
+def cmd_health(args):
+    """System health check."""
+    print("gcc-evo Health Check")
+    print("-" * 40)
+
+    checks = []
+
+    # Check .GCC directory
+    gcc_dir = Path(".GCC")
+    ok = gcc_dir.exists()
+    checks.append(("Project initialized (.GCC/)", ok))
+
+    # Check state directory
+    state_dir = Path("state")
+    ok = state_dir.exists()
+    checks.append(("State directory (state/)", ok))
+
+    # Check config
+    config = gcc_dir / "evolution.yaml"
+    ok = config.exists()
+    checks.append(("Configuration (evolution.yaml)", ok))
+
+    # Check pipeline
+    pipeline = gcc_dir / "pipeline" / "tasks.json"
+    ok = pipeline.exists()
+    checks.append(("Pipeline tasks", ok))
+
+    # Check imports
+    try:
+        from . import __version__
+        checks.append((f"Package v{__version__}", True))
+    except Exception:
+        checks.append(("Package import", False))
+
+    for name, ok in checks:
+        icon = "OK" if ok else "MISSING"
+        print(f"  [{icon:>7}] {name}")
+
+    passed = sum(1 for _, ok in checks if ok)
+    print(f"\n{passed}/{len(checks)} checks passed")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="gcc-evo",
+        description="gcc-evo — AI Self-Evolution Engine",
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    # version
+    subparsers.add_parser("version", help="Show version info")
+
+    # init
+    init_parser = subparsers.add_parser("init", help="Initialize project")
+    init_parser.add_argument("--project", type=str, default=None)
+
+    # loop
+    loop_parser = subparsers.add_parser("loop", help="Run improvement loop")
+    loop_parser.add_argument("task_id", type=str)
+    loop_parser.add_argument("--once", action="store_true", default=False)
+    loop_parser.add_argument("--provider", type=str, default=None)
+
+    # pipe
+    pipe_parser = subparsers.add_parser("pipe", help="Pipeline management")
+    pipe_sub = pipe_parser.add_subparsers(dest="pipe_command")
+
+    task_parser = pipe_sub.add_parser("task", help="Create task")
+    task_parser.add_argument("title", type=str)
+    task_parser.add_argument("-k", "--key", required=True)
+    task_parser.add_argument("-m", "--module", required=True)
+    task_parser.add_argument("-p", "--priority", default="P1")
+
+    pipe_sub.add_parser("list", help="List tasks")
+
+    status_parser = pipe_sub.add_parser("status", help="Task status")
+    status_parser.add_argument("task_id", type=str)
+
+    # memory
+    mem_parser = subparsers.add_parser("memory", help="Memory management")
+    mem_sub = mem_parser.add_subparsers(dest="mem_command")
+    mem_sub.add_parser("compact", help="Compact memory")
+    export_parser = mem_sub.add_parser("export", help="Export state")
+    export_parser.add_argument("--output", type=str, default=None)
+
+    # health
+    subparsers.add_parser("health", help="System health check")
+
+    args = parser.parse_args()
+
+    if args.command == "version":
+        cmd_version(args)
+    elif args.command == "init":
+        cmd_init(args)
+    elif args.command == "loop":
+        cmd_loop(args)
+    elif args.command == "pipe":
+        if args.pipe_command == "task":
+            cmd_pipe_task(args)
+        elif args.pipe_command == "list":
+            cmd_pipe_list(args)
+        elif args.pipe_command == "status":
+            cmd_pipe_status(args)
+        else:
+            pipe_parser.print_help()
+    elif args.command == "memory":
+        if args.mem_command == "compact":
+            cmd_memory_compact(args)
+        elif args.mem_command == "export":
+            cmd_memory_export(args)
+        else:
+            mem_parser.print_help()
+    elif args.command == "health":
+        cmd_health(args)
+    else:
+        _print_banner()
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

@@ -12,6 +12,13 @@
 **/knn_*
 **/signal_evolution*
 
+# === Enterprise stubs (upgrade_prompt, no real logic) ===
+# These are safe to publish — they only show friendly upgrade warnings
+!gcc_evolution/enterprise/knn_evolution.py
+!gcc_evolution/enterprise/walk_forward.py
+!gcc_evolution/enterprise/bandit_scheduler.py
+!gcc_evolution/enterprise/adaptive_dag.py
+
 # === 敏感配置 ===
 .env
 **/api_keys*

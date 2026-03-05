@@ -8,7 +8,7 @@ Framework is open-source; content library is available in Evolve+ tier.
 """
 
 from .distiller import ExperienceDistiller, CardGenerator
-from .experience_card import ExperienceCard, CardVersion, CardMetadata
+from .experience_card import ExperienceCard, CardVersion, CardMetadata, CardType
 
 __all__ = [
     "ExperienceDistiller",
@@ -16,6 +16,7 @@ __all__ = [
     "ExperienceCard",
     "CardVersion",
     "CardMetadata",
+    "CardType",
 ]
 
 __version__ = "1.0.0"

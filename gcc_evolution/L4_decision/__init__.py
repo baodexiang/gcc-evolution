@@ -8,14 +8,16 @@ Community: base skeptic + dual-model comparison
 Enterprise: full multi-model ensemble + specialized validators
 """
 
-from .skeptic import SkepticValidator, HallucinationDetector
-from .multi_model import MultiModelEnsemble, ModelComparator
+from .skeptic import SkepticValidator, HallucinationDetector, ValidationResult
+from .multi_model import MultiModelEnsemble, ModelComparator, ModelPrediction
 
 __all__ = [
     "SkepticValidator",
     "HallucinationDetector",
+    "ValidationResult",
     "MultiModelEnsemble",
     "ModelComparator",
+    "ModelPrediction",
 ]
 
 __version__ = "1.0.0"
