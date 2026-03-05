@@ -182,39 +182,40 @@ class EventBus:
 
     def _writer_loop(self) -> None:
         """后台写入线程：消费队列 → 更新缓冲 → 批量写磁盘。"""
-        pending: list[GCCEvent] = []
+        unflushed: list[GCCEvent] = []   # 跨batch累积，等到 _FLUSH_EVERY 条再写盘
 
         while self._running:
             # 批量取，最多等 0.1s
             try:
                 event = self._queue.get(timeout=0.1)
-                pending.append(event)
-                # 尽量取完
+                batch = [event]
+                # 尽量取完队列里已有的
                 while True:
                     try:
-                        pending.append(self._queue.get_nowait())
+                        batch.append(self._queue.get_nowait())
                     except queue.Empty:
                         break
             except queue.Empty:
-                pass
+                batch = []
 
-            if not pending:
+            if not batch:
                 continue
 
             # 更新内存缓冲
             with self._buffer_lock:
-                self._buffer.extend(pending)
-                # 修剪超出上限
+                self._buffer.extend(batch)
                 if len(self._buffer) > _MAX_MEMORY:
                     self._buffer = self._buffer[-_MAX_MEMORY:]
 
-            # 批量写磁盘
-            self._flush_count += len(pending)
-            if self._flush_count >= _FLUSH_EVERY:
-                self._persist(pending)
-                self._flush_count = 0
+            # 跨batch累积，达到阈值才写磁盘
+            unflushed.extend(batch)
+            if len(unflushed) >= _FLUSH_EVERY:
+                self._persist(unflushed)
+                unflushed = []
 
-            pending = []
+        # 线程退出前 flush 剩余未写条目
+        if unflushed:
+            self._persist(unflushed)
 
     def _persist(self, events: list[GCCEvent]) -> None:
         """追加写入 events.jsonl。"""
@@ -227,11 +228,11 @@ class EventBus:
             logger.warning("[EventBus] persist failed: %s", ex)
 
     def stop(self, timeout: float = 2.0) -> None:
-        """停止 EventBus，等待写线程 flush 剩余事件。"""
+        """停止 EventBus，等待写线程完成最终 flush。"""
         self._running = False
         if self._writer_thread and self._writer_thread.is_alive():
             self._writer_thread.join(timeout=timeout)
-        # 强制 flush 队列剩余
+        # 写线程退出后，排空队列中尚未被消费的事件（极少见）
         remaining: list[GCCEvent] = []
         while True:
             try:
@@ -239,6 +240,8 @@ class EventBus:
             except queue.Empty:
                 break
         if remaining:
+            with self._buffer_lock:
+                self._buffer.extend(remaining)
             self._persist(remaining)
 
     def clear(self) -> None:

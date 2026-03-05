@@ -195,12 +195,9 @@ class Tracer:
             self.mark_layer(event.loop_id, layer, "skipped",
                             data=data, message=event.message)
         else:
-            # 收到事件但无明确状态 → 标记为 running
-            with self._lock:
-                run2 = self._runs.get(event.loop_id)
-            if run2:
-                lt = run2.layer(layer)
-                if lt.status == "pending":
-                    lt.status = "running"
-                    lt.started_at = lt.started_at or event.ts
-                lt.message = event.message
+            # 收到事件但无明确状态 → 标记为 running (run 已在上方确认非 None)
+            lt = run.layer(layer)
+            if lt.status == "pending":
+                lt.status = "running"
+                lt.started_at = lt.started_at or event.ts
+            lt.message = event.message
