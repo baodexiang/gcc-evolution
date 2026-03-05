@@ -1864,12 +1864,17 @@ class PluginSignalTracker:
                     break
 
             # 3. 执行失败 (未执行)
+            # 日志格式: [SYMBOL] PluginName: 未执行(原因)
             m = self.EXEC_FAIL_PATTERN.search(line)
             if m:
                 bracket_name, sym_or_plugin, reason = m.groups()
-                # 识别plugin和symbol
-                plugin = bracket_name or sym_or_plugin
-                symbol = sym_or_plugin if bracket_name else extract_symbol(line)
+                # bracket_name=[品种], sym_or_plugin=外挂名
+                if bracket_name:
+                    symbol = bracket_name
+                    plugin = sym_or_plugin
+                else:
+                    plugin = sym_or_plugin
+                    symbol = extract_symbol(line)
                 plugin = self._normalize_plugin(plugin)
                 symbol = self._normalize_symbol(symbol)
                 self.stats[plugin][symbol]["failed"] += 1
