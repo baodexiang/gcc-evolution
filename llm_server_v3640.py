@@ -5125,8 +5125,6 @@ def analyze_pa_from_bars_enhanced(bars: list, tv_signals: list = None) -> str:
 
 from flask import Flask, request, jsonify
 
-from openai import OpenAI
-import httpx
 import json
 import requests
 import smtplib
@@ -21757,14 +21755,6 @@ def _write_decision_log_v197_inner(
     except Exception as e:
         print(f"[WARN] write_decision_log_v197 failed: {e}")
 
-# v3.001: 添加 OpenAI API 超时保护，防止网络问题导致系统卡死
-OPENAI_API_TIMEOUT = 60  # OpenAI API 超时时间（秒）
-OPENAI_API_MAX_RETRIES = 2  # 最大重试次数
-
-client = OpenAI(
-    timeout=httpx.Timeout(OPENAI_API_TIMEOUT, connect=10.0),  # 总超时60秒，连接超时10秒
-    max_retries=OPENAI_API_MAX_RETRIES,  # 自动重试2次
-)  # 自动读取 OPENAI_API_KEY 环境变量
 
 # =========================================
 # 版本号
@@ -52059,7 +52049,7 @@ def _autosave_worker():
                 try:
                     if _baseline_vision_last_run["value"] == 0.0:
                         from baseline_vision_task import update_all_symbols
-                        update_all_symbols(symbol_state, client, log_fn=log_to_server)
+                        update_all_symbols(symbol_state, log_fn=log_to_server)
                         _baseline_vision_last_run["value"] = time.time()
                         log_to_server("[BASELINE] 基准K线识别完成(启动首次)")
                 except Exception as _e_bl:

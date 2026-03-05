@@ -235,7 +235,7 @@ def _vision_find(closed_bars, n, log_fn, symbol):
 _MIN_BARS_AGO = 2
 
 
-def _update_symbol(symbol: str, bars: list, openai_client, log_fn=None) -> bool:
+def _update_symbol(symbol: str, bars: list, log_fn=None) -> bool:
     """
     双验证: Vision + 数据摆点都跑，一致才用，不一致则丢弃(不拦截)。
     返回 True=成功更新, False=失败(保留旧数据)
@@ -331,11 +331,10 @@ def _update_symbol(symbol: str, bars: list, openai_client, log_fn=None) -> bool:
     return True
 
 
-def update_all_symbols(symbol_state: dict, openai_client, log_fn=None) -> None:
+def update_all_symbols(symbol_state: dict, log_fn=None) -> None:
     """
     遍历所有有ohlcv_bars的品种，执行Vision识别。
     symbol_state: 主程序的 symbol_state 字典
-    openai_client: OpenAI client实例
     """
     if log_fn is None:
         log_fn = print
@@ -359,7 +358,7 @@ def update_all_symbols(symbol_state: dict, openai_client, log_fn=None) -> None:
                 continue
 
         try:
-            ok = _update_symbol(symbol, bars, openai_client, log_fn)
+            ok = _update_symbol(symbol, bars, log_fn)
             if ok:
                 success_count += 1
             else:
