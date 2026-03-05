@@ -488,7 +488,7 @@ except ImportError as e:
 # 不再依赖独立进程 vision_analyzer.py，按需调用GPT Vision
 # =============================================================================
 
-ENABLE_VISION_TREND_ANALYZER = False  # 趋势不再用Vision判断, 仅形态+基准价格(RADAR_PROMPT)
+ENABLE_VISION_TREND_ANALYZER = True  # Vision用于形态+基准价格(RADAR_PROMPT)+N字结构+KEY-001 Cache
 VISION_LATEST_FILE = "state/vision/latest.json"  # 缓存文件
 VISION_RESULT_TTL_SECONDS = 7200  # 结果有效期2小时
 VISION_PER_SYMBOL_COOLDOWN = 1800  # 每品种最少间隔30分钟才重新调API
