@@ -78,3 +78,10 @@ venv/
 env/
 ENV/
 .venv
+
+# === Local repo workspace noise ===
+.GCC/
+_audit_tmp_proj/
+load_db.py
+ocr.py
+ocr_pdf.sh

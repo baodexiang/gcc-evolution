@@ -293,27 +293,28 @@ skill = distiller.extract_skill(experience={'observation': '...', 'outcome': '..
 skillbank.add_skill(skill)
 
 # Layer 4: Decision making operations
-from gcc_evolution.skeptic import SkepticGate
+from gcc_evolution import SkepticValidator
 
-skeptic = SkepticGate(threshold=0.75)
-decision = llm.make_decision(context=context)
-if skeptic.verify(decision):
+skeptic = SkepticValidator()
+decision = {
+    "signal": "BUY",
+    "action": "BUY_PARTIAL",
+    "confidence": 0.82,
+    "conditions": ["+trend_up", "+volume_confirm"],
+    "reasoning": "Trend and volume align for a partial long entry.",
+}
+validation = skeptic.validate(decision)
+if validation.is_valid:
     apply_decision(decision)
 else:
-    request_human_review(decision)
+    request_human_review(validation.issues)
 
 # Layer 5: Orchestration operations
-from gcc_evolution.pipeline import LoopEngine
+from gcc_evolution.L5_orchestration.loop_engine_base import SimpleImprovementLoop
 
-loop = LoopEngine(task_id='GCC-0001')
-result = loop.run_once(
-    observe=lambda: get_logs(),
-    audit=lambda logs: analyze(logs),
-    extract=lambda: distill_experience(),
-    verify=lambda: skeptic_check(),
-    distill=lambda: update_skillbank(),
-    report=lambda: generate_report()
-)
+loop = SimpleImprovementLoop()
+result = loop.run_iteration()
+print(result.iteration_id, result.phase.value)
 ```
 
 ---
@@ -324,7 +325,8 @@ result = loop.run_once(
 ```bash
 gcc-evo init [--project NAME]         # Initialize project
 gcc-evo version                       # Show version
-gcc-evo config set API_KEY <key>      # Set environment
+gcc-evo setup KEY-001                 # Configure L0 session settings
+gcc-evo setup --show                  # Show current L0 settings
 ```
 
 ### Task Management
@@ -345,13 +347,11 @@ gcc-evo loop GCC-0001 --provider gemini  # Specify LLM
 ```bash
 gcc-evo memory compact                # Compress memory
 gcc-evo memory export                 # Backup state
-gcc-evo memory migrate                # Upgrade schema
 ```
 
 ### Debugging
 ```bash
-gcc-evo audit --symbol TSLA --days 7  # Audit logs
-gcc-evo debug --trace                 # Enable trace logging
+GCC_LOG_LEVEL=DEBUG gcc-evo loop GCC-0001 --once  # Debug one loop run
 gcc-evo health                        # System health check
 ```
 

@@ -188,8 +188,8 @@ gcc-evo pipe task "Fix bug in parser" -k KEY-002 -m parser -p P1
 # View task details
 gcc-evo pipe status GCC-0001
 
-# Mark task done
-gcc-evo pipe done GCC-0001
+# Check task details
+gcc-evo pipe status GCC-0001
 ```
 
 ### Loop Execution
@@ -209,8 +209,8 @@ gcc-evo loop GCC-0001 &
 
 ### Memory Management
 ```bash
-# View memory statistics
-gcc-evo memory stats
+# Check project health before memory maintenance
+gcc-evo health
 
 # Compact old memories
 gcc-evo memory compact
@@ -218,17 +218,15 @@ gcc-evo memory compact
 # Export all state
 gcc-evo memory export
 
-# Clear and reset
-gcc-evo memory reset
+# Export to backup file
+gcc-evo memory export --output backup.json
 ```
 
 ### Debugging
 ```bash
-# View audit logs (last 24 hours)
-gcc-evo audit
-
-# Audit specific task
-gcc-evo audit --task GCC-0001 --days 7
+# View generated loop audit logs
+ls state/audit
+tail -n 20 state/audit/GCC-0001_log.jsonl
 
 # Enable debug logging
 GCC_LOG_LEVEL=DEBUG gcc-evo loop GCC-0001 --once
@@ -338,8 +336,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # Check logs
 tail -f logs/gcc-evo.log
 
-# Verify config
-gcc-evo config show
+# Verify L0 config
+gcc-evo setup --show
 
 # Run in debug mode
 GCC_LOG_LEVEL=DEBUG gcc-evo loop GCC-0001 --once
@@ -365,9 +363,8 @@ gcc-evo memory compact
 # Check memory usage
 du -sh state/
 
-# Export and reset if needed
-gcc-evo memory export
-gcc-evo memory reset
+# Export if needed
+gcc-evo memory export --output backup.json
 ```
 
 ---

@@ -59,8 +59,8 @@ GCC_LOG_LEVEL=INFO
 GCC_SKEPTIC_THRESHOLD=0.75
 EOF
 
-# Verify
-gcc-evo config show
+# Verify L0 setup
+gcc-evo setup --show
 ```
 
 ---
@@ -715,8 +715,8 @@ tail -f logs/gcc-evo.log
 # Enable debug
 GCC_LOG_LEVEL=DEBUG gcc-evo loop GCC-0001 --once
 
-# Check memory status
-gcc-evo memory stats
+# Check runtime health
+gcc-evo health
 
 # Verify API connectivity
 curl https://api.openai.com/v1/models
@@ -725,8 +725,8 @@ curl https://api.openai.com/v1/models
 ### Issue: Low confidence decisions
 
 ```bash
-# Review audit logs
-gcc-evo audit --days 7 --task GCC-0001
+# Review generated audit logs
+tail -n 20 state/audit/GCC-0001_log.jsonl
 
 # Lower threshold temporarily (testing only)
 export GCC_SKEPTIC_THRESHOLD=0.65
@@ -745,8 +745,7 @@ du -sh state/
 gcc-evo memory compact
 
 # Archive old memories
-gcc-evo memory export > backup.json
-gcc-evo memory reset
+gcc-evo memory export --output backup.json
 ```
 
 ---
