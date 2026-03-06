@@ -49748,6 +49748,19 @@ def handle_p0_signal():
         }
         symbol = REVERSE_SYMBOL_MAP.get(scan_symbol, scan_symbol)
 
+        # KEY-010 S6: 记录有效信号（观察模式，进入下单逻辑前）
+        if signal_filter and ValidSignal and signal in ("BUY", "SELL"):
+            try:
+                from datetime import datetime as _dt_sf, timezone as _tz_sf
+                signal_filter.record_signal(ValidSignal(
+                    signal_id=str(uuid.uuid4())[:8],
+                    timestamp=_dt_sf.now(_tz_sf.utc).isoformat(),
+                    direction=signal.lower(),
+                    source=signal_type,
+                ))
+            except Exception as _sf_e:
+                log_to_server(f"[SignalFilter] 记录有效信号失败: {_sf_e}")
+
         # P0信号去重检查
         import time
         cache_key = f"{symbol}_{signal}"
