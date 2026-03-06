@@ -431,7 +431,54 @@ def _update_pipeline_after_commit(task_id: str, step_id: str | None, commit_sha:
     return True, f"Synced dashboard state: {task_id} -> done"
 
 
-def _run_ho_create() -> tuple[bool, str]:
+def _write_handoff_fallback(task_id: str | None, step_id: str | None, commit_sha: str, message: str) -> tuple[bool, str]:
+    """Fallback handoff writer for OSS CLI when `ho create` command is unavailable."""
+    try:
+        branch_res = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        branch = branch_res.stdout.strip() if branch_res.returncode == 0 else "main"
+        now = _utc_now_iso()
+        date_tag = now[:10].replace("-", "")
+        branch_dir = Path(".GCC") / "branches" / branch
+        handoff_dir = Path(".GCC") / "handoffs"
+        branch_dir.mkdir(parents=True, exist_ok=True)
+        handoff_dir.mkdir(parents=True, exist_ok=True)
+
+        body = [
+            f"# Handoff: HO_AUTO_{date_tag}",
+            "",
+            "## Current State",
+            f"Branch: {branch} | Commit: {commit_sha}",
+            "",
+            "## Trigger",
+            "Auto-created by `gcc-evo commit` fallback (ho create unavailable).",
+            "",
+            "## Scope",
+            f"Task: {task_id or 'N/A'}",
+            f"Step: {step_id or 'N/A'}",
+            f"Message: {message}",
+            "",
+            "## Next Steps",
+            "1. Run validation/tests for this task scope.",
+            "2. Continue next pending pipeline step.",
+            "3. Create formal handoff with full GCC CLI if available (`gcc-evo ho create`).",
+            "",
+            f"_Generated at {now}_",
+        ]
+        content = "\n".join(body) + "\n"
+        branch_md = branch_dir / "handoff.md"
+        flat_md = handoff_dir / f"HO_AUTO_{date_tag}.md"
+        branch_md.write_text(content, encoding="utf-8")
+        flat_md.write_text(content, encoding="utf-8")
+        return True, f"Wrote fallback handoff: {branch_md}"
+    except Exception as exc:
+        return False, f"Fallback handoff write failed: {exc}"
+
+
+def _run_ho_create(task_id: str | None, step_id: str | None, commit_sha: str, message: str) -> tuple[bool, str]:
     """
     Best-effort handoff generation.
     Preference: call `gcc-evo ho create` directly so existing full CLI handles it.
@@ -448,7 +495,9 @@ def _run_ho_create() -> tuple[bool, str]:
         if res.returncode == 0:
             output = (res.stdout or "").strip()
             return True, output or "Executed: gcc-evo ho create"
-    return False, "Failed to run `gcc-evo ho create` automatically."
+
+    # Fallback for OSS CLI without `ho` command support.
+    return _write_handoff_fallback(task_id=task_id, step_id=step_id, commit_sha=commit_sha, message=message)
 
 
 def cmd_commit(args):
@@ -496,9 +545,9 @@ def cmd_commit(args):
             print(msg)
         else:
             print(f"Status sync warning: {msg}")
-        ho_ok, ho_msg = _run_ho_create()
+        ho_ok, ho_msg = _run_ho_create(task_id=task_id, step_id=step_id, commit_sha=commit_sha, message=message)
         if ho_ok:
-            print("Auto handoff: success")
+            print(f"Auto handoff: success ({ho_msg})")
         else:
             print(f"Auto handoff: warning ({ho_msg})")
     else:
