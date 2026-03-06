@@ -1,5 +1,5 @@
 """
-gcc-evo — AI Self-Evolution Engine v5.295
+gcc-evo — AI Self-Evolution Engine v5.300
 
 Open-source framework for LLM agent persistent memory + continuous learning.
 
@@ -7,17 +7,23 @@ License: BUSL 1.1 | Free for personal/academic/<$1M revenue
 Commercial: gcc-evo.dev/licensing
 
 Layers:
+  L0: Setup (session config + L0 gate before loop)
   L1: Memory (persistent 3-tier storage)
   L2: Retrieval (hybrid semantic + temporal + keyword)
   L3: Distillation (experience cards + SkillBank)
   L4: Decision (skeptic gate + multi-model ensemble)
   L5: Orchestration (6-step loop + DAG pipeline)
+  L6: Observation (EventBus + SSE Dashboard + RunTracer)
   Direction Anchor (constitutional principles)
 """
 
-__version__ = "5.295"
+__version__ = "5.300"
 __author__ = "baodexiang"
 __license__ = "BUSL-1.1"
+
+# L0: Setup
+from .session_config import SessionConfig
+from .setup_wizard import run_setup_wizard
 
 # L1: Memory
 from .L1_memory import SensoryMemory, ShortTermMemory, LongTermMemory
@@ -39,10 +45,16 @@ from .L4_decision import MultiModelEnsemble, ModelPrediction
 from .L5_orchestration import DAGPipeline, PipelineStage
 from .L5_orchestration import SelfImprovementLoop, LoopPhase
 
+# L6: Observation
+from .observer import EventBus, GCCEvent, LayerEmitter, RunTracer, Tracer
+from .dashboard_server import DashboardServer
+
 # Direction Anchor
 from .direction_anchor import DirectionAnchor, PrincipleSet
 
 __all__ = [
+    # L0
+    "SessionConfig", "run_setup_wizard",
     # L1
     "SensoryMemory", "ShortTermMemory", "LongTermMemory",
     "JSONStorage", "SQLiteStorage",
@@ -58,6 +70,9 @@ __all__ = [
     # L5
     "DAGPipeline", "PipelineStage",
     "SelfImprovementLoop", "LoopPhase",
+    # L6
+    "EventBus", "GCCEvent", "LayerEmitter", "RunTracer", "Tracer",
+    "DashboardServer",
     # Anchor
     "DirectionAnchor", "PrincipleSet",
 ]

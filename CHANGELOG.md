@@ -4,6 +4,38 @@
 
 ---
 
+## [5.300] — 2026-03-05
+
+### ✨ 新增 (New)
+
+- **L0 预先设置层** — `gcc-evo setup` 交互式向导，每次 loop 前强制通过 L0 gate
+  - `SessionConfig` — 存储 `.GCC/state/session_config.json`，3个必填字段验证
+  - `gcc-evo setup KEY-010` — 交互式填写目标/成功标准/配置
+  - `gcc-evo setup --show` — 查看当前配置
+  - `gcc-evo setup --edit` — 编辑单个字段
+  - `gcc-evo setup --reset` — 重置配置
+- **L6 观测层** — 完整实时观测框架
+  - `EventBus` — 线程安全单例事件总线，<5ms emit，持久化到 `.GCC/logs/events.jsonl`
+  - `LayerEmitter` — 七层语义化 emit 接口 (`emit_l0~l6`, `layer_start/done/error`)
+  - `RunTracer` — 按 loop_id 追踪每次运行的全流程快照
+  - `DashboardServer` — 本地 HTTP 服务 (端口 7842)，SSE 实时推送，15秒心跳
+- **实时 Dashboard** — 七层状态可视化，暗色主题，SSE 自动重连，运行历史面板
+- **`gcc-evo loop --dry-run`** — 跳过 L0 gate 检查（用于测试）
+
+### 🎯 改进 (Improved)
+
+- `gcc-evo version` — 现在显示 L6:Observation 层状态
+- `gcc-evo loop` — 增加 L0 gate：配置无效时拒绝启动并提示 `gcc-evo setup`
+- `cli.py` — 新增 `setup` 子命令路由
+
+### 🔧 技术细节
+
+- **EventBus `_writer_loop`** — 跨批次 `unflushed` 列表累积，达到阈值才写盘，线程退出时最终 flush
+- **ThreadingHTTPServer** — `daemon_threads=True`，SSE 线程不阻塞 `stop()`；`stop()` 调用 `shutdown()` + `server_close()` 确保端口可复用
+- **RunTracer `_on_event`** — 自动推断层状态 (started/done/error/skipped)，无需手动调用 `mark_layer`
+
+---
+
 ## [5.295] — 2026-03-03
 
 ### ✨ 新增 (New)

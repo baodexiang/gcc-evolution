@@ -1,4 +1,4 @@
-# Tutorial — Deep Dive into gcc-evo v5.295
+# Tutorial — Deep Dive into gcc-evo v5.300
 
 **Comprehensive learning guide for building self-evolving LLM agents**
 
@@ -29,7 +29,7 @@ pip install gcc-evo
 
 # Verify
 gcc-evo version
-# Output: gcc-evo v5.295
+# Output: gcc-evo v5.300
 
 # Check environment
 gcc-evo health

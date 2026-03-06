@@ -3,8 +3,9 @@ gcc-evo CLI — Command-line interface for the self-evolution engine.
 
 Usage:
     gcc-evo version
+    gcc-evo setup KEY [--show] [--edit] [--reset]
     gcc-evo init [--project NAME]
-    gcc-evo loop TASK_ID [--once] [--provider PROVIDER]
+    gcc-evo loop TASK_ID [--once] [--provider PROVIDER] [--dry-run]
     gcc-evo pipe task TITLE -k KEY -m MODULE -p PRIORITY
     gcc-evo pipe list
     gcc-evo pipe status TASK_ID
@@ -64,6 +65,11 @@ def cmd_version(args):
         layers.append("Anchor")
     except ImportError:
         pass
+    try:
+        from . import observer
+        layers.append("L6:Observation")
+    except ImportError:
+        pass
 
     print(f"Layers: {', '.join(layers)}")
 
@@ -73,6 +79,35 @@ def cmd_version(args):
         print("Enterprise: available (license required)")
     except Exception:
         print("Enterprise: not loaded")
+
+
+def cmd_setup(args):
+    """L0 session setup wizard."""
+    from .session_config import SessionConfig
+    from .setup_wizard import run_setup_wizard, run_edit_menu
+
+    key = args.key or ""
+
+    if args.reset:
+        cfg = SessionConfig()
+        cfg.reset()
+        print("Session config reset.")
+        return
+
+    if args.show:
+        cfg = SessionConfig.load()
+        print(cfg.summary())
+        return
+
+    if args.edit:
+        cfg = SessionConfig.load()
+        if not cfg.key and key:
+            cfg.key = key
+        run_edit_menu(cfg)
+        return
+
+    # Full wizard
+    run_setup_wizard(key=key)
 
 
 def cmd_init(args):
@@ -97,7 +132,7 @@ def cmd_init(args):
     if not config_path.exists():
         config_path.write_text(
             "# gcc-evo configuration\n"
-            "version: '5.295'\n"
+            "version: '5.300'\n"
             "project: '{}'\n"
             "loop_interval: 300  # seconds\n"
             "skeptic_threshold: 0.75\n"
@@ -128,7 +163,9 @@ def cmd_init(args):
     print(f"  state/               — runtime state")
     print(f"  logs/                — execution logs")
     print()
-    print("Next: gcc-evo pipe task 'My first task' -k KEY-001 -m core -p P1")
+    print("Next steps:")
+    print("  1. gcc-evo setup KEY-001       # L0 session config (required before loop)")
+    print("  2. gcc-evo pipe task 'My first task' -k KEY-001 -m core -p P1")
 
 
 def cmd_loop(args):
@@ -136,6 +173,19 @@ def cmd_loop(args):
     task_id = args.task_id
     once = args.once
     provider = args.provider
+    dry_run = getattr(args, "dry_run", False)
+
+    # ── L0 Gate ──────────────────────────────────────────
+    if not dry_run:
+        from .session_config import SessionConfig
+        cfg = SessionConfig.load()
+        ok, err = cfg.is_valid()
+        if not ok:
+            print(f"[L0] Session config invalid: {err}")
+            print("Run first: gcc-evo setup <KEY>")
+            return
+        print(f"[L0] Goal: {cfg.goal}")
+        print(f"[L0] KEY: {cfg.key}")
 
     print(f"Loop: {task_id} | provider={provider or 'default'} | once={once}")
 
@@ -396,6 +446,13 @@ def main():
     # version
     subparsers.add_parser("version", help="Show version info")
 
+    # setup (L0)
+    setup_parser = subparsers.add_parser("setup", help="L0 session setup wizard")
+    setup_parser.add_argument("key", nargs="?", default="", help="KEY number (e.g. KEY-010)")
+    setup_parser.add_argument("--show", action="store_true", help="Show current config")
+    setup_parser.add_argument("--edit", action="store_true", help="Edit existing config")
+    setup_parser.add_argument("--reset", action="store_true", help="Reset/delete config")
+
     # init
     init_parser = subparsers.add_parser("init", help="Initialize project")
     init_parser.add_argument("--project", type=str, default=None)
@@ -405,6 +462,8 @@ def main():
     loop_parser.add_argument("task_id", type=str)
     loop_parser.add_argument("--once", action="store_true", default=False)
     loop_parser.add_argument("--provider", type=str, default=None)
+    loop_parser.add_argument("--dry-run", action="store_true", default=False,
+                             help="Skip L0 gate check")
 
     # pipe
     pipe_parser = subparsers.add_parser("pipe", help="Pipeline management")
@@ -435,6 +494,8 @@ def main():
 
     if args.command == "version":
         cmd_version(args)
+    elif args.command == "setup":
+        cmd_setup(args)
     elif args.command == "init":
         cmd_init(args)
     elif args.command == "loop":

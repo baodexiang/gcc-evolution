@@ -1,5 +1,5 @@
-# gcc-evo — AI Self-Evolution Engine v5.295
-# gcc-evo — AI 自进化引擎 v5.295
+# gcc-evo — AI Self-Evolution Engine v5.300
+# gcc-evo — AI 自进化引擎 v5.300
 
 > **Break the 200K token context window limit — let AI truly remember and continuously evolve**
 >
@@ -200,7 +200,7 @@ Welcome issues and PRs. For core architecture changes, please open an issue firs
 ## Roadmap
 
 ```
-v5.295 (Current) — Loop + Skeptic + Multi-Model
+v5.300 (Current) — Loop + Skeptic + Multi-Model
     ↓
 v5.5 (Q2 2026) — Distributed Memory + Real-time Collaboration
     ↓
@@ -219,7 +219,7 @@ v7.0 (2027) — Plugin Ecosystem + Enterprise Features
   title = {gcc-evo: AI Self-Evolution Engine},
   year = {2026},
   url = {https://github.com/baodexiang/gcc-evolution},
-  version = {5.295}
+  version = {5.300}
 }
 ```
 

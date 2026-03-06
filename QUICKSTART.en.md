@@ -1,4 +1,4 @@
-# Quick Start — gcc-evo v5.295
+# Quick Start — gcc-evo v5.300
 
 **Get up and running in 10 minutes**
 
@@ -31,7 +31,7 @@ pip install -e ".[dev]"
 ### Verify Installation
 ```bash
 gcc-evo version
-# Output: gcc-evo v5.295
+# Output: gcc-evo v5.300
 ```
 
 ---
@@ -92,6 +92,27 @@ set -a && source .env && set +a
 
 ## Your First Loop
 
+### Step 0: L0 Setup (Required — new in v5.300)
+
+Every loop requires a valid L0 session config. Run the interactive wizard first:
+
+```bash
+gcc-evo setup KEY-001
+# Wizard prompts:
+#   KEY number:        KEY-001
+#   Evolution goal:    Improve error handling to reduce failure rate
+#   Success criteria:  1. Error rate < 5%
+#                      2. Recovery time < 30s
+#   Human confirm:     Y/n
+#   Max iterations:    0 (unlimited)
+```
+
+View or edit anytime:
+```bash
+gcc-evo setup --show    # view current config
+gcc-evo setup --edit    # edit a field
+```
+
 ### Step 1: Create a Task
 ```bash
 gcc-evo pipe task "Improve error handling" \
@@ -108,6 +129,7 @@ gcc-evo loop GCC-0001 --once
 ```
 
 **What happens:**
+0. ✅ **L0 Gate** — Validates session config (goal, criteria, key)
 1. ✅ **Task Audit** — Analyzes logs + finds issues
 2. ✅ **Experience Cards** — Extracts patterns
 3. ✅ **SkillBank** — Stores reusable rules
@@ -385,7 +407,7 @@ make test
 ### Build Locally
 ```bash
 make build
-pip install dist/gcc_evo-5.295-py3-none-any.whl
+pip install dist/gcc_evo-5.300-py3-none-any.whl
 ```
 
 ### Contribute

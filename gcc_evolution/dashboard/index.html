@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GCC-EVO L6 Dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#c9d1d9;font-family:'SF Mono',Consolas,monospace;min-height:100vh}
+header{padding:16px 24px;border-bottom:1px solid #21262d;display:flex;align-items:center;gap:12px}
+header h1{font-size:1rem;color:#58a6ff;font-weight:600}
+.badge{background:#161b22;border:1px solid #30363d;padding:2px 8px;border-radius:4px;font-size:.75rem;color:#8b949e}
+.badge.live{border-color:#3fb950;color:#3fb950}
+.main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 24px}
+@media(max-width:900px){.main{grid-template-columns:1fr}}
+.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px}
+.card-title{font-size:.75rem;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px}
+
+/* Layer grid */
+.layer-list{display:flex;flex-direction:column;gap:6px}
+.layer-row{display:flex;align-items:center;gap:10px;padding:8px 10px;
+           background:#0d1117;border-radius:6px;border-left:3px solid #30363d;
+           transition:border-color .3s}
+.layer-row.running{border-color:#f0883e}
+.layer-row.done{border-color:#3fb950}
+.layer-row.error{border-color:#f85149}
+.layer-row.paused{border-color:#e3b341}
+.dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;background:#484f58}
+.dot.running{background:#f0883e;animation:pulse 1s infinite}
+.dot.done{background:#3fb950}
+.dot.error{background:#f85149}
+.dot.skipped{background:#8b949e}
+.dot.paused{background:#e3b341;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.layer-id{width:28px;font-size:.8rem;color:#58a6ff;font-weight:600}
+.layer-name{width:80px;font-size:.75rem;color:#8b949e}
+.layer-msg{flex:1;font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.layer-ts{font-size:.7rem;color:#484f58;flex-shrink:0}
+.layer-dur{font-size:.7rem;color:#8b949e;flex-shrink:0;min-width:40px;text-align:right}
+
+/* Config panel */
+.cfg-item{display:flex;gap:8px;font-size:.8rem;padding:3px 0;border-bottom:1px solid #21262d}
+.cfg-key{color:#8b949e;min-width:80px}
+.cfg-val{color:#e6edf3}
+
+/* Event log */
+.log-box{height:280px;overflow-y:auto;background:#010409;border:1px solid #21262d;
+         border-radius:6px;padding:8px;font-size:.75rem;line-height:1.6}
+.log-box::-webkit-scrollbar{width:4px}
+.log-box::-webkit-scrollbar-thumb{background:#30363d;border-radius:2px}
+.ev{display:flex;gap:6px}
+.ev-ts{color:#484f58;flex-shrink:0;min-width:56px}
+.ev-layer{min-width:24px;flex-shrink:0;font-weight:600}
+.ev-L0{color:#e3b341}.ev-L1{color:#58a6ff}.ev-L2{color:#79c0ff}
+.ev-L3{color:#d2a8ff}.ev-L4{color:#ffa657}.ev-L5{color:#7ee787}.ev-L6{color:#ff7b72}
+.ev-INFO .ev-msg{color:#8b949e}
+.ev-WARN .ev-msg{color:#e3b341}
+.ev-ERROR .ev-msg{color:#f85149}
+
+/* Run history */
+.run-list{max-height:200px;overflow-y:auto}
+.run-row{display:flex;gap:8px;font-size:.75rem;padding:4px 6px;border-radius:4px}
+.run-row:hover{background:#1c2128}
+.run-id{color:#58a6ff;min-width:80px}
+.run-key{color:#8b949e;min-width:60px}
+.run-status.running{color:#f0883e} .run-status.done{color:#3fb950}
+.run-status.error{color:#f85149} .run-status.paused{color:#e3b341}
+.run-iter{color:#484f58}
+
+/* Footer */
+.footer{padding:8px 24px;border-top:1px solid #21262d;font-size:.7rem;color:#484f58;
+        display:flex;gap:16px}
+
+/* Connection status */
+#conn-dot{width:8px;height:8px;border-radius:50%;background:#484f58;display:inline-block}
+#conn-dot.connected{background:#3fb950}
+#conn-dot.error{background:#f85149;animation:pulse 1s infinite}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>GCC-EVO L6 Real-time Dashboard</h1>
+  <span class="badge live" id="live-badge">● LIVE</span>
+  <span class="badge" id="loop-badge">loop: --</span>
+  <span class="badge" id="key-badge">KEY: --</span>
+  <span style="flex:1"></span>
+  <span id="conn-dot"></span>
+  <span id="conn-label" style="font-size:.75rem;color:#8b949e;margin-left:4px">Connecting...</span>
+</header>
+
+<div class="main">
+  <!-- Left: 7-layer status + Session Config -->
+  <div style="display:flex;flex-direction:column;gap:16px">
+
+    <div class="card">
+      <div class="card-title">7-Layer Status</div>
+      <div class="layer-list" id="layer-list"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">L0 Session Config</div>
+      <div id="cfg-panel">
+        <div class="cfg-item"><span class="cfg-key">Status</span>
+          <span class="cfg-val" id="cfg-status">--</span></div>
+        <div class="cfg-item"><span class="cfg-key">KEY</span>
+          <span class="cfg-val" id="cfg-key">--</span></div>
+        <div class="cfg-item"><span class="cfg-key">Goal</span>
+          <span class="cfg-val" id="cfg-goal" style="font-size:.75rem">--</span></div>
+        <div class="cfg-item"><span class="cfg-key">Human confirm</span>
+          <span class="cfg-val" id="cfg-anchor">--</span></div>
+        <div class="cfg-item"><span class="cfg-key">Max iterations</span>
+          <span class="cfg-val" id="cfg-maxiter">--</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Right: Event log + Run history -->
+  <div style="display:flex;flex-direction:column;gap:16px">
+
+    <div class="card" style="flex:1">
+      <div class="card-title" style="display:flex;justify-content:space-between">
+        <span>Real-time Event Log</span>
+        <span id="ev-count" style="color:#484f58;font-size:.7rem">0 events</span>
+      </div>
+      <div class="log-box" id="log-box"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Run History (last 10)</div>
+      <div class="run-list" id="run-list">
+        <div style="color:#484f58;font-size:.8rem;padding:8px">No runs yet</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="footer">
+  <span>GCC-EVO v5.300</span>
+  <span id="footer-ts">--</span>
+  <span>SSE port 7842</span>
+  <span id="sse-clients">clients: 0</span>
+</div>
+
+<script>
+// ── Layer definitions ──
+const LAYERS = [
+  {id:'L0', name:'Setup'},
+  {id:'L1', name:'Memory'},
+  {id:'L2', name:'Retrieval'},
+  {id:'L3', name:'Distillation'},
+  {id:'L4', name:'Decision'},
+  {id:'L5', name:'Orchestration'},
+  {id:'L6', name:'Observation'},
+];
+
+const layerState = {};
+LAYERS.forEach(l => {
+  layerState[l.id] = {status:'pending', message:'waiting...', ts:'', dur:null};
+});
+
+// ── Build layer DOM ──
+const list = document.getElementById('layer-list');
+LAYERS.forEach(l => {
+  const row = document.createElement('div');
+  row.id = 'lr-' + l.id;
+  row.className = 'layer-row';
+  row.innerHTML = `
+    <span class="dot" id="dot-${l.id}"></span>
+    <span class="layer-id">${l.id}</span>
+    <span class="layer-name">${l.name}</span>
+    <span class="layer-msg" id="msg-${l.id}">waiting...</span>
+    <span class="layer-ts" id="ts-${l.id}"></span>
+    <span class="layer-dur" id="dur-${l.id}"></span>
+  `;
+  list.appendChild(row);
+});
+
+// ── Event counter ──
+let evCount = 0;
+
+// ── Update layer ──
+function updateLayer(layer, status, message, ts, dur) {
+  const dot = document.getElementById('dot-' + layer);
+  const msg = document.getElementById('msg-' + layer);
+  const tsEl = document.getElementById('ts-' + layer);
+  const durEl = document.getElementById('dur-' + layer);
+  const row = document.getElementById('lr-' + layer);
+  if (!dot) return;
+  dot.className = 'dot ' + (status || 'pending');
+  msg.textContent = message || '--';
+  tsEl.textContent = (ts || '').substr(11, 8);
+  if (dur != null) durEl.textContent = dur.toFixed(0) + 'ms';
+  row.className = 'layer-row ' + (status || 'pending');
+}
+
+// ── Add log entry ──
+function addLog(e) {
+  const box = document.getElementById('log-box');
+  const div = document.createElement('div');
+  div.className = 'ev ev-' + (e.level || 'INFO');
+  const ts = (e.ts || '').substr(11, 8);
+  div.innerHTML = `<span class="ev-ts">${ts}</span>
+    <span class="ev-layer ev-${e.layer}">${e.layer}</span>
+    <span class="ev-msg">${e.message || ''}</span>`;
+  box.prepend(div);
+  while (box.children.length > 300) box.removeChild(box.lastChild);
+  evCount++;
+  document.getElementById('ev-count').textContent = evCount + ' events';
+}
+
+// ── Process event ──
+function processEvent(e) {
+  const layer = e.layer;
+  const data = e.data || {};
+  const status = data.status;
+
+  if (layer && document.getElementById('dot-' + layer)) {
+    const st = status || (e.level === 'ERROR' ? 'error' : null);
+    updateLayer(layer, st, e.message, e.ts, data.duration_ms);
+  }
+
+  if (e.loop_id) {
+    document.getElementById('loop-badge').textContent = 'loop: ' + e.loop_id.substr(-8);
+  }
+
+  if (data.type === 'human_pause') {
+    updateLayer('L0', 'paused', '[waiting for human] ' + (data.reason || ''), e.ts, null);
+  }
+
+  addLog(e);
+  document.getElementById('footer-ts').textContent = (e.ts || '').substr(0, 19);
+}
+
+// ── Load status snapshot ──
+function loadStatus() {
+  fetch('/status').then(r => r.json()).then(status => {
+    Object.entries(status).forEach(([layer, info]) => {
+      if (info) {
+        updateLayer(layer, null, info.last_message, info.last_ts, null);
+        document.getElementById('loop-badge').textContent = 'loop: ' + (info.loop_id || '--').substr(-8);
+      }
+    });
+  }).catch(() => {});
+}
+
+// ── Load run history ──
+function loadRuns() {
+  fetch('/runs').then(r => r.json()).then(runs => {
+    const container = document.getElementById('run-list');
+    if (!runs || !runs.length) return;
+    container.innerHTML = '';
+    runs.slice(0, 10).forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'run-row';
+      const dur = r.started_at && r.finished_at ?
+        ((new Date(r.finished_at) - new Date(r.started_at)) / 1000).toFixed(1) + 's' : '--';
+      row.innerHTML = `
+        <span class="run-id">${(r.loop_id || '--').substr(-10)}</span>
+        <span class="run-key">${r.key || '--'}</span>
+        <span class="run-status ${r.status}">${r.status}</span>
+        <span class="run-iter">#${r.iteration || 1}</span>
+        <span style="color:#484f58;flex:1;text-align:right">${dur}</span>
+      `;
+      container.appendChild(row);
+    });
+    if (runs[0] && runs[0].key) {
+      document.getElementById('key-badge').textContent = 'KEY: ' + runs[0].key;
+    }
+  }).catch(() => {});
+}
+
+// ── SSE connection ──
+let es = null;
+let reconnectTimer = null;
+
+function connect() {
+  if (es) { es.close(); es = null; }
+  const dot = document.getElementById('conn-dot');
+  const label = document.getElementById('conn-label');
+
+  es = new EventSource('/events');
+  es.onopen = () => {
+    dot.className = 'connected';
+    label.textContent = 'Connected';
+    document.getElementById('live-badge').style.opacity = '1';
+    loadStatus();
+    loadRuns();
+  };
+  es.onmessage = ev => {
+    try { processEvent(JSON.parse(ev.data)); } catch(e) {}
+  };
+  es.onerror = () => {
+    dot.className = 'error';
+    label.textContent = 'Reconnecting...';
+    document.getElementById('live-badge').style.opacity = '.4';
+    es.close(); es = null;
+    if (!reconnectTimer) {
+      reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 3000);
+    }
+  };
+}
+
+connect();
+
+// ── Periodic refresh of run history ──
+setInterval(loadRuns, 10000);
+</script>
+</body>
+</html>

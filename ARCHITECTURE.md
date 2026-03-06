@@ -1,27 +1,33 @@
-# gcc-evo 五层架构详解
+# gcc-evo 七层架构详解
 
-> 完整的五层框架设计、实现逻辑和数据流转说明
+> 完整的七层框架设计、实现逻辑和数据流转说明 (v5.300)
 
 ---
 
 ## 目录
 
 1. [架构概览](#架构概览)
-2. [L1：记忆层](#l1记忆层)
-3. [L2：检索层](#l2检索层)
-4. [L3：蒸馏层](#l3蒸馏层)
-5. [L4：决策层](#l4决策层)
-6. [L5：编排层](#l5编排层)
-7. [层间协作](#层间协作)
-8. [实现指南](#实现指南)
+2. [L0：预先设置层](#l0预先设置层)
+3. [L1：记忆层](#l1记忆层)
+4. [L2：检索层](#l2检索层)
+5. [L3：蒸馏层](#l3蒸馏层)
+6. [L4：决策层](#l4决策层)
+7. [L5：编排层](#l5编排层)
+8. [L6：观测层](#l6观测层)
+9. [层间协作](#层间协作)
+10. [实现指南](#实现指南)
 
 ---
 
 ## 架构概览
 
-### 为什么是五层？
+### 为什么是七层？(v5.300)
 
-gcc-evo 的五层架构并非凭空设计，而是对以下问题的系统回答：
+gcc-evo 的七层架构并非凭空设计，而是对以下问题的系统回答：
+
+0. **L0 预先设置层** — "每次 loop 前如何保证目标明确？"
+   - 传统方案：直接运行，目标模糊（方向飘移）
+   - gcc-evo 方案：SessionConfig 强制门控，3个必填字段
 
 1. **L1 记忆层** — "AI 怎样跨会话记住信息？"
    - 传统方案：每次拼接完整历史（Token爆炸）
@@ -43,44 +49,116 @@ gcc-evo 的五层架构并非凭空设计，而是对以下问题的系统回答
    - 传统方案：手工脚本（易出错）
    - gcc-evo 方案：DAG 调度 + Loop 闭环
 
-### 五层的关系图
+6. **L6 观测层** — "怎样实时监控整个流程？"
+   - 传统方案：查日志文件（滞后、不直观）
+   - gcc-evo 方案：EventBus + SSE Dashboard 实时推送
+
+### 七层的关系图
 
 ```
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃  L5: 编排层 (Orchestration)            ┃
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  L6: 观测层 (Observation)               ┃
+┃  ├─ EventBus 事件总线 (<5ms emit)       ┃
+┃  ├─ SSE 实时 Dashboard (端口 7842)      ┃
+┃  └─ RunTracer 全流程追踪                ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+                 ↑ (订阅所有层的事件)
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  L5: 编排层 (Orchestration)             ┃
 ┃  ├─ 6步闭环：Observe→Audit→Extract→... ┃
-┃  ├─ DAG任务调度                        ┃
-┃  └─ Loop自动化运行                     ┃
-┗━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┛
+┃  ├─ DAG任务调度                         ┃
+┃  └─ Loop自动化运行                      ┃
+┗━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┛
                  │ (调度任务 + 执行指令)
-┏━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━┓
-┃  L4: 决策层 (Decision Making)         ┃
-┃  ├─ LLM 推理                          ┃
-┃  ├─ Skeptic 门控                      ┃
-┃  └─ Human-in-the-Loop 验证             ┃
-┗━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  L4: 决策层 (Decision Making)           ┃
+┃  ├─ LLM 推理                            ┃
+┃  ├─ Skeptic 门控                        ┃
+┃  └─ Human-in-the-Loop 验证              ┃
+┗━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┛
                  │ (推理请求 + 验证指令)
-┏━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━┓
-┃  L3: 蒸馏层 (Distillation)            ┃
-┃  ├─ 经验卡 → SkillBank                ┃
-┃  ├─ 自动版本管理                      ┃
-┃  └─ 准确率追踪                        ┃
-┗━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  L3: 蒸馏层 (Distillation)              ┃
+┃  ├─ 经验卡 → SkillBank                  ┃
+┃  ├─ 自动版本管理                        ┃
+┃  └─ 准确率追踪                          ┃
+┗━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┛
                  │ (规则查询 + 蒸馏指令)
-┏━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━┓
-┃  L2: 检索层 (Retrieval)               ┃
-┃  ├─ 语义相似度 (50%)                  ┃
-┃  ├─ KNN 时间加权 (30%)                ┃
-┃  └─ BM25 关键词 (20%)                 ┃
-┗━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  L2: 检索层 (Retrieval)                 ┃
+┃  ├─ 语义相似度 (50%)                    ┃
+┃  ├─ KNN 时间加权 (30%)                  ┃
+┃  └─ BM25 关键词 (20%)                   ┃
+┗━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┛
                  │ (查询请求)
-┏━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━┓
-┃  L1: 记忆层 (Memory)                  ┃
-┃  ├─ Sensory (24h)                     ┃
-┃  ├─ Short-term (7d)                   ┃
-┃  └─ Long-term (∞)                     ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  L1: 记忆层 (Memory)                    ┃
+┃  ├─ Sensory (24h)                       ┃
+┃  ├─ Short-term (7d)                     ┃
+┃  └─ Long-term (∞)                       ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+                 ↑ (loop 前必须通过 L0 gate)
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  L0: 预先设置层 (Setup)                 ┃
+┃  ├─ SessionConfig 必填校验              ┃
+┃  ├─ goal / success_criteria / key       ┃
+┃  └─ human_anchor_required               ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
+
+---
+
+## L0：预先设置层
+
+### 设计理念
+
+**问题**：每次 loop 前，目标是否明确？成功标准是否可测量？
+
+**核心方案**：`SessionConfig` 强制门控 — 配置不完整则拒绝启动 loop
+
+### SessionConfig 必填字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `key` | str | 关联的 KEY 编号（如 KEY-010） |
+| `goal` | str | 本次进化目标（≥10字） |
+| `success_criteria` | list[str] | 成功标准（1-5条） |
+
+### 选填字段
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `human_anchor_required` | True | 每轮结束后是否需要人工确认 |
+| `max_iterations` | 0 | 最大循环次数（0=不限） |
+| `notes` | "" | 备注 |
+
+### 使用示例
+
+```bash
+# 首次配置
+gcc-evo setup KEY-010
+
+# 查看当前配置
+gcc-evo setup --show
+
+# 编辑某个字段
+gcc-evo setup --edit
+
+# 重置配置
+gcc-evo setup --reset
+```
+
+```python
+from gcc_evolution import SessionConfig
+
+cfg = SessionConfig.load()
+ok, err = cfg.is_valid()
+if not ok:
+    print(f"Config invalid: {err}")
+    # -> "Please run: gcc-evo setup <KEY>"
+```
+
+---
 
 ---
 
@@ -897,6 +975,70 @@ while True:
     if should_stop():
         break
 ```
+
+---
+
+## L6：观测层
+
+### 设计理念
+
+**问题**：L0-L5 执行时，怎样实时知道每层的状态？
+
+**核心方案**：EventBus 全局事件流 + SSE Dashboard 实时推送
+
+### 核心组件
+
+#### EventBus — 事件总线
+
+```python
+bus = EventBus.get()               # 全局单例
+bus.emit("L1", "记忆加载完成", {"cards": 12})   # <5ms 非阻塞
+bus.subscribe(callback)            # 注册实时回调
+events = bus.recent(50)            # 查询最近50条
+```
+
+**内部实现**：
+- `queue.Queue(maxsize=2000)` — 非阻塞写入
+- 后台写线程 — 批量持久化到 `.GCC/logs/events.jsonl`
+- 跨批次 `unflushed` 累积，达 10 条写盘，线程退出时最终 flush
+
+#### LayerEmitter — 语义化发射器
+
+```python
+emitter = LayerEmitter(bus, loop_id="loop_001")
+emitter.emit_l0("L0 gate passed")
+emitter.emit_l1("memory loaded", {"cards": 12})
+emitter.layer_start("L2")
+emitter.layer_done("L2", result={"hits": 5})
+emitter.layer_error("L3", "distill failed")
+emitter.human_pause("等待人工确认")
+```
+
+#### RunTracer — 运行追踪器
+
+```python
+tracer = Tracer(bus)
+tracer.start_run("loop_001", key="KEY-010")
+# 自动从 EventBus 更新状态，无需手动 mark_layer
+snapshot = tracer.get_run("loop_001")
+recent = tracer.recent_runs(10)
+```
+
+#### DashboardServer — 实时 Dashboard
+
+```python
+server = DashboardServer()
+server.start()
+# 浏览器访问 http://localhost:7842
+# 七层状态 + 实时事件日志 + 运行历史
+server.stop()  # shutdown() + server_close() 释放端口
+```
+
+**技术特点**：
+- `ThreadingHTTPServer` + `daemon_threads=True`
+- SSE `/events` — 15秒心跳，客户端断开自动清理
+- `GET /status` — JSON 层级快照
+- `GET /runs` — JSON 最近运行列表
 
 ---
 

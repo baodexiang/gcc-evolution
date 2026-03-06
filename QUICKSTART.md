@@ -1,4 +1,4 @@
-# QUICKSTART — 10 分钟上手 gcc-evo
+# QUICKSTART — 10 分钟上手 gcc-evo v5.300
 
 ---
 
@@ -14,7 +14,7 @@ pip install -e .
 
 # 验证安装
 gcc-evo version
-# 输出: gcc-evo v5.295
+# 输出: gcc-evo v5.300
 ```
 
 ---
@@ -74,6 +74,37 @@ gcc-evo init
 
 ---
 
+## L0 预先设置（新！必须先做）
+
+v5.300 新增：每次 loop 前必须先完成 L0 配置。
+
+```bash
+# 首次配置（交互式向导）
+gcc-evo setup KEY-010
+
+# 向导会依次询问：
+#   KEY编号:       KEY-010
+#   进化目标:      提升信号准确率（至少10字）
+#   成功标准:      1. 信号准确率>80%
+#                  2. 误报率<10%
+#   人工确认:      Y/n（每轮结束是否暂停等待确认）
+#   最大循环次数:  0=不限
+#   备注:          （可选）
+
+# 查看当前配置
+gcc-evo setup --show
+
+# 编辑某个字段
+gcc-evo setup --edit
+
+# 重置配置（重新填写）
+gcc-evo setup --reset
+```
+
+配置存储在 `.GCC/state/session_config.json`。
+
+---
+
 ## 核心工作流（5 分钟）
 
 ### 1. 定义改善方向（KEY）
@@ -103,11 +134,16 @@ gcc-evo task create "改善信号准确率 Phase 1" \
 ### 3. 运行 Loop 闭环
 
 ```bash
+# 前提：先完成 L0 配置（gcc-evo setup KEY-010）
+
 # 单次闭环（分析→蒸馏→更新）
 gcc-evo loop GCC-0001 --once
 
 # 持续闭环（每 5 分钟自动运行）
 gcc-evo loop GCC-0001
+
+# 测试用：跳过 L0 gate
+gcc-evo loop GCC-0001 --once --dry-run
 ```
 
 Loop 会自动执行：
@@ -154,15 +190,16 @@ gcc-evo diag KEY-001
 
 | 命令 | 说明 |
 |------|------|
+| `gcc-evo setup KEY-010` | L0 配置向导（必须先做） |
+| `gcc-evo setup --show` | 查看当前 L0 配置 |
+| `gcc-evo setup --edit` | 编辑 L0 配置字段 |
 | `gcc-evo init` | 初始化项目结构 |
 | `gcc-evo loop GCC-001 --once` | 单次闭环 |
-| `gcc-evo dashboard` | 打开可视化看板 |
-| `gcc-evo show KEY-001` | 查看 KEY 详情 |
-| `gcc-evo distill` | 手动蒸馏经验卡 |
-| `gcc-evo distill --model gemini` | 用 Gemini 蒸馏 |
-| `gcc-evo task list` | 列出所有任务 |
-| `gcc-evo skillbank` | 查看技能库 |
+| `gcc-evo loop GCC-001 --dry-run` | 跳过 L0 gate 测试 |
+| `gcc-evo pipe task "标题" -k KEY-001 -m core -p P1` | 创建任务 |
+| `gcc-evo pipe list` | 列出所有任务 |
 | `gcc-evo memory compact` | 压实长期记忆 |
+| `gcc-evo health` | 系统健康检查 |
 
 ---
 

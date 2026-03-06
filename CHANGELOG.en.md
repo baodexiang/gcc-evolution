@@ -4,6 +4,38 @@ All notable changes to this project are documented in this file. This project fo
 
 ---
 
+## [5.300] — 2026-03-05
+
+### ✨ New Features
+
+- **L0 Setup Layer** — `gcc-evo setup` interactive wizard, mandatory L0 gate before every loop
+  - `SessionConfig` — stores `.GCC/state/session_config.json`, validates 3 required fields
+  - `gcc-evo setup KEY-010` — interactive wizard for goal/criteria/config
+  - `gcc-evo setup --show` — display current config
+  - `gcc-evo setup --edit` — edit individual fields
+  - `gcc-evo setup --reset` — delete config
+- **L6 Observation Layer** — complete real-time observation framework
+  - `EventBus` — thread-safe singleton event bus, <5ms emit, persists to `.GCC/logs/events.jsonl`
+  - `LayerEmitter` — semantic emit interfaces for all 7 layers (`emit_l0~l6`, `layer_start/done/error`)
+  - `RunTracer` — tracks full flow snapshots per loop_id
+  - `DashboardServer` — local HTTP server (port 7842), SSE real-time push, 15s heartbeat
+- **Real-time Dashboard** — 7-layer status visualization, dark theme, SSE auto-reconnect, run history panel
+- **`gcc-evo loop --dry-run`** — skip L0 gate check (for testing)
+
+### 🎯 Improvements
+
+- `gcc-evo version` — now shows L6:Observation layer status
+- `gcc-evo loop` — adds L0 gate: invalid config rejects startup and prompts `gcc-evo setup`
+- `cli.py` — new `setup` subcommand routing
+
+### 🔧 Technical Details
+
+- **EventBus `_writer_loop`** — cross-batch `unflushed` list accumulation, flushes at threshold, final flush on thread exit
+- **ThreadingHTTPServer** — `daemon_threads=True`, SSE threads don't block `stop()`; `stop()` calls `shutdown()` + `server_close()` for port reuse
+- **RunTracer `_on_event`** — auto-infers layer status (started/done/error/skipped) without manual `mark_layer` calls
+
+---
+
 ## [5.295] — 2026-03-03
 
 ### ✨ New Features
