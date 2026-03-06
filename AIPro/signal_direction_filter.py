@@ -150,11 +150,15 @@ class SignalDirectionFilter:
 
         count_4h = len(signals_4h)
         count_week = len(signals_week)
+        buy_4h = sum(1 for s in signals_4h if s.get("direction") == "buy")
+        buy_week = sum(1 for s in signals_week if s.get("direction") == "buy")
+        sell_4h = count_4h - buy_4h
+        sell_week = count_week - buy_week
 
-        if count_4h < MIN_SAMPLE or count_week < MIN_SAMPLE:
+        if buy_4h < MIN_SAMPLE or sell_4h < MIN_SAMPLE:
             return self._make_result(
                 direction="NO_ANSWER",
-                reason=f"样本不足（4h={count_4h}, week={count_week}, min={MIN_SAMPLE}）",
+                reason=f"4h 样本不足（Buy {buy_4h} / Sell {sell_4h}，各需至少 {MIN_SAMPLE} 条）",
                 buy_ratio_4h=0.0,
                 sell_ratio_4h=0.0,
                 buy_ratio_week=0.0,
@@ -163,10 +167,17 @@ class SignalDirectionFilter:
                 sample_week=count_week,
             )
 
-        buy_4h = sum(1 for s in signals_4h if s.get("direction") == "buy")
-        buy_week = sum(1 for s in signals_week if s.get("direction") == "buy")
-        sell_4h = count_4h - buy_4h
-        sell_week = count_week - buy_week
+        if buy_week < MIN_SAMPLE or sell_week < MIN_SAMPLE:
+            return self._make_result(
+                direction="NO_ANSWER",
+                reason=f"本周样本不足（Buy {buy_week} / Sell {sell_week}，各需至少 {MIN_SAMPLE} 条）",
+                buy_ratio_4h=0.0,
+                sell_ratio_4h=0.0,
+                buy_ratio_week=0.0,
+                sell_ratio_week=0.0,
+                sample_4h=count_4h,
+                sample_week=count_week,
+            )
 
         buy_ratio_4h = buy_4h / count_4h if count_4h else 0.0
         sell_ratio_4h = sell_4h / count_4h if count_4h else 0.0
