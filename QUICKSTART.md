@@ -110,8 +110,8 @@ gcc-evo setup --reset
 ### 1. 定义改善方向（KEY）
 
 ```bash
-# 在 state/improvements.json 中添加 KEY
-gcc-evo all
+# 先完成 L0 KEY 配置
+gcc-evo setup KEY-001
 ```
 
 输出示例：
@@ -125,10 +125,7 @@ KEY-002: 降低虚假信号
 
 ```bash
 # 为 KEY-001 创建任务
-gcc-evo task create "改善信号准确率 Phase 1" \
-  --key KEY-001 \
-  --priority P1 \
-  --description "通过历史数据验证+回撤分析提升准确率"
+gcc-evo pipe task "改善信号准确率 Phase 1" -k KEY-001 -m core -p P1
 ```
 
 ### 3. 运行 Loop 闭环
@@ -174,14 +171,14 @@ Next Iteration: 5 minutes
 ### 4. 查看进度
 
 ```bash
-# 打开可视化看板
-gcc-evo dashboard
+# 健康检查
+gcc-evo health
 
-# 查看特定 KEY 的详情
-gcc-evo show KEY-001
+# 查看当前 L0 配置
+gcc-evo setup --show
 
-# 查看历史分数趋势
-gcc-evo diag KEY-001
+# 查看任务详情
+gcc-evo pipe status GCC-0001
 ```
 
 ---
@@ -211,8 +208,8 @@ gcc-evo 支持无缝切换模型，无损上下文：
 # 用 Gemini 跑本次 loop
 gcc-evo loop GCC-0001 --provider gemini --once
 
-# 用 ChatGPT 做分析
-gcc-evo analyze --provider openai
+# 用 OpenAI 跑一次 loop
+gcc-evo loop GCC-0001 --provider openai --once
 
 # 多模型协作（Skeptic 验证）
 # 默认用 claude 决策，gemini + openai 验证
@@ -256,8 +253,8 @@ tail -f .GCC/logs/loop.log
 # 强制中止
 Ctrl+C
 
-# 重置状态
-gcc-evo state reset --confirm
+# 重新初始化项目结构
+gcc-evo init
 ```
 
 ---

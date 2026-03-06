@@ -115,8 +115,8 @@ gcc-evo --help
 # Run improvement loop / 运行改善闭环
 gcc-evo loop GCC-0001 --once
 
-# Open dashboard / 打开看板
-gcc-evo dashboard
+# Health check / 健康检查
+gcc-evo health
 ```
 
 See [QUICKSTART.md](QUICKSTART.md) | [QUICKSTART.en.md](QUICKSTART.en.md)

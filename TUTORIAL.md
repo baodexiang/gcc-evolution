@@ -1,6 +1,7 @@
 # TUTORIAL — gcc-evo 深度使用指南
 
 > 本教程假设你已阅读 QUICKSTART.md。我们将深入讨论核心概念、高级用法和最佳实践。
+> ⚠ 开源版 v5.300 CLI 仅支持 `version/setup/init/loop/pipe/memory/health`，其余命令请按本文中的“开源替代命令”使用。
 
 ---
 
@@ -210,10 +211,10 @@ nohup gcc-evo loop GCC-0155 > loop.log 2>&1 &
 tail -f .GCC/logs/loop.log
 
 # 查看进度
-gcc-evo show GCC-0155
+gcc-evo pipe status GCC-0155
 
-# 查看诊断
-gcc-evo diag GCC-0155
+# 查看健康状态
+gcc-evo health
 ```
 
 ### Loop 的内部机制
@@ -321,17 +322,17 @@ Long-term Tier (长期层)
 ### 内存查询
 
 ```bash
-# 查看感知层
-gcc-evo memory show --tier sensory
+# 查看系统健康
+gcc-evo health
 
-# 查看短期层，最近 7 天
-gcc-evo memory show --tier short-term --days 7
+# 导出内存快照
+gcc-evo memory export --output memory_backup.json
 
 # 查看长期层，搜索关键词
 gcc-evo memory search "信号准确率" --tier long-term
 
-# 内存统计
-gcc-evo memory stats
+# 内存与运行状态
+gcc-evo health
 # 输出:
 # Sensory: 8/10 (80%)
 # Short-term: 47/100 (47%)
@@ -344,11 +345,11 @@ gcc-evo memory stats
 # 压缩内存 (自动将旧的短期转移到长期)
 gcc-evo memory compact
 
-# 重新索引 (重建搜索索引)
-gcc-evo memory reindex
+# 压缩记忆
+gcc-evo memory compact
 
-# 清理过期数据 (删除超过保留期的数据)
-gcc-evo memory cleanup --days 30
+# 导出备份
+gcc-evo memory export --output memory_backup.json
 ```
 
 ---
@@ -378,14 +379,14 @@ gcc-evo 的检索使用三个策略的组合：
 **使用检索**：
 
 ```bash
-# 搜索相似的任务
-gcc-evo search "提高信号准确率"
+# 在审计日志中检索关键词
+rg "提高信号准确率" state/audit
 
-# 搜索特定 KEY 的经验
-gcc-evo search "KEY-001" --type cards
+# 检索特定 KEY
+rg "KEY-001" state/audit
 
-# 搜索规则
-gcc-evo search "环境变量" --type rules
+# 检索规则相关关键词
+rg "环境变量" state/audit
 ```
 
 ### 经验蒸馏
@@ -409,17 +410,17 @@ gcc-evo search "环境变量" --type rules
 **手动蒸馏**：
 
 ```bash
-# 从日志蒸馏
-gcc-evo distill --source logs --days 7
+# 开源版替代：压缩并沉淀内存
+gcc-evo memory compact
 
-# 使用特定 LLM
-gcc-evo distill --model gemini
+# 使用特定 LLM 跑一次 loop
+gcc-evo loop GCC-0100 --provider gemini --once
 
-# 查看蒸馏结果
-gcc-evo skillbank list
+# 导出结果供离线分析
+gcc-evo memory export --output memory_backup.json
 
-# 查看技能详情
-gcc-evo skillbank show SK-0042
+# 查看系统健康
+gcc-evo health
 ```
 
 ---
@@ -492,11 +493,11 @@ gcc-evo loop GCC-0100 --once
 # 1. 运行 Audit，发现问题
 gcc-evo loop GCC-0100
 
-# 2. 查看问题列表
-gcc-evo diag GCC-0100
+# 2. 查看健康状态
+gcc-evo health
 
-# 3. 分析根因
-gcc-evo search "假突破" --type problems
+# 3. 在审计日志中分析根因
+rg "假突破" state/audit
 ```
 
 **Day 6-10: 改进实施**
@@ -510,8 +511,8 @@ gcc-evo pipe task "实现新信号过滤规则" -k KEY-001 -p P1
 # 3. 验证改进
 gcc-evo loop GCC-0101 --once
 
-# 4. 蒸馏成规则
-gcc-evo distill --source logs --days 3
+# 4. 压缩并沉淀内存
+gcc-evo memory compact
 ```
 
 **Day 11-15: 监控验证**
@@ -519,11 +520,11 @@ gcc-evo distill --source logs --days 3
 # 持续运行 Loop
 gcc-evo loop GCC-0101 &
 
-# 每天检查进度
-gcc-evo diag GCC-0101
+# 每天检查健康
+gcc-evo health
 
-# 查看准确率趋势
-gcc-evo show KEY-001
+# 查看当前 L0 配置
+gcc-evo setup --show
 ```
 
 ---
@@ -576,13 +577,13 @@ gcc-evo loop GCC-0156 &
 gcc-evo loop GCC-0157 &
 
 # 2. 使用快速模型
-gcc-evo loop GCC-0155 --model gemini --once
+gcc-evo loop GCC-0155 --provider gemini --once
 
-# 3. 减少日志分析范围
-gcc-evo loop GCC-0155 --audit-days 1
+# 3. 单次快速运行
+gcc-evo loop GCC-0155 --once
 
-# 4. 禁用不需要的阶段
-gcc-evo loop GCC-0155 --skip distill --skip cards
+# 4. 干运行测试
+gcc-evo loop GCC-0155 --once --dry-run
 ```
 
 ### 内存优化
@@ -591,24 +592,24 @@ gcc-evo loop GCC-0155 --skip distill --skip cards
 # 定期压缩
 gcc-evo memory compact --schedule daily
 
-# 减少保留期
-gcc-evo memory config --short-term-days 3 --long-term-days 90
+# 调整配置
+gcc-evo setup --edit
 
-# 清理过期数据
-gcc-evo memory cleanup --older-than 30days
+# 定期压缩
+gcc-evo memory compact
 ```
 
 ### 成本优化
 
 ```bash
-# 查看成本统计
-gcc-evo stats --cost
+# 查看系统状态
+gcc-evo health
 
 # 使用便宜模型
-gcc-evo loop GCC-0155 --model deepseek
+gcc-evo loop GCC-0155 --provider deepseek
 
-# 批量处理以减少 API 调用
-gcc-evo distill --batch-size 50
+# 压缩记忆以减少上下文负担
+gcc-evo memory compact
 ```
 
 ---
@@ -624,13 +625,13 @@ gcc-evo distill --batch-size 50
 tail -f .GCC/logs/loop.log
 
 # 2. 检查状态
-gcc-evo show GCC-0155
+gcc-evo pipe status GCC-0155
 
 # 3. 强制中止
 pkill -f "gcc-evo loop"
 
-# 4. 重置状态
-gcc-evo state reset --confirm
+# 4. 重新初始化项目结构
+gcc-evo init
 
 # 5. 重新启动
 gcc-evo loop GCC-0155 --once
@@ -639,43 +640,43 @@ gcc-evo loop GCC-0155 --once
 **Q2: 内存不足**
 
 ```bash
-# 1. 检查内存大小
-gcc-evo memory stats
+# 1. 检查系统健康
+gcc-evo health
 
 # 2. 压缩内存
 gcc-evo memory compact
 
-# 3. 清理过期数据
-gcc-evo memory cleanup
+# 3. 导出备份
+gcc-evo memory export --output memory_backup.json
 
-# 4. 检查是否有内存泄漏
-gcc-evo diag --memory
+# 4. 再次检查健康
+gcc-evo health
 ```
 
 **Q3: LLM 准确率低**
 
 ```bash
-# 1. 检查置信度
-gcc-evo show GCC-0155 | grep confidence
+# 1. 检查最近审计记录
+tail -n 20 state/audit/GCC-0155_log.jsonl
 
 # 2. 切换到更强的模型
-gcc-evo loop GCC-0155 --model gpt-4 --once
+gcc-evo loop GCC-0155 --provider openai --once
 
-# 3. 提高 Skeptic 阈值 (要求更多验证)
-gcc-evo config set skeptic.threshold 0.85
+# 3. 调整配置 (含阈值)
+gcc-evo setup --edit
 
 # 4. 查看最近的错误决策
-gcc-evo search "REQUIRES_HUMAN_REVIEW"
+rg "REQUIRES_HUMAN_REVIEW" state/audit
 ```
 
 ### 调试模式
 
 ```bash
 # 启用调试日志
-gcc-evo loop GCC-0155 --debug --once
+GCC_LOG_LEVEL=DEBUG gcc-evo loop GCC-0155 --once
 
-# 输出详细的 LLM 对话
-gcc-evo loop GCC-0155 --verbose-llm --once
+# 输出更详细日志（同上）
+GCC_LOG_LEVEL=DEBUG gcc-evo loop GCC-0155 --once
 
 # 干运行 (不执行修改)
 gcc-evo loop GCC-0155 --dry-run --once
@@ -720,7 +721,7 @@ gcc-evo 的核心力量在于：
 **下一步**：
 - 阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解如何贡献
 - 查看 [ARCHITECTURE.md](ARCHITECTURE.md) 深入理解设计
-- 浏览 SkillBank 学习已有的技能 — `gcc-evo skillbank list`
+- 浏览已沉淀记录 — `gcc-evo memory export --output memory_backup.json`
 
 ---
 
