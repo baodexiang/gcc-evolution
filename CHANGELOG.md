@@ -9,6 +9,9 @@
   - scan_symbol流程从7步精简为6步
 
 ### Fixed
+- **fix(vision)**: `analyze_patterns()` 基准价回填统一使用局部 `bars` 数据
+  - `baseline_buy/baseline_sell` 的 `bars_ago` 映射在同一批 K 线上计算，避免变量错用导致写入异常
+- **fix(vision)**: `pattern_latest.json` 改为按品种合并更新，避免覆盖其他 symbol 的最新形态结果
 - **fix(scan-engine)**: v21.27 移动止损/止盈豁免P0冷却和日限次 — CRWV保命信号被误封
   - `_notify_main_server()` 新增 `_p0_safety_exempt` 标志
   - 移动止损/止盈跳过 P0 fail 冷却 (v21.2) 和 P0 日限次 (v21.19)

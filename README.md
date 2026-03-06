@@ -17,6 +17,10 @@
 | `modules/key002_regime.py` | v1.0 (KEY-002 Phase B) |
 | `modules/es_risk_backtest.py` | v2.0 (KEY-005 Phase A) |
 
+**Vision 修复补充（Unreleased）**：
+- `vision_analyzer.py` 形态写入 `pattern_latest.json` 采用“按 symbol 合并更新”，避免单次写入覆盖其他品种结果
+- 基准价回填统一使用 `analyze_patterns()` 内部 `bars` 数据按 `bars_ago` 定位，避免变量错用导致基准价写入异常
+
 ## 架构概述
 
 ```
