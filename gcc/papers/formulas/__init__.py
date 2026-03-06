@@ -29,6 +29,12 @@ from .P004_prompt_repetition import (
     eq_1_repetition_performance_gain,
     eq_2_optimal_repetition_count,
 )
+from .P005_dualpath_kvcache import (
+    KV_EPSILON,
+    eq_1_dualpath_allocation_ratio,
+    eq_2_cache_hit_objective,
+    eq_3_inference_latency_estimate,
+)
 
 __all__ = [
     "ALPHA",
@@ -52,4 +58,8 @@ __all__ = [
     "REP_EPSILON",
     "eq_1_repetition_performance_gain",
     "eq_2_optimal_repetition_count",
+    "KV_EPSILON",
+    "eq_1_dualpath_allocation_ratio",
+    "eq_2_cache_hit_objective",
+    "eq_3_inference_latency_estimate",
 ]
