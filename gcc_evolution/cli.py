@@ -7,6 +7,7 @@ Usage:
     gcc-evo init [--project NAME]
     gcc-evo loop TASK_ID [--once] [--provider PROVIDER] [--dry-run]
     gcc-evo commit "MESSAGE" [--task-id GCC-0001] [--step-id S1]
+    gcc-evo ho create [--task-id GCC-0001] [--step-id S1] [--message TEXT]
     gcc-evo pipe task TITLE -k KEY -m MODULE -p PRIORITY
     gcc-evo pipe list
     gcc-evo pipe status TASK_ID
@@ -20,8 +21,18 @@ import json
 import argparse
 import subprocess
 import re
+import shutil
 from pathlib import Path
 from datetime import datetime
+
+
+def _safe_print(text: str) -> None:
+    """Print with a safe fallback for legacy console encodings."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        # Avoid command failure on cp1252/cp936 terminals.
+        print(text.encode("ascii", errors="replace").decode("ascii"))
 
 
 def _print_banner():
@@ -99,7 +110,7 @@ def cmd_setup(args):
 
     if args.show:
         cfg = SessionConfig.load()
-        print(cfg.summary())
+        _safe_print(cfg.summary())
         return
 
     if args.edit:
@@ -500,6 +511,81 @@ def _run_ho_create(task_id: str | None, step_id: str | None, commit_sha: str, me
     return _write_handoff_fallback(task_id=task_id, step_id=step_id, commit_sha=commit_sha, message=message)
 
 
+def cmd_ho_create(args):
+    """Create a handoff note in OSS mode."""
+    task_id = args.task_id
+    step_id = args.step_id
+    message = (args.message or "manual handoff").strip()
+
+    if step_id and not task_id:
+        print("Error: --step-id requires --task-id.")
+        sys.exit(1)
+
+    sha_res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
+    commit_sha = sha_res.stdout.strip() if sha_res.returncode == 0 else "HEAD"
+
+    ok, msg = _write_handoff_fallback(
+        task_id=task_id,
+        step_id=step_id,
+        commit_sha=commit_sha,
+        message=message,
+    )
+    if not ok:
+        print(f"ho create failed: {msg}")
+        sys.exit(1)
+    print(f"ho create success: {msg}")
+
+    sync_ok, sync_msg = _sync_docs_after_ho_create()
+    if sync_ok:
+        print(f"doc sync: {sync_msg}")
+    else:
+        print(f"doc sync warning: {sync_msg}")
+
+
+def _sync_docs_after_ho_create() -> tuple[bool, str]:
+    """
+    Best-effort doc sync hook after `gcc-evo ho create`.
+    Source of truth: .GCC/skill/SKILL.md
+    Mirror target:    AIPro/v5.640/SKILL.md
+    """
+    src = Path(".GCC") / "skill" / "SKILL.md"
+    dst = Path("AIPro") / "v5.640" / "SKILL.md"
+    if not src.exists():
+        return False, f"source not found: {src}"
+
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+    except Exception as exc:
+        return False, f"sync failed ({src} -> {dst}): {exc}"
+
+    checker_candidates = [
+        Path(".GCC") / "improvement" / "key-010" / "03062026" / "doc_consistency_check.py",
+        Path(".GCC") / "scripts" / "doc_consistency_check.py",
+    ]
+    checker = next((p for p in checker_candidates if p.exists()), None)
+    if checker is None:
+        return True, f"synced {src} -> {dst}; checker not found"
+
+    try:
+        res = subprocess.run(
+            [sys.executable, str(checker)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except Exception as exc:
+        return False, f"synced, but checker execution failed: {exc}"
+
+    output = (res.stdout or "").strip()
+    if res.returncode != 0:
+        err = (res.stderr or "").strip()
+        tail = output or err or "unknown checker error"
+        return False, f"synced, checker failed: {tail}"
+    return True, f"synced {src} -> {dst}; checker passed"
+
+
 def cmd_commit(args):
     """Git commit and sync pipeline/dashboard status."""
     message = args.message.strip()
@@ -668,6 +754,17 @@ def main():
     commit_parser.add_argument("--no-verify", action="store_true", default=False,
                                help="Pass --no-verify to git commit")
 
+    # ho
+    ho_parser = subparsers.add_parser("ho", help="Handoff operations")
+    ho_sub = ho_parser.add_subparsers(dest="ho_command")
+    ho_create_parser = ho_sub.add_parser("create", help="Create handoff note")
+    ho_create_parser.add_argument("--task-id", type=str, default=None,
+                                  help="GCC task id, e.g. GCC-0155")
+    ho_create_parser.add_argument("--step-id", type=str, default=None,
+                                  help="Pipeline step id, e.g. S3")
+    ho_create_parser.add_argument("--message", type=str, default="manual handoff",
+                                  help="Optional handoff summary")
+
     # pipe
     pipe_parser = subparsers.add_parser("pipe", help="Pipeline management")
     pipe_sub = pipe_parser.add_subparsers(dest="pipe_command")
@@ -705,6 +802,11 @@ def main():
         cmd_loop(args)
     elif args.command == "commit":
         cmd_commit(args)
+    elif args.command == "ho":
+        if args.ho_command == "create":
+            cmd_ho_create(args)
+        else:
+            ho_parser.print_help()
     elif args.command == "pipe":
         if args.pipe_command == "task":
             cmd_pipe_task(args)
