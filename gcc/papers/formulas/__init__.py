@@ -35,6 +35,14 @@ from .P005_dualpath_kvcache import (
     eq_2_cache_hit_objective,
     eq_3_inference_latency_estimate,
 )
+from .P006_drift_aware import (
+    DRIFT_EPSILON,
+    eq_1_stl_residual,
+    eq_2_psi_score,
+    eq_3_ks_statistic,
+    eq_4_adaptive_window_size,
+    eq_5_drift_detected,
+)
 
 __all__ = [
     "ALPHA",
@@ -62,4 +70,10 @@ __all__ = [
     "eq_1_dualpath_allocation_ratio",
     "eq_2_cache_hit_objective",
     "eq_3_inference_latency_estimate",
+    "DRIFT_EPSILON",
+    "eq_1_stl_residual",
+    "eq_2_psi_score",
+    "eq_3_ks_statistic",
+    "eq_4_adaptive_window_size",
+    "eq_5_drift_detected",
 ]
