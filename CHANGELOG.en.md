@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file. This project fo
 
 ---
 
+## [5.310] — 2026-03-06
+
+### 🔧 Changed
+
+- Release version bumped to **5.310** (`setup.py`, `gcc_evolution/__init__.py`, dashboard label, init template version field).
+- Regenerated source release archive as `gcc_evolution_v5310.zip` to include latest formula updates.
+
+---
+
 ## [5.305] — 2026-03-06
 
 ### 🔧 Changed
