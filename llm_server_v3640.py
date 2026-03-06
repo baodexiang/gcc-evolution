@@ -48,6 +48,7 @@ import sys
 sys.stdout.reconfigure(encoding='utf-8')
 import os
 import math
+import uuid
 import subprocess
 from dataclasses import dataclass  # v3.501: 用于BreakoutState类
 from timeframe_params import get_timeframe_params, read_symbol_timeframe, is_crypto_symbol  # v3.600
@@ -56,6 +57,14 @@ from modules.volume_analyzer import VolumeAnalyzer  # v3.653: OrderFlow量价分
 from czsc_lite import RawBar, Freq, CZSC  # KEY-001: L1分型输出
 from n_structure import Fractal  # KEY-001: N字结构分型数据类
 from modules.correlation_monitor import CorrelationMonitor  # v3.654: 组合相关性监控
+try:
+    from AIPro.signal_direction_filter import SignalDirectionFilter, ValidSignal
+except ImportError:
+    try:
+        from signal_direction_filter import SignalDirectionFilter, ValidSignal
+    except ImportError:
+        SignalDirectionFilter = None
+        ValidSignal = None
 try:
     from modules.behavior_finance import evaluate_behavior_finance  # KEY-005: 行为金融增强层
     _BEHAVIOR_FINANCE_LOADED = True
@@ -9316,6 +9325,9 @@ N_SWING_STRONG_SELL_THRESHOLD = 0.97
 
 # Flask 初始化
 app = Flask(__name__)
+
+# KEY-010: 信号方向过滤器（观察模式）
+signal_filter = SignalDirectionFilter(data_dir=".GCC/signal_filter") if SignalDirectionFilter else None
 
 # v3.003: 请求计时器，用于诊断慢请求
 import time as _time_module
