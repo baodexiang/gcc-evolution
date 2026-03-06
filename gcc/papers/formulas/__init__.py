@@ -18,6 +18,12 @@ from .P002_nowcasting import (
     eq_2_fusion_weights,
     eq_3_confidence_interval,
 )
+from .P003_alphaforgebench import (
+    BENCH_EPSILON,
+    eq_1_offline_pattern_score,
+    eq_2_precision_recall_f1,
+    eq_3_composite_benchmark_score,
+)
 
 __all__ = [
     "ALPHA",
@@ -34,4 +40,8 @@ __all__ = [
     "eq_1_realtime_state_estimate",
     "eq_2_fusion_weights",
     "eq_3_confidence_interval",
+    "BENCH_EPSILON",
+    "eq_1_offline_pattern_score",
+    "eq_2_precision_recall_f1",
+    "eq_3_composite_benchmark_score",
 ]
