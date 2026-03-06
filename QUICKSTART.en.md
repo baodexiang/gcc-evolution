@@ -1,4 +1,4 @@
-﻿# Quick Start â€” gcc-evo v5.320
+﻿# Quick Start â€” gcc-evo v5.305
 
 **Get up and running in 10 minutes**
 
@@ -31,7 +31,7 @@ pip install -e ".[dev]"
 ### Verify Installation
 ```bash
 gcc-evo version
-# Output: gcc-evo v5.320
+# Output: gcc-evo v5.305
 ```
 
 ---
@@ -92,7 +92,7 @@ set -a && source .env && set +a
 
 ## Your First Loop
 
-### Step 0: L0 Setup (Required â€” new in v5.320)
+### Step 0: L0 Setup (Required â€” new in v5.305)
 
 Every loop requires a valid L0 session config. Run the interactive wizard first:
 
@@ -404,7 +404,7 @@ make test
 ### Build Locally
 ```bash
 make build
-pip install dist/gcc_evo-5.320-py3-none-any.whl
+pip install dist/gcc_evo-5.305-py3-none-any.whl
 ```
 
 ### Contribute
@@ -424,5 +424,4 @@ See [CONTRIBUTING.en.md](CONTRIBUTING.en.md)
 **Happy evolving! ðŸš€**
 
 [English](QUICKSTART.en.md) | [ä¸­æ–‡](QUICKSTART.md)
-
 

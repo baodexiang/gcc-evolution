@@ -1,4 +1,4 @@
-﻿# Tutorial â€” Deep Dive into gcc-evo v5.320
+﻿# Tutorial â€” Deep Dive into gcc-evo v5.305
 
 **Comprehensive learning guide for building self-evolving LLM agents**
 
@@ -29,7 +29,7 @@ pip install gcc-evo
 
 # Verify
 gcc-evo version
-# Output: gcc-evo v5.320
+# Output: gcc-evo v5.305
 
 # Check environment
 gcc-evo health
@@ -787,5 +787,4 @@ gcc-evo memory export --output backup.json
 **Happy learning! ðŸš€**
 
 [English](TUTORIAL.en.md) | [ä¸­æ–‡](TUTORIAL.md)
-
 

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -81,7 +81,7 @@ header h1{font-size:1rem;color:#58a6ff;font-weight:600}
 
 <header>
   <h1>GCC-EVO L6 Real-time Dashboard</h1>
-  <span class="badge live" id="live-badge">â— LIVE</span>
+  <span class="badge live" id="live-badge">● LIVE</span>
   <span class="badge" id="loop-badge">loop: --</span>
   <span class="badge" id="key-badge">KEY: --</span>
   <span style="flex:1"></span>
@@ -138,14 +138,14 @@ header h1{font-size:1rem;color:#58a6ff;font-weight:600}
 </div>
 
 <div class="footer">
-  <span>GCC-EVO v5.320</span>
+  <span>GCC-EVO v5.305</span>
   <span id="footer-ts">--</span>
   <span>SSE port 7842</span>
   <span id="sse-clients">clients: 0</span>
 </div>
 
 <script>
-// â”€â”€ Layer definitions â”€â”€
+// ── Layer definitions ──
 const LAYERS = [
   {id:'L0', name:'Setup'},
   {id:'L1', name:'Memory'},
@@ -161,7 +161,7 @@ LAYERS.forEach(l => {
   layerState[l.id] = {status:'pending', message:'waiting...', ts:'', dur:null};
 });
 
-// â”€â”€ Build layer DOM â”€â”€
+// ── Build layer DOM ──
 const list = document.getElementById('layer-list');
 LAYERS.forEach(l => {
   const row = document.createElement('div');
@@ -178,10 +178,10 @@ LAYERS.forEach(l => {
   list.appendChild(row);
 });
 
-// â”€â”€ Event counter â”€â”€
+// ── Event counter ──
 let evCount = 0;
 
-// â”€â”€ Update layer â”€â”€
+// ── Update layer ──
 function updateLayer(layer, status, message, ts, dur) {
   const dot = document.getElementById('dot-' + layer);
   const msg = document.getElementById('msg-' + layer);
@@ -196,7 +196,7 @@ function updateLayer(layer, status, message, ts, dur) {
   row.className = 'layer-row ' + (status || 'pending');
 }
 
-// â”€â”€ Add log entry â”€â”€
+// ── Add log entry ──
 function addLog(e) {
   const box = document.getElementById('log-box');
   const div = document.createElement('div');
@@ -211,7 +211,7 @@ function addLog(e) {
   document.getElementById('ev-count').textContent = evCount + ' events';
 }
 
-// â”€â”€ Process event â”€â”€
+// ── Process event ──
 function processEvent(e) {
   const layer = e.layer;
   const data = e.data || {};
@@ -234,7 +234,7 @@ function processEvent(e) {
   document.getElementById('footer-ts').textContent = (e.ts || '').substr(0, 19);
 }
 
-// â”€â”€ Load status snapshot â”€â”€
+// ── Load status snapshot ──
 function loadStatus() {
   fetch('/status').then(r => r.json()).then(status => {
     Object.entries(status).forEach(([layer, info]) => {
@@ -246,7 +246,7 @@ function loadStatus() {
   }).catch(() => {});
 }
 
-// â”€â”€ Load run history â”€â”€
+// ── Load run history ──
 function loadRuns() {
   fetch('/runs').then(r => r.json()).then(runs => {
     const container = document.getElementById('run-list');
@@ -272,7 +272,7 @@ function loadRuns() {
   }).catch(() => {});
 }
 
-// â”€â”€ SSE connection â”€â”€
+// ── SSE connection ──
 let es = null;
 let reconnectTimer = null;
 
@@ -305,9 +305,8 @@ function connect() {
 
 connect();
 
-// â”€â”€ Periodic refresh of run history â”€â”€
+// ── Periodic refresh of run history ──
 setInterval(loadRuns, 10000);
 </script>
 </body>
 </html>
-

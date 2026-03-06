@@ -35,6 +35,19 @@ def _safe_print(text: str) -> None:
         print(text.encode("ascii", errors="replace").decode("ascii"))
 
 
+def _configure_console_output() -> None:
+    """Best-effort stdout/stderr Unicode compatibility on Windows."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None:
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            # Older environments may not support reconfigure().
+            pass
+
+
 def _print_banner():
     from . import __version__
     print(f"gcc-evo v{__version__} â€” AI Self-Evolution Engine")
@@ -714,6 +727,7 @@ def cmd_health(args):
 
 
 def main():
+    _configure_console_output()
     parser = argparse.ArgumentParser(
         prog="gcc-evo",
         description="gcc-evo â€” AI Self-Evolution Engine",
@@ -733,6 +747,11 @@ def main():
     # init
     init_parser = subparsers.add_parser("init", help="Initialize project")
     init_parser.add_argument("--project", type=str, default=None)
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Backward-compatible no-op flag (legacy scripts).",
+    )
 
     # loop
     loop_parser = subparsers.add_parser("loop", help="Run improvement loop")
