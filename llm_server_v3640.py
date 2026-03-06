@@ -3387,14 +3387,18 @@ def _run_cycle_switch_analysis(symbol: str, timeframe: int):
         print(f"  DeepSeek: {deepseek_reason[:80] if deepseek_reason else 'N/A'}")
         print(f"{'='*70}\n")
 
-        # 8. 执行交易 (正常流程)
+        # 8. 执行交易 (可开关)
         executed = False
         trade_reason = ""
+        CYCLE_SWITCH_ORDER_ENABLED = False  # 用户要求：关闭 _run_cycle_switch_analysis 下单功能
 
         is_crypto = is_crypto_symbol(symbol)
 
         # GCC-0194: N-Gate/HOLD_BAND已移除，外挂只被Vision过滤(扫描引擎FilterChain)
-        if action == "BUY":
+        if not CYCLE_SWITCH_ORDER_ENABLED:
+            trade_reason = "P0-CycleSwitch下单已禁用"
+            print(f"[P0-CycleSwitch] {symbol}: {trade_reason}")
+        elif action == "BUY":
             if position_units >= max_units:
                 trade_reason = f"满仓({position_units}/{max_units})，跳过买入"
                 print(f"[P0-CycleSwitch] {symbol}: {trade_reason}")
