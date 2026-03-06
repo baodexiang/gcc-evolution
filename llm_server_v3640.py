@@ -50018,6 +50018,27 @@ def handle_p0_signal():
                     pass
 
                 if not reason:
+                    # KEY-010 S9: SELL方向卡门（观察模式：仅记录，不真实拦截）
+                    if signal_filter and ValidSignal and direction_result:
+                        try:
+                            _sell_allowed = signal_filter.filter_signal(
+                                ValidSignal(
+                                    signal_id=str(uuid.uuid4())[:8],
+                                    timestamp=datetime.now().isoformat(),
+                                    direction="sell",
+                                    source=signal_type,
+                                ),
+                                direction_result
+                            )
+                            if not _sell_allowed:
+                                log_to_server(
+                                    f"[方向过滤][观察] SELL本应拦截 | 原因:{direction_result.direction} "
+                                    f"| 4h Sell {direction_result.sell_ratio_4h:.1%} "
+                                    f"Week Sell {direction_result.sell_ratio_week:.1%}"
+                                )
+                        except Exception as _sf_sell_e:
+                            log_to_server(f"[SignalFilter] SELL过滤调用失败: {_sf_sell_e}")
+
                     log_to_server(f"[P0] 执行卖出: {symbol} pos={position_units}")
                     try:
                         if is_crypto:
