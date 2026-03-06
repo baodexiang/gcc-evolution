@@ -1,12 +1,21 @@
----
+﻿---
 name: Aipro
 use_deepseek_api: true
 deepseek_model: deepseek-chat
-description: AI PRO Trading System v5.640 - **核心职责**：更新主程序(.GCC/skill/SKILL.md)和云端程序(AI Pro/v5.640/SKILL.md)的md文件。**v5.640新功能**(缠论K线合并+三段判定早期趋势变化检测)。**7个外挂架构**(扫描引擎:P0-Tracking+剥头皮+SuperTrend；L1层:RobHoffman+双底双顶+飞云；L2层:MACD背离)。**L2评分体系**(5大类±22:形态±6+唐纳奇综合±8+量能±2+Wyckoff±2+每日偏向±2+Vegas隧道±2)。**信号来源分布**(外挂激活60%买卖+主程序协商40%买卖)。
+description: AI PRO Trading System v5.640 - **核心职责**：更新主程序(.GCC/skill/SKILL.md)和云端程序(AI Pro/v5.640/SKILL.md)的md文件。**v5.640新功能**(缠论K线合并+三段判定早期趋势变化检测)。**当前实况**(扫描引擎以移动止盈/止损与统一门禁链路为主；`P0_TRACKING_ENABLED=False`；部分外挂入口保留但主循环按配置启停)。**L2评分体系**(5大类±22:形态±6+唐纳奇综合±8+量能±2+Wyckoff±2+每日偏向±2+Vegas隧道±2)。**信号来源分布**(外挂激活60%买卖+主程序协商40%买卖)。
 version: 5.640
 ---
 
-# AI PRO Trading System v5.640
+
+## 当前运行实况 (2026-03-05)
+
+- 主程序版本: llm_server_v3640.py -> VERSION = "3.677"
+- 扫描引擎版本: price_scan_engine_v21.py -> 21.27
+- P0-Tracking: P0_TRACKING_ENABLED = False（默认关闭）
+- 移动止损/止盈: 保持运行，并进入 Signal Gate / FilterChain 审核
+- FilterChain豁免: 当前为 BrooksVision / VisionPattern / 双底双顶，移动止损/止盈不豁免
+- P0-CycleSwitch: 触发入口仍在，但 _run_cycle_switch_analysis() 内下单开关已关闭
+- 说明: 下方历史章节用于回溯，不代表全部“当前运行态”
 
 ## DeepSeek API处理
 
@@ -33,7 +42,7 @@ version: 5.640
 | 层级 | 外挂 | 状态 | 数据周期 | 触发条件 | 冻结 |
 |------|------|------|----------|----------|------|
 | **P0** | P0-Open | ⏸️ 暂停 | 1h | UP→BUY, DOWN→SELL, SIDE→跳过 | 1-4h |
-| **P0** | P0-Tracking | ✅ 运行 | 1h | 任何趋势下触发(v11.6) + 每日偏向 | 2-8h |
+| **P0** | P0-Tracking | ❌ 默认停用 | 1h | 当前代码 `P0_TRACKING_ENABLED=False`，仅保留移动止盈/止损路径 | - |
 | **P0** | Chandelier+ZLSMA | ✅ 运行 | 5m | UP只买, DOWN只卖, SIDE依赖信号 + 每日偏向 | 2-8h |
 | **L1** | SuperTrend v0.8.5 | ✅ 运行 | 1h | 方向+位置过滤(趋势解耦) | 门卫冻结 |
 | **L1** | 飞云双突破 | ✅ 运行 | 1h | 趋势线+形态+放量(趋势解耦) | 门卫冻结 |
@@ -1560,7 +1569,7 @@ grep "规则E激活" logs/server.log | wc -l
 | **v3.465** | 2026-01-17 | P1改善项(云端增强): 20 EMA趋势过滤器(回调信号检测)+Power Candle力量K线检测(强度1-3级)+量堆式拉升检测(脉冲量警告)+监控告警面板P1显示 |
 | **v3.460** | 2026-01-17 | L2大小周期门卫机制: 大周期STRONG→小周期交易一次→冻结→等待下一大周期信号 |
 | **v3.455** | 2026-01-16 | L2评分重构: 解决分数膨胀问题(原27%→新50%触发STRONG)，新增K线形态分(大阳/锤子/十字/阴线)，权重压缩(-12~+12) |
-| **v3.450** | 2026-01-16 | P0-CycleSwitch: 周期切换立即完整分析(Tech+Human+DeepSeek)，正常交易+邮件通知，不等待下次TradingView推送 |
+| **v3.450** | 2026-01-16 | P0-CycleSwitch: 历史设计为周期切换后立即完整分析并可下单+邮件通知（当前 `v3.677` 已关闭该函数下单） |
 | **v3.446** | 2026-01-16 | 直接使用TradingView完整OHLCV: 解析highs/lows/opens/volumes数组，构建120根真实K线，解决O=H=L=C假数据问题，道氏理论/ATR/形态识别更准确 |
 | **v3.445** | 2026-01-16 | 品种独立周期配置: SYMBOL_TIMEFRAMES字典定义每个品种交易周期(ZEC=1h,BTC/ETH/SOL=2h,美股=4h)，OHLCV缓存按symbol+timeframe分离 |
 | v3.442 | 2026-01-16 | 加密货币专用ADX阈值(20 vs 美股25) + SuperTrend v0.8.4移除趋势限制 |
@@ -1665,3 +1674,4 @@ Trend judgment too conservative - actual 3-5% decline judged as SIDE.
 - [training.md](training.md) - Model training guide
 - [troubleshooting.md](troubleshooting.md) - Common issues
 - [deepseek.md](deepseek.md) - DeepSeek integration guide
+
