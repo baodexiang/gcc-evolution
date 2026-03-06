@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file. This project fo
 
 ---
 
+## [5.305] — 2026-03-06
+
+### 🔧 Changed
+
+- Release version bumped to **5.305** (`setup.py`, `gcc_evolution/__init__.py`, init template version field).
+- Updated open-source module header version tags from `v5.300`/`v5.301` to `v5.305` for consistency.
+- Updated user manual deliverables to `v5_305`:
+  - `GCC_Beginners_Guide_v5_305.docx`
+  - `GCC_新手完全手册_v5_305.docx`
+- Regenerated source release archive as `gcc_evolution_v5305.zip`.
+
+---
+
 ## [5.301] — 2026-03-06
 
 ### 🔧 Fixed

@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """
-gcc-evo — AI Self-Evolution Engine
+gcc-evo â€” AI Self-Evolution Engine
 
 Setup configuration for PyPI distribution.
 """
@@ -10,7 +10,7 @@ from pathlib import Path
 
 # Pin release version for this source package.
 # Do not infer from external files to avoid accidental parse errors.
-version = "5.301"
+version = "5.305"
 
 # Read long description from README
 readme_file = Path(__file__).parent / "README.md"
@@ -32,7 +32,7 @@ setup(
         "Changelog": "https://github.com/baodexiang/gcc-evo/blob/main/opensource/CHANGELOG.md",
     },
 
-    description="AI Self-Evolution Engine — Persistent memory + continuous learning for LLM",
+    description="AI Self-Evolution Engine â€” Persistent memory + continuous learning for LLM",
     long_description=long_description,
     long_description_content_type="text/markdown",
 
@@ -111,3 +111,5 @@ setup(
 
     zip_safe=False,
 )
+
+

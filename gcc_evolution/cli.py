@@ -1,5 +1,5 @@
-"""
-gcc-evo CLI — Command-line interface for the self-evolution engine.
+﻿"""
+gcc-evo CLI â€” Command-line interface for the self-evolution engine.
 
 Usage:
     gcc-evo version
@@ -26,7 +26,7 @@ from datetime import datetime
 
 def _print_banner():
     from . import __version__
-    print(f"gcc-evo v{__version__} — AI Self-Evolution Engine")
+    print(f"gcc-evo v{__version__} â€” AI Self-Evolution Engine")
 
 
 def cmd_version(args):
@@ -135,7 +135,7 @@ def cmd_init(args):
     if not config_path.exists():
         config_path.write_text(
             "# gcc-evo configuration\n"
-            "version: '5.301'\n"
+            "version: '5.305'\n"
             "project: '{}'\n"
             "loop_interval: 300  # seconds\n"
             "skeptic_threshold: 0.75\n"
@@ -161,10 +161,10 @@ def cmd_init(args):
         print(f"Initialized project: {project_name}/")
     else:
         print("Initialized gcc-evo in current directory")
-    print(f"  .GCC/evolution.yaml  — configuration")
-    print(f"  .GCC/pipeline/       — task management")
-    print(f"  state/               — runtime state")
-    print(f"  logs/                — execution logs")
+    print(f"  .GCC/evolution.yaml  â€” configuration")
+    print(f"  .GCC/pipeline/       â€” task management")
+    print(f"  state/               â€” runtime state")
+    print(f"  logs/                â€” execution logs")
     print()
     print("Next steps:")
     print("  1. gcc-evo setup KEY-001       # L0 session config (required before loop)")
@@ -178,7 +178,7 @@ def cmd_loop(args):
     provider = args.provider
     dry_run = getattr(args, "dry_run", False)
 
-    # ── L0 Gate ──────────────────────────────────────────
+    # â”€â”€ L0 Gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if not dry_run:
         from .session_config import SessionConfig
         cfg = SessionConfig.load()
@@ -216,7 +216,7 @@ def cmd_loop(args):
         iteration += 1
         ts = datetime.utcnow().strftime("%H:%M:%S")
         print(f"\n{'='*50}")
-        print(f"[{ts}] Iteration {iteration} — {task_id}")
+        print(f"[{ts}] Iteration {iteration} â€” {task_id}")
         print(f"{'='*50}")
 
         # Step 1: Observe
@@ -324,7 +324,7 @@ def cmd_pipe_task(args):
     data["counter"] = counter
     data["tasks"].append(task)
     tasks_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"Created: {task_id} — {args.title}")
+    print(f"Created: {task_id} â€” {args.title}")
     print(f"  Key: {args.key} | Module: {args.module} | Priority: {args.priority}")
 
 
@@ -630,7 +630,7 @@ def cmd_health(args):
 def main():
     parser = argparse.ArgumentParser(
         prog="gcc-evo",
-        description="gcc-evo — AI Self-Evolution Engine",
+        description="gcc-evo â€” AI Self-Evolution Engine",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -730,3 +730,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
