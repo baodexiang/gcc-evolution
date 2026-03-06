@@ -1,5 +1,5 @@
 """
-GCC v5.295 — L6 Run Tracer
+GCC v5.300 — L6 Run Tracer
 
 按 loop_id 追踪每次 loop 运行的全流程快照。
 

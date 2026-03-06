@@ -1,5 +1,5 @@
 """
-GCC v5.295 — L6 Layer Emitter
+GCC v5.300 — L6 Layer Emitter
 
 为每一层提供语义化的 emit 接口，自动附加 layer 标签和 loop_id。
 

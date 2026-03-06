@@ -1,5 +1,5 @@
 """
-GCC v5.295 — L6 Event Bus
+GCC v5.300 — L6 Event Bus
 
 线程安全的事件总线，<5ms emit，持久化到 .GCC/logs/events.jsonl。
 

@@ -1,5 +1,5 @@
 """
-GCC v5.295 — L0 预先设置层: SessionConfig
+GCC v5.300 — L0 预先设置层: SessionConfig
 
 每次 gcc-evo loop 前必须通过 L0 gate 校验。
 存储路径: .GCC/state/session_config.json

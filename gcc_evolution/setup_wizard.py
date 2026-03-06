@@ -1,5 +1,5 @@
 """
-GCC v5.295 — L0 Setup Wizard
+GCC v5.300 — L0 Setup Wizard
 
 交互式向导，引导用户完成 SessionConfig 的3个必填 + 3个选填字段。
 

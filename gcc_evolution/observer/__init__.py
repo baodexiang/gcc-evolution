@@ -1,5 +1,5 @@
 """
-GCC v5.295 — L6 Observer Package
+GCC v5.300 — L6 Observer Package
 
 事件总线 + 层级发射器 + 运行追踪器。
 

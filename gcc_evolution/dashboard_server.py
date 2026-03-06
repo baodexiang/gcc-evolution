@@ -1,5 +1,5 @@
 """
-GCC v5.295 — L6 实时 Dashboard 服务器
+GCC v5.300 — L6 实时 Dashboard 服务器
 
 本地 HTTP 服务，端口 7842。
 提供:
