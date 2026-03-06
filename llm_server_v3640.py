@@ -49794,6 +49794,14 @@ def handle_p0_signal():
         # 记录本次信号到缓存
         _p0_signal_cache[cache_key] = current_time
 
+        # KEY-010 S7: 方向评估（观察模式，不直接拦截）
+        direction_result = None
+        if signal_filter:
+            try:
+                direction_result = signal_filter.evaluate_direction()
+            except Exception as _sf_eval_e:
+                log_to_server(f"[SignalFilter] evaluate_direction失败: {_sf_eval_e}")
+
         # 获取symbol_state (v2.980: 修复变量名)
         global symbol_state
         sym_state = symbol_state.get(symbol, {})
