@@ -1,0 +1,212 @@
+﻿from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, List
+
+THRESHOLD = 0.50
+MIN_SAMPLE = 1
+WARNING_THRESHOLD = 0.50
+RETENTION_DAYS = 7
+WINDOW_4H = 4
+WINDOW_WEEK = 24 * 7
+OBSERVE_ONLY = True
+
+
+@dataclass
+class ValidSignal:
+    signal_id: str
+    timestamp: str
+    direction: str
+    source: str
+
+
+@dataclass
+class DirectionResult:
+    direction: str
+    reason: str
+    buy_ratio_4h: float
+    sell_ratio_4h: float
+    buy_ratio_week: float
+    sell_ratio_week: float
+    sample_4h: int
+    sample_week: int
+
+
+class SignalDirectionFilter:
+    def __init__(self, data_dir: str = ".GCC/signal_filter") -> None:
+        self.data_dir = Path(data_dir)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.valid_path = self.data_dir / "valid_signals.jsonl"
+        self.filtered_path = self.data_dir / "filtered_signals.jsonl"
+        self.direction_log_path = self.data_dir / "direction_log.jsonl"
+
+    def _parse_ts(self, ts: str) -> datetime:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    def _append_jsonl(self, path: Path, obj: Dict[str, Any]) -> None:
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    def _read_jsonl(self, path: Path) -> List[Dict[str, Any]]:
+        if not path.exists():
+            return []
+        rows: List[Dict[str, Any]] = []
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return rows
+
+    def _rewrite_jsonl(self, path: Path, rows: List[Dict[str, Any]]) -> None:
+        with path.open("w", encoding="utf-8") as f:
+            for row in rows:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def _cleanup_old_signals(self) -> None:
+        signals = self._read_jsonl(self.valid_path)
+        if not signals:
+            return
+        cutoff = datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)
+        kept = [s for s in signals if self._parse_ts(s.get("timestamp", "1970-01-01T00:00:00+00:00")) >= cutoff]
+        if len(kept) != len(signals):
+            self._rewrite_jsonl(self.valid_path, kept)
+
+    def record_signal(self, signal: ValidSignal) -> None:
+        self._cleanup_old_signals()
+        obj = asdict(signal)
+        obj["direction"] = obj.get("direction", "").lower()
+        self._append_jsonl(self.valid_path, obj)
+
+    def _make_result(
+        self,
+        direction: str,
+        reason: str,
+        buy_ratio_4h: float,
+        sell_ratio_4h: float,
+        buy_ratio_week: float,
+        sell_ratio_week: float,
+        sample_4h: int,
+        sample_week: int,
+    ) -> DirectionResult:
+        result = DirectionResult(
+            direction=direction,
+            reason=reason,
+            buy_ratio_4h=buy_ratio_4h,
+            sell_ratio_4h=sell_ratio_4h,
+            buy_ratio_week=buy_ratio_week,
+            sell_ratio_week=sell_ratio_week,
+            sample_4h=sample_4h,
+            sample_week=sample_week,
+        )
+        self._append_jsonl(
+            self.direction_log_path,
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "direction": result.direction,
+                "reason": result.reason,
+                "buy_ratio_4h": result.buy_ratio_4h,
+                "sell_ratio_4h": result.sell_ratio_4h,
+                "buy_ratio_week": result.buy_ratio_week,
+                "sell_ratio_week": result.sell_ratio_week,
+                "sample_4h": result.sample_4h,
+                "sample_week": result.sample_week,
+            },
+        )
+        return result
+
+    def evaluate_direction(self) -> DirectionResult:
+        self._cleanup_old_signals()
+        signals = self._read_jsonl(self.valid_path)
+        now = datetime.now(timezone.utc)
+        cutoff_4h = now - timedelta(hours=WINDOW_4H)
+        cutoff_week = now - timedelta(hours=WINDOW_WEEK)
+
+        signals_4h = [s for s in signals if self._parse_ts(s.get("timestamp", "1970-01-01T00:00:00+00:00")) >= cutoff_4h]
+        signals_week = [s for s in signals if self._parse_ts(s.get("timestamp", "1970-01-01T00:00:00+00:00")) >= cutoff_week]
+
+        count_4h = len(signals_4h)
+        count_week = len(signals_week)
+
+        if count_4h < MIN_SAMPLE or count_week < MIN_SAMPLE:
+            return self._make_result(
+                direction="NO_ANSWER",
+                reason=f"样本不足（4h={count_4h}, week={count_week}, min={MIN_SAMPLE}）",
+                buy_ratio_4h=0.0,
+                sell_ratio_4h=0.0,
+                buy_ratio_week=0.0,
+                sell_ratio_week=0.0,
+                sample_4h=count_4h,
+                sample_week=count_week,
+            )
+
+        buy_4h = sum(1 for s in signals_4h if s.get("direction") == "buy")
+        buy_week = sum(1 for s in signals_week if s.get("direction") == "buy")
+        sell_4h = count_4h - buy_4h
+        sell_week = count_week - buy_week
+
+        buy_ratio_4h = buy_4h / count_4h if count_4h else 0.0
+        sell_ratio_4h = sell_4h / count_4h if count_4h else 0.0
+        buy_ratio_week = buy_week / count_week if count_week else 0.0
+        sell_ratio_week = sell_week / count_week if count_week else 0.0
+
+        if buy_ratio_4h >= THRESHOLD and buy_ratio_week >= THRESHOLD:
+            direction = "BUY_DOMINANT"
+            reason = f"BUY占优（4h={buy_ratio_4h:.1%}, week={buy_ratio_week:.1%}）"
+        elif sell_ratio_4h >= THRESHOLD and sell_ratio_week >= THRESHOLD:
+            direction = "SELL_DOMINANT"
+            reason = f"SELL占优（4h={sell_ratio_4h:.1%}, week={sell_ratio_week:.1%}）"
+        else:
+            direction = "NEUTRAL"
+            reason = "方向不一致，维持中性"
+
+        return self._make_result(
+            direction=direction,
+            reason=reason,
+            buy_ratio_4h=buy_ratio_4h,
+            sell_ratio_4h=sell_ratio_4h,
+            buy_ratio_week=buy_ratio_week,
+            sell_ratio_week=sell_ratio_week,
+            sample_4h=count_4h,
+            sample_week=count_week,
+        )
+
+    def filter_signal(self, signal: ValidSignal, direction_result: DirectionResult) -> bool:
+        signal_dir = signal.direction.lower()
+        would_block = (
+            (direction_result.direction == "BUY_DOMINANT" and signal_dir == "sell")
+            or (direction_result.direction == "SELL_DOMINANT" and signal_dir == "buy")
+        )
+
+        if would_block:
+            self._append_jsonl(
+                self.filtered_path,
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "signal_id": signal.signal_id,
+                    "source": signal.source,
+                    "direction": signal_dir,
+                    "result": direction_result.direction,
+                    "reason": direction_result.reason,
+                    "observe_only": OBSERVE_ONLY,
+                    "would_block": True,
+                    "blocked": False,
+                    "buy_ratio_4h": direction_result.buy_ratio_4h,
+                    "buy_ratio_week": direction_result.buy_ratio_week,
+                    "sell_ratio_4h": direction_result.sell_ratio_4h,
+                    "sell_ratio_week": direction_result.sell_ratio_week,
+                },
+            )
+
+        # 观察模式：不做真实拦截，只记录would_block事件
+        return True
