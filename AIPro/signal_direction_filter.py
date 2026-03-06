@@ -49,6 +49,19 @@ class SignalDirectionFilter:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
 
+    def _get_week_start(self) -> datetime:
+        """
+        计算本周周一 08:00（本地时间）并转换为 UTC。
+        若当前时间早于本周一 08:00，则返回当前时间（等价于本周窗口为空）。
+        """
+        now_local = datetime.now().astimezone()
+        days_since_monday = now_local.weekday()  # 0=Monday
+        monday = now_local - timedelta(days=days_since_monday)
+        week_start_local = monday.replace(hour=8, minute=0, second=0, microsecond=0)
+        if now_local < week_start_local:
+            return now_local.astimezone(timezone.utc)
+        return week_start_local.astimezone(timezone.utc)
+
     def _append_jsonl(self, path: Path, obj: Dict[str, Any]) -> None:
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
@@ -130,7 +143,7 @@ class SignalDirectionFilter:
         signals = self._read_jsonl(self.valid_path)
         now = datetime.now(timezone.utc)
         cutoff_4h = now - timedelta(hours=WINDOW_4H)
-        cutoff_week = now - timedelta(hours=WINDOW_WEEK)
+        cutoff_week = self._get_week_start()
 
         signals_4h = [s for s in signals if self._parse_ts(s.get("timestamp", "1970-01-01T00:00:00+00:00")) >= cutoff_4h]
         signals_week = [s for s in signals if self._parse_ts(s.get("timestamp", "1970-01-01T00:00:00+00:00")) >= cutoff_week]
