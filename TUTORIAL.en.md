@@ -1,4 +1,4 @@
-# Tutorial — Deep Dive into gcc-evo v5.300
+﻿# Tutorial â€” Deep Dive into gcc-evo v5.305
 
 **Comprehensive learning guide for building self-evolving LLM agents**
 
@@ -29,7 +29,7 @@ pip install gcc-evo
 
 # Verify
 gcc-evo version
-# Output: gcc-evo v5.300
+# Output: gcc-evo v5.305
 
 # Check environment
 gcc-evo health
@@ -71,21 +71,21 @@ gcc-evo setup --show
 
 **Sensory Layer** (24-hour window)
 ```
-Raw observations → Unprocessed conversations → Auto-discarded
+Raw observations â†’ Unprocessed conversations â†’ Auto-discarded
 Purpose: Immediate context, ephemeral data
 Access: Always available, not stored
 ```
 
 **Short-term Layer** (7-day window)
 ```
-Recent decisions → Contextual details → Automatic compression
+Recent decisions â†’ Contextual details â†’ Automatic compression
 Purpose: Discussion history, recent patterns
 Access: Semantic search + recency weighting
 ```
 
 **Long-term Layer** (Persistent)
 ```
-Verified rules → Experience cards → Immutable archive
+Verified rules â†’ Experience cards â†’ Immutable archive
 Purpose: Permanent knowledge base
 Access: Distilled patterns, reusable skills
 ```
@@ -93,18 +93,18 @@ Access: Distilled patterns, reusable skills
 ### 2.2 Loop Cycle (6 Steps)
 
 ```
-① OBSERVE        → Collect logs/observations
-   ↓
-② AUDIT          → Analyze patterns/failures
-   ↓
-③ EXTRACT        → Identify reusable rules
-   ↓
-④ VERIFY         → Skeptic gate validation
-   ↓
-⑤ DISTILL        → Compress into skills
-   ↓
-⑥ REPORT         → Generate summary & next actions
-   ↓
+â‘  OBSERVE        â†’ Collect logs/observations
+   â†“
+â‘¡ AUDIT          â†’ Analyze patterns/failures
+   â†“
+â‘¢ EXTRACT        â†’ Identify reusable rules
+   â†“
+â‘£ VERIFY         â†’ Skeptic gate validation
+   â†“
+â‘¤ DISTILL        â†’ Compress into skills
+   â†“
+â‘¥ REPORT         â†’ Generate summary & next actions
+   â†“
 (Repeat...)
 ```
 
@@ -118,8 +118,8 @@ confidence = (
 )
 
 # Decision gate:
-# confidence >= 0.75 → Accept
-# confidence < 0.75  → Reject (skeptic block)
+# confidence >= 0.75 â†’ Accept
+# confidence < 0.75  â†’ Reject (skeptic block)
 ```
 
 ---
@@ -161,15 +161,15 @@ gcc-evo loop GCC-0001 --provider gemini --once
 **Single Iteration Process:**
 ```
 Start Loop
-├─ Read config (params.yaml)
-├─ Load current state (improvements.json)
-├─ Load memories (short/long term)
-├─ Run audit analysis
-├─ LLM decision (extract patterns)
-├─ Skeptic verification
-├─ Update memories
-├─ Save state
-└─ Generate report
+â”œâ”€ Read config (params.yaml)
+â”œâ”€ Load current state (improvements.json)
+â”œâ”€ Load memories (short/long term)
+â”œâ”€ Run audit analysis
+â”œâ”€ LLM decision (extract patterns)
+â”œâ”€ Skeptic verification
+â”œâ”€ Update memories
+â”œâ”€ Save state
+â””â”€ Generate report
 ```
 
 ---
@@ -446,7 +446,7 @@ low_confidence = {
 }
 
 approved = skeptic.verify(low_confidence)
-# False → Decision blocked
+# False â†’ Decision blocked
 ```
 
 ### 7.2 Human-in-the-Loop Validation
@@ -586,7 +586,7 @@ gcc-evo loop GCC-0001 --once
 gcc-evo loop GCC-0001 --once
 
 # Output:
-# - Accuracy improved: 60% → 85%
+# - Accuracy improved: 60% â†’ 85%
 # - Skill saved: SK-001 "MACD_Range_Adaptation"
 # - Next action: Test on other timeframes
 ```
@@ -620,8 +620,8 @@ gcc-evo loop GCC-0002 --once
 gcc-evo loop GCC-0002 --once
 
 # Results:
-# - 95th percentile latency: 2.1s → 0.8s
-# - Timeout rate: 3.2% → 0.1%
+# - 95th percentile latency: 2.1s â†’ 0.8s
+# - Timeout rate: 3.2% â†’ 0.1%
 # - Cost: unchanged (better efficiency)
 ```
 
@@ -752,7 +752,7 @@ gcc-evo memory export --output backup.json
 
 ## Best Practices
 
-### ✅ DO
+### âœ… DO
 
 - Test changes in single-iteration mode before continuous loops
 - Monitor confidence scores for all decisions
@@ -762,7 +762,7 @@ gcc-evo memory export --output backup.json
 - Start with high skeptic thresholds, lower gradually
 - Backup state regularly
 
-### ❌ DON'T
+### âŒ DON'T
 
 - Run multiple loops on same task simultaneously
 - Lower skeptic threshold below 0.6 without testing
@@ -776,14 +776,15 @@ gcc-evo memory export --output backup.json
 
 ## Next Steps
 
-1. **Run Quick Start** — [QUICKSTART.en.md](QUICKSTART.en.md)
-2. **Read Full Docs** — [README.en.md](README.en.md)
-3. **Explore Examples** — GitHub repository
-4. **Join Community** — GitHub Discussions
-5. **Contribute** — [CONTRIBUTING.en.md](CONTRIBUTING.en.md)
+1. **Run Quick Start** â€” [QUICKSTART.en.md](QUICKSTART.en.md)
+2. **Read Full Docs** â€” [README.en.md](README.en.md)
+3. **Explore Examples** â€” GitHub repository
+4. **Join Community** â€” GitHub Discussions
+5. **Contribute** â€” [CONTRIBUTING.en.md](CONTRIBUTING.en.md)
 
 ---
 
-**Happy learning! 🚀**
+**Happy learning! ðŸš€**
 
-[English](TUTORIAL.en.md) | [中文](TUTORIAL.md)
+[English](TUTORIAL.en.md) | [ä¸­æ–‡](TUTORIAL.md)
+

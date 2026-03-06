@@ -1,4 +1,4 @@
-# Quick Start — gcc-evo v5.300
+﻿# Quick Start â€” gcc-evo v5.305
 
 **Get up and running in 10 minutes**
 
@@ -31,7 +31,7 @@ pip install -e ".[dev]"
 ### Verify Installation
 ```bash
 gcc-evo version
-# Output: gcc-evo v5.300
+# Output: gcc-evo v5.305
 ```
 
 ---
@@ -47,17 +47,17 @@ cd my-trading-bot
 ### Directory Structure
 ```
 my-trading-bot/
-├── .env                    # Environment variables
-├── .GCC/
-│   ├── gcc_evo.py         # Core engine
-│   ├── dashboard.html     # Visual dashboard
-│   └── ...
-├── state/
-│   ├── improvements.json  # Task definitions
-│   ├── skillbank.jsonl    # Learned skills
-│   └── ...
-└── config/
-    └── params.yaml        # Configuration
+â”œâ”€â”€ .env                    # Environment variables
+â”œâ”€â”€ .GCC/
+â”‚   â”œâ”€â”€ gcc_evo.py         # Core engine
+â”‚   â”œâ”€â”€ dashboard.html     # Visual dashboard
+â”‚   â””â”€â”€ ...
+â”œâ”€â”€ state/
+â”‚   â”œâ”€â”€ improvements.json  # Task definitions
+â”‚   â”œâ”€â”€ skillbank.jsonl    # Learned skills
+â”‚   â””â”€â”€ ...
+â””â”€â”€ config/
+    â””â”€â”€ params.yaml        # Configuration
 ```
 
 ---
@@ -92,7 +92,7 @@ set -a && source .env && set +a
 
 ## Your First Loop
 
-### Step 0: L0 Setup (Required — new in v5.300)
+### Step 0: L0 Setup (Required â€” new in v5.305)
 
 Every loop requires a valid L0 session config. Run the interactive wizard first:
 
@@ -129,13 +129,13 @@ gcc-evo loop GCC-0001 --once
 ```
 
 **What happens:**
-0. ✅ **L0 Gate** — Validates session config (goal, criteria, key)
-1. ✅ **Task Audit** — Analyzes logs + finds issues
-2. ✅ **Experience Cards** — Extracts patterns
-3. ✅ **SkillBank** — Stores reusable rules
-4. ✅ **Skeptic Gate** — Validates confidence
-5. ✅ **Distillation** — Compresses knowledge
-6. ✅ **Report** — Generates summary
+0. âœ… **L0 Gate** â€” Validates session config (goal, criteria, key)
+1. âœ… **Task Audit** â€” Analyzes logs + finds issues
+2. âœ… **Experience Cards** â€” Extracts patterns
+3. âœ… **SkillBank** â€” Stores reusable rules
+4. âœ… **Skeptic Gate** â€” Validates confidence
+5. âœ… **Distillation** â€” Compresses knowledge
+6. âœ… **Report** â€” Generates summary
 
 ### Step 3: Check Results
 ```bash
@@ -167,11 +167,11 @@ cd .GCC && python -m http.server 8000
 ```
 
 ### Dashboard Sections
-- **Tasks** — GCC task hierarchy + status
-- **Skills** — Learned patterns + accuracy
-- **Timeline** — Loop execution history
-- **Metrics** — Success rate by category
-- **Issues** — Identified problems
+- **Tasks** â€” GCC task hierarchy + status
+- **Skills** â€” Learned patterns + accuracy
+- **Timeline** â€” Loop execution history
+- **Metrics** â€” Success rate by category
+- **Issues** â€” Identified problems
 
 ---
 
@@ -240,9 +240,9 @@ gcc-evo health
 ## Next Steps
 
 ### 1. Read Documentation
-- **[README.en.md](README.en.md)** — Full feature overview
-- **[TUTORIAL.en.md](TUTORIAL.en.md)** — Deep-dive guide
-- **[CHANGELOG.en.md](CHANGELOG.en.md)** — Version history
+- **[README.en.md](README.en.md)** â€” Full feature overview
+- **[TUTORIAL.en.md](TUTORIAL.en.md)** â€” Deep-dive guide
+- **[CHANGELOG.en.md](CHANGELOG.en.md)** â€” Version history
 
 ### 2. Configure for Your Use Case
 ```bash
@@ -373,11 +373,11 @@ gcc-evo memory export --output backup.json
 
 ### Three-Tier Memory
 ```
-Sensory (24h) → Recent events, raw observations
-    ↓ (consolidation)
-Short-term (7 days) → Recent decisions, context
-    ↓ (distillation)
-Long-term (∞) → Verified rules, patterns
+Sensory (24h) â†’ Recent events, raw observations
+    â†“ (consolidation)
+Short-term (7 days) â†’ Recent decisions, context
+    â†“ (distillation)
+Long-term (âˆž) â†’ Verified rules, patterns
 ```
 
 ### Skeptic Verification Gate
@@ -387,7 +387,7 @@ Long-term (∞) → Verified rules, patterns
 
 ### Loop Cycle
 ```
-Observe → Analyze → Extract → Verify → Distill → Report → Observe...
+Observe â†’ Analyze â†’ Extract â†’ Verify â†’ Distill â†’ Report â†’ Observe...
  (logs)    (audit)   (rules)  (gate)   (skills) (dashboard)
 ```
 
@@ -404,7 +404,7 @@ make test
 ### Build Locally
 ```bash
 make build
-pip install dist/gcc_evo-5.300-py3-none-any.whl
+pip install dist/gcc_evo-5.305-py3-none-any.whl
 ```
 
 ### Contribute
@@ -414,13 +414,14 @@ See [CONTRIBUTING.en.md](CONTRIBUTING.en.md)
 
 ## Support
 
-- 📖 **Docs** — https://github.com/baodexiang/gcc-evo
-- 🐛 **Issues** — https://github.com/baodexiang/gcc-evo/issues
-- 💬 **Discussions** — https://github.com/baodexiang/gcc-evo/discussions
-- 🔐 **Security** — security@gcc-evo.dev
+- ðŸ“– **Docs** â€” https://github.com/baodexiang/gcc-evo
+- ðŸ› **Issues** â€” https://github.com/baodexiang/gcc-evo/issues
+- ðŸ’¬ **Discussions** â€” https://github.com/baodexiang/gcc-evo/discussions
+- ðŸ” **Security** â€” security@gcc-evo.dev
 
 ---
 
-**Happy evolving! 🚀**
+**Happy evolving! ðŸš€**
 
-[English](QUICKSTART.en.md) | [中文](QUICKSTART.md)
+[English](QUICKSTART.en.md) | [ä¸­æ–‡](QUICKSTART.md)
+

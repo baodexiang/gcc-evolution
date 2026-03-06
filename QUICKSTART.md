@@ -1,33 +1,33 @@
-# QUICKSTART — 10 分钟上手 gcc-evo v5.300
+﻿# QUICKSTART â€” 10 åˆ†é’Ÿä¸Šæ‰‹ gcc-evo v5.305
 
 ---
 
-## 安装（2 分钟）
+## å®‰è£…ï¼ˆ2 åˆ†é’Ÿï¼‰
 
 ```bash
-# 克隆或下载源码
+# å…‹éš†æˆ–ä¸‹è½½æºç 
 git clone https://github.com/baodexiang/gcc-evo.git
 cd gcc-evo
 
-# 安装依赖
+# å®‰è£…ä¾èµ–
 pip install -e .
 
-# 验证安装
+# éªŒè¯å®‰è£…
 gcc-evo version
-# 输出: gcc-evo v5.300
+# è¾“å‡º: gcc-evo v5.305
 ```
 
 ---
 
-## 配置（2 分钟）
+## é…ç½®ï¼ˆ2 åˆ†é’Ÿï¼‰
 
-编辑 `evolution.yaml`（或新建），配置 LLM API：
+ç¼–è¾‘ `evolution.yaml`ï¼ˆæˆ–æ–°å»ºï¼‰ï¼Œé…ç½® LLM APIï¼š
 
 ```yaml
 # evolution.yaml
 llm_providers:
   gemini:
-    api_key: ${GCC_GEMINI_KEY}    # 从环境变量读取
+    api_key: ${GCC_GEMINI_KEY}    # ä»ŽçŽ¯å¢ƒå˜é‡è¯»å–
     model: gemini-2.0-pro
 
   openai:
@@ -41,233 +41,235 @@ llm_providers:
 default_provider: claude
 ```
 
-设置环境变量：
+è®¾ç½®çŽ¯å¢ƒå˜é‡ï¼š
 ```bash
 export GCC_CLAUDE_KEY=sk-ant-...
 export GCC_GEMINI_KEY=AIza...
 export GCC_OPENAI_KEY=sk-proj-...
 ```
 
-或复制 `evolution.example.yaml`：
+æˆ–å¤åˆ¶ `evolution.example.yaml`ï¼š
 ```bash
 cp evolution.example.yaml evolution.yaml
-# 编辑 evolution.yaml，填入你的 API Key
+# ç¼–è¾‘ evolution.yamlï¼Œå¡«å…¥ä½ çš„ API Key
 ```
 
 ---
 
-## 初始化项目（1 分钟）
+## åˆå§‹åŒ–é¡¹ç›®ï¼ˆ1 åˆ†é’Ÿï¼‰
 
 ```bash
-# 创建 .GCC/ 目录和必要文件
+# åˆ›å»º .GCC/ ç›®å½•å’Œå¿…è¦æ–‡ä»¶
 gcc-evo init
 
-# 文件结构
+# æ–‡ä»¶ç»“æž„
 .GCC/
-├── gcc.db              # 改善历史数据库
-├── pipeline/
-│   └── tasks.json      # 任务管道
-├── state/
-│   └── improvements.json  # KEY/改善项定义
-└── handoff/            # 交接文档
+â”œâ”€â”€ gcc.db              # æ”¹å–„åŽ†å²æ•°æ®åº“
+â”œâ”€â”€ pipeline/
+â”‚   â””â”€â”€ tasks.json      # ä»»åŠ¡ç®¡é“
+â”œâ”€â”€ state/
+â”‚   â””â”€â”€ improvements.json  # KEY/æ”¹å–„é¡¹å®šä¹‰
+â””â”€â”€ handoff/            # äº¤æŽ¥æ–‡æ¡£
 ```
 
 ---
 
-## L0 预先设置（新！必须先做）
+## L0 é¢„å…ˆè®¾ç½®ï¼ˆæ–°ï¼å¿…é¡»å…ˆåšï¼‰
 
-v5.300 新增：每次 loop 前必须先完成 L0 配置。
+v5.305 æ–°å¢žï¼šæ¯æ¬¡ loop å‰å¿…é¡»å…ˆå®Œæˆ L0 é…ç½®ã€‚
 
 ```bash
-# 首次配置（交互式向导）
+# é¦–æ¬¡é…ç½®ï¼ˆäº¤äº’å¼å‘å¯¼ï¼‰
 gcc-evo setup KEY-010
 
-# 向导会依次询问：
-#   KEY编号:       KEY-010
-#   进化目标:      提升信号准确率（至少10字）
-#   成功标准:      1. 信号准确率>80%
-#                  2. 误报率<10%
-#   人工确认:      Y/n（每轮结束是否暂停等待确认）
-#   最大循环次数:  0=不限
-#   备注:          （可选）
+# å‘å¯¼ä¼šä¾æ¬¡è¯¢é—®ï¼š
+#   KEYç¼–å·:       KEY-010
+#   è¿›åŒ–ç›®æ ‡:      æå‡ä¿¡å·å‡†ç¡®çŽ‡ï¼ˆè‡³å°‘10å­—ï¼‰
+#   æˆåŠŸæ ‡å‡†:      1. ä¿¡å·å‡†ç¡®çŽ‡>80%
+#                  2. è¯¯æŠ¥çŽ‡<10%
+#   äººå·¥ç¡®è®¤:      Y/nï¼ˆæ¯è½®ç»“æŸæ˜¯å¦æš‚åœç­‰å¾…ç¡®è®¤ï¼‰
+#   æœ€å¤§å¾ªçŽ¯æ¬¡æ•°:  0=ä¸é™
+#   å¤‡æ³¨:          ï¼ˆå¯é€‰ï¼‰
 
-# 查看当前配置
+# æŸ¥çœ‹å½“å‰é…ç½®
 gcc-evo setup --show
 
-# 编辑某个字段
+# ç¼–è¾‘æŸä¸ªå­—æ®µ
 gcc-evo setup --edit
 
-# 重置配置（重新填写）
+# é‡ç½®é…ç½®ï¼ˆé‡æ–°å¡«å†™ï¼‰
 gcc-evo setup --reset
 ```
 
-配置存储在 `.GCC/state/session_config.json`。
+é…ç½®å­˜å‚¨åœ¨ `.GCC/state/session_config.json`ã€‚
 
 ---
 
-## 核心工作流（5 分钟）
+## æ ¸å¿ƒå·¥ä½œæµï¼ˆ5 åˆ†é’Ÿï¼‰
 
-### 1. 定义改善方向（KEY）
+### 1. å®šä¹‰æ”¹å–„æ–¹å‘ï¼ˆKEYï¼‰
 
 ```bash
-# 先完成 L0 KEY 配置
+# å…ˆå®Œæˆ L0 KEY é…ç½®
 gcc-evo setup KEY-001
 ```
 
-输出示例：
+è¾“å‡ºç¤ºä¾‹ï¼š
 ```
-KEY-001: 提高交易信号准确率
-KEY-002: 降低虚假信号
+KEY-001: æé«˜äº¤æ˜“ä¿¡å·å‡†ç¡®çŽ‡
+KEY-002: é™ä½Žè™šå‡ä¿¡å·
 ...
 ```
 
-### 2. 创建任务
+### 2. åˆ›å»ºä»»åŠ¡
 
 ```bash
-# 为 KEY-001 创建任务
-gcc-evo pipe task "改善信号准确率 Phase 1" -k KEY-001 -m core -p P1
+# ä¸º KEY-001 åˆ›å»ºä»»åŠ¡
+gcc-evo pipe task "æ”¹å–„ä¿¡å·å‡†ç¡®çŽ‡ Phase 1" -k KEY-001 -m core -p P1
 ```
 
-### 3. 运行 Loop 闭环
+### 3. è¿è¡Œ Loop é—­çŽ¯
 
 ```bash
-# 前提：先完成 L0 配置（gcc-evo setup KEY-010）
+# å‰æï¼šå…ˆå®Œæˆ L0 é…ç½®ï¼ˆgcc-evo setup KEY-010ï¼‰
 
-# 单次闭环（分析→蒸馏→更新）
+# å•æ¬¡é—­çŽ¯ï¼ˆåˆ†æžâ†’è’¸é¦â†’æ›´æ–°ï¼‰
 gcc-evo loop GCC-0001 --once
 
-# 持续闭环（每 5 分钟自动运行）
+# æŒç»­é—­çŽ¯ï¼ˆæ¯ 5 åˆ†é’Ÿè‡ªåŠ¨è¿è¡Œï¼‰
 gcc-evo loop GCC-0001
 
-# 测试用：跳过 L0 gate
+# æµ‹è¯•ç”¨ï¼šè·³è¿‡ L0 gate
 gcc-evo loop GCC-0001 --once --dry-run
 ```
 
-Loop 会自动执行：
-1. **Tasks** — 读取任务进度
-2. **Audit** — 分析日志，发现问题
-3. **Cards** — 生成经验卡
-4. **Rules** — 提取可复用规则
-5. **Distill** — 蒸馏到 SkillBank
-6. **Report** — 显示闭环摘要
+Loop ä¼šè‡ªåŠ¨æ‰§è¡Œï¼š
+1. **Tasks** â€” è¯»å–ä»»åŠ¡è¿›åº¦
+2. **Audit** â€” åˆ†æžæ—¥å¿—ï¼Œå‘çŽ°é—®é¢˜
+3. **Cards** â€” ç”Ÿæˆç»éªŒå¡
+4. **Rules** â€” æå–å¯å¤ç”¨è§„åˆ™
+5. **Distill** â€” è’¸é¦åˆ° SkillBank
+6. **Report** â€” æ˜¾ç¤ºé—­çŽ¯æ‘˜è¦
 
-示例输出：
+ç¤ºä¾‹è¾“å‡ºï¼š
 ```
-🔄 Loop Cycle: GCC-0001
-═══════════════════════════════════════
-✓ Step 1: Tasks [2/5 done]
-✓ Step 2: Audit [5 issues found]
-  - Issue-1: 信号延迟 100ms
-  - Issue-2: 虚假突破触发率 12%
-✓ Step 3: Cards [新增 3 张经验卡]
-✓ Step 4: Rules [提取 5 条规则]
-✓ Step 5: Distill [SkillBank +2 技能]
-✓ Step 6: Report [预计改善: +3% 准确率]
+ðŸ”„ Loop Cycle: GCC-0001
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+âœ“ Step 1: Tasks [2/5 done]
+âœ“ Step 2: Audit [5 issues found]
+  - Issue-1: ä¿¡å·å»¶è¿Ÿ 100ms
+  - Issue-2: è™šå‡çªç ´è§¦å‘çŽ‡ 12%
+âœ“ Step 3: Cards [æ–°å¢ž 3 å¼ ç»éªŒå¡]
+âœ“ Step 4: Rules [æå– 5 æ¡è§„åˆ™]
+âœ“ Step 5: Distill [SkillBank +2 æŠ€èƒ½]
+âœ“ Step 6: Report [é¢„è®¡æ”¹å–„: +3% å‡†ç¡®çŽ‡]
 
 Status: HEALTHY
 Next Iteration: 5 minutes
 ```
 
-### 4. 查看进度
+### 4. æŸ¥çœ‹è¿›åº¦
 
 ```bash
-# 健康检查
+# å¥åº·æ£€æŸ¥
 gcc-evo health
 
-# 查看当前 L0 配置
+# æŸ¥çœ‹å½“å‰ L0 é…ç½®
 gcc-evo setup --show
 
-# 查看任务详情
+# æŸ¥çœ‹ä»»åŠ¡è¯¦æƒ…
 gcc-evo pipe status GCC-0001
 ```
 
 ---
 
-## 常用命令速查
+## å¸¸ç”¨å‘½ä»¤é€ŸæŸ¥
 
-| 命令 | 说明 |
+| å‘½ä»¤ | è¯´æ˜Ž |
 |------|------|
-| `gcc-evo setup KEY-010` | L0 配置向导（必须先做） |
-| `gcc-evo setup --show` | 查看当前 L0 配置 |
-| `gcc-evo setup --edit` | 编辑 L0 配置字段 |
-| `gcc-evo init` | 初始化项目结构 |
-| `gcc-evo loop GCC-001 --once` | 单次闭环 |
-| `gcc-evo loop GCC-001 --dry-run` | 跳过 L0 gate 测试 |
-| `gcc-evo pipe task "标题" -k KEY-001 -m core -p P1` | 创建任务 |
-| `gcc-evo pipe list` | 列出所有任务 |
-| `gcc-evo memory compact` | 压实长期记忆 |
-| `gcc-evo health` | 系统健康检查 |
+| `gcc-evo setup KEY-010` | L0 é…ç½®å‘å¯¼ï¼ˆå¿…é¡»å…ˆåšï¼‰ |
+| `gcc-evo setup --show` | æŸ¥çœ‹å½“å‰ L0 é…ç½® |
+| `gcc-evo setup --edit` | ç¼–è¾‘ L0 é…ç½®å­—æ®µ |
+| `gcc-evo init` | åˆå§‹åŒ–é¡¹ç›®ç»“æž„ |
+| `gcc-evo loop GCC-001 --once` | å•æ¬¡é—­çŽ¯ |
+| `gcc-evo loop GCC-001 --dry-run` | è·³è¿‡ L0 gate æµ‹è¯• |
+| `gcc-evo pipe task "æ ‡é¢˜" -k KEY-001 -m core -p P1` | åˆ›å»ºä»»åŠ¡ |
+| `gcc-evo pipe list` | åˆ—å‡ºæ‰€æœ‰ä»»åŠ¡ |
+| `gcc-evo memory compact` | åŽ‹å®žé•¿æœŸè®°å¿† |
+| `gcc-evo health` | ç³»ç»Ÿå¥åº·æ£€æŸ¥ |
 
 ---
 
-## 切换 LLM 模型
+## åˆ‡æ¢ LLM æ¨¡åž‹
 
-gcc-evo 支持无缝切换模型，无损上下文：
+gcc-evo æ”¯æŒæ— ç¼åˆ‡æ¢æ¨¡åž‹ï¼Œæ— æŸä¸Šä¸‹æ–‡ï¼š
 
 ```bash
-# 用 Gemini 跑本次 loop
+# ç”¨ Gemini è·‘æœ¬æ¬¡ loop
 gcc-evo loop GCC-0001 --provider gemini --once
 
-# 用 OpenAI 跑一次 loop
+# ç”¨ OpenAI è·‘ä¸€æ¬¡ loop
 gcc-evo loop GCC-0001 --provider openai --once
 
-# 多模型协作（Skeptic 验证）
-# 默认用 claude 决策，gemini + openai 验证
+# å¤šæ¨¡åž‹åä½œï¼ˆSkeptic éªŒè¯ï¼‰
+# é»˜è®¤ç”¨ claude å†³ç­–ï¼Œgemini + openai éªŒè¯
 gcc-evo loop GCC-0001 --once
 ```
 
 ---
 
-## 故障排查
+## æ•…éšœæŽ’æŸ¥
 
-### 问题 1：API Key 找不到
+### é—®é¢˜ 1ï¼šAPI Key æ‰¾ä¸åˆ°
 
 ```
 Error: GCC_CLAUDE_KEY not set
 ```
 
-**解决**：
+**è§£å†³**ï¼š
 ```bash
-export GCC_CLAUDE_KEY=你的key
-# 或编辑 evolution.yaml，直接填入 key
+export GCC_CLAUDE_KEY=ä½ çš„key
+# æˆ–ç¼–è¾‘ evolution.yamlï¼Œç›´æŽ¥å¡«å…¥ key
 ```
 
-### 问题 2：权限不足
+### é—®é¢˜ 2ï¼šæƒé™ä¸è¶³
 
 ```
 PermissionError: [Errno 13] Permission denied: '.GCC/gcc.db'
 ```
 
-**解决**：
+**è§£å†³**ï¼š
 ```bash
 chmod +x .GCC
 chmod 644 .GCC/gcc.db
 ```
 
-### 问题 3：Loop 卡住
+### é—®é¢˜ 3ï¼šLoop å¡ä½
 
 ```bash
-# 查看日志
+# æŸ¥çœ‹æ—¥å¿—
 tail -f .GCC/logs/loop.log
 
-# 强制中止
+# å¼ºåˆ¶ä¸­æ­¢
 Ctrl+C
 
-# 重新初始化项目结构
+# é‡æ–°åˆå§‹åŒ–é¡¹ç›®ç»“æž„
 gcc-evo init
 ```
 
 ---
 
-## 下一步
+## ä¸‹ä¸€æ­¥
 
-- 👉 完整文档：[README.md](README.md)
-- 🔒 安全政策：[SECURITY.md](SECURITY.md)
-- 🤝 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)
-- 📚 高级用法：`gcc-evo help <command>`
+- ðŸ‘‰ å®Œæ•´æ–‡æ¡£ï¼š[README.md](README.md)
+- ðŸ”’ å®‰å…¨æ”¿ç­–ï¼š[SECURITY.md](SECURITY.md)
+- ðŸ¤ è´¡çŒ®æŒ‡å—ï¼š[CONTRIBUTING.md](CONTRIBUTING.md)
+- ðŸ“š é«˜çº§ç”¨æ³•ï¼š`gcc-evo <command> --help`
 
 ---
 
-**祝你用得愉快！**
+**ç¥ä½ ç”¨å¾—æ„‰å¿«ï¼**
 
-有问题？[提交 Issue](https://github.com/baodexiang/gcc-evo/issues)
+æœ‰é—®é¢˜ï¼Ÿ[æäº¤ Issue](https://github.com/baodexiang/gcc-evo/issues)
+
+

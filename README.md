@@ -1,6 +1,6 @@
-# gcc-evo v5.300
+﻿# gcc-evo v5.305
 
-**AI Self-Evolution Engine** — Persistent memory + continuous learning for LLM agents
+**AI Self-Evolution Engine** â€” Persistent memory + continuous learning for LLM agents
 
 [![Tests](https://github.com/baodexiang/gcc-evo/workflows/Tests/badge.svg)](https://github.com/baodexiang/gcc-evo/actions/workflows/test.yml)
 [![Release](https://github.com/baodexiang/gcc-evo/workflows/Release/badge.svg)](https://github.com/baodexiang/gcc-evo/actions/workflows/release.yml)
@@ -15,25 +15,25 @@
 
 **gcc-evo** is an open-source framework that enables LLM agents to:
 
-- **Remember** — Three-tier persistent memory system (sensory/short-term/long-term)
-- **Learn** — Automatic experience distillation into reusable skills
-- **Improve** — Continuous self-refinement through automated loops
-- **Decide** — Skeptic verification gate to prevent hallucinations
-- **Collaborate** — Seamless switching between Claude, GPT-4, Gemini, DeepSeek
+- **Remember** â€” Three-tier persistent memory system (sensory/short-term/long-term)
+- **Learn** â€” Automatic experience distillation into reusable skills
+- **Improve** â€” Continuous self-refinement through automated loops
+- **Decide** â€” Skeptic verification gate to prevent hallucinations
+- **Collaborate** â€” Seamless switching between Claude, GPT-4, Gemini, DeepSeek
 
 ### Core Components
 
-- **Memory Tiers** — Sensory (24h) → Short-term (7 days) → Long-term (persistent summaries)
-- **Retrieval** — Semantic similarity + KNN temporal weighting + BM25 keywords
-- **Distillation** — Experience cards → SkillBank with automatic versioning
-- **Skeptic Gate** — Confidence threshold (default 0.75) + Human-in-the-loop validation
-- **Loop Command** — Single `gcc-evo loop GCC-0001` runs 6-step improvement cycle
+- **Memory Tiers** â€” Sensory (24h) â†’ Short-term (7 days) â†’ Long-term (persistent summaries)
+- **Retrieval** â€” Semantic similarity + KNN temporal weighting + BM25 keywords
+- **Distillation** â€” Experience cards â†’ SkillBank with automatic versioning
+- **Skeptic Gate** â€” Confidence threshold (default 0.75) + Human-in-the-loop validation
+- **Loop Command** â€” Single `gcc-evo loop GCC-0001` runs 6-step improvement cycle
 
 ---
 
 ## Key Features
 
-### 🎯 Loop Closure (v5.295)
+### ðŸŽ¯ Loop Closure (v5.295)
 ```bash
 gcc-evo loop GCC-0001 --once      # Single iteration
 gcc-evo loop GCC-0001             # Continuous (5-minute cycles)
@@ -41,34 +41,34 @@ gcc-evo loop GCC-0001 --provider gemini  # Switch LLM provider
 ```
 
 **6 Automated Steps:**
-1. **Task Audit** — Analyze execution logs + identify gaps
-2. **Experience Cards** — Extract reusable patterns
-3. **SkillBank** — Version and store skills
-4. **Skeptic Verification** — Human validation gate
-5. **Distillation** — Compress knowledge
-6. **Daily Report** — Summary + next actions
+1. **Task Audit** â€” Analyze execution logs + identify gaps
+2. **Experience Cards** â€” Extract reusable patterns
+3. **SkillBank** â€” Version and store skills
+4. **Skeptic Verification** â€” Human validation gate
+5. **Distillation** â€” Compress knowledge
+6. **Daily Report** â€” Summary + next actions
 
-### 🧠 Three-Tier Memory
+### ðŸ§  Three-Tier Memory
 ```
 Sensory Layer (24h events)
-  ↓ (retrieval when queried)
+  â†“ (retrieval when queried)
 Short-term Layer (7-day discussion)
-  ↓ (consolidation)
+  â†“ (consolidation)
 Long-term Layer (permanent summaries)
 ```
 
-### 🔀 Multi-Model Support
+### ðŸ”€ Multi-Model Support
 ```bash
 # Switch providers seamlessly
 gcc-evo loop GCC-0001 --provider claude|gpt|gemini|deepseek --once
 ```
 
-### 🛡️ Skeptic Verification
+### ðŸ›¡ï¸ Skeptic Verification
 - Prevents low-confidence decisions from entering memory
 - Requires human review for unverified conclusions
 - Confidence threshold configurable (default: 0.75)
 
-### 📊 Dashboard
+### ðŸ“Š Dashboard
 ```bash
 # Single-file HTML dashboard (no installation needed)
 open .GCC/dashboard.html
@@ -82,7 +82,7 @@ open .GCC/dashboard.html
 ```bash
 pip install gcc-evo
 gcc-evo version
-# Output: gcc-evo v5.300
+# Output: gcc-evo v5.305
 ```
 
 ### From Source
@@ -149,92 +149,92 @@ gcc-evo loop GCC-0002 --provider gemini --once
 ### System Architecture Diagram
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                         Application Layer                         │
-│                   gcc-evo loop / commands                        │
-└──────────────────────────┬───────────────────────────────────────┘
-                           │
-┌──────────────────────────▼────────────────────────────────────────┐
-│  Layer 5: Orchestration (Automation & Scheduling)                 │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  Loop Closure Engine (6-step automation):                    ││
-│  │  Observe → Audit → Extract → Verify → Distill → Report     ││
-│  │                                                              ││
-│  │  Pipeline DAG Scheduling / Task Dependencies / Retry Logic   ││
-│  │  Modules: pipeline.py, loop_engine.py                        ││
-│  └──────────────────────────────────────────────────────────────┘│
-└──────────────────────────┬───────────────────────────────────────┘
-                           │ (Structured instructions + Verification)
-┌──────────────────────────▼────────────────────────────────────────┐
-│  Layer 4: Decision Making (LLM Reasoning & Verification)          │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  Skeptic Verification Gate:                                 ││
-│  │  - Confidence threshold judgment (default: 0.75)            ││
-│  │  - Human-in-the-Loop validation                            ││
-│  │  - Hallucination prevention mechanism                       ││
-│  │                                                              ││
-│  │  LLM decision reasoning + Multi-model comparison             ││
-│  │  Modules: skeptic.py, multi_model.py                        ││
-│  └──────────────────────────────────────────────────────────────┘│
-└──────────────────────────┬───────────────────────────────────────┘
-                           │ (Decision requests + Verification)
-┌──────────────────────────▼────────────────────────────────────────┐
-│  Layer 3: Distillation (Knowledge Extraction & Compression)       │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  Experience Cards → SkillBank Knowledge Library:            ││
-│  │  - Convert observations into reusable rules                 ││
-│  │  - Automatic version management                            ││
-│  │  - Accuracy tracking across versions                       ││
-│  │  - Mark deprecated rules                                   ││
-│  │                                                              ││
-│  │  LLM synthesis + Knowledge compression + Skill indexing     ││
-│  │  Modules: distiller.py, skillbank.py, experience_card.py   ││
-│  └──────────────────────────────────────────────────────────────┘│
-└──────────────────────────┬───────────────────────────────────────┘
-                           │ (Rule queries + Retrieval parameters)
-┌──────────────────────────▼────────────────────────────────────────┐
-│  Layer 2: Retrieval (Multi-Strategy RAG)                          │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  Hybrid Retrieval Strategy:                                 ││
-│  │  ┌─────────────────────────────────────────────────────────┐││
-│  │  │ Semantic Similarity  Temporal Weighting  Keyword Match  │││
-│  │  │   (embedding)       (recency bias)     (exact match)   │││
-│  │  │        50%               30%               20%          │││
-│  │  └─────────────────────────────────────────────────────────┘││
-│  │                                                              ││
-│  │  RAG pipeline + Context compression + Results ranking       ││
-│  │  Modules: retriever.py, rag_pipeline.py                     ││
-│  └──────────────────────────────────────────────────────────────┘│
-└──────────────────────────┬───────────────────────────────────────┘
-                           │ (Queries + Query type)
-┌──────────────────────────▼────────────────────────────────────────┐
-│  Layer 1: Memory (Persistent Storage & Hierarchy)                 │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  Three-Tier Memory System:                                  ││
-│  │                                                              ││
-│  │  Sensory (Perception):  24-hour - Latest events             ││
-│  │  ├─ Data: Raw logs, real-time events                        ││
-│  │  ├─ Access: High-frequency, fast                            ││
-│  │  └─ Management: Auto-expiration                             ││
-│  │                                                              ││
-│  │  Short-term (Working Memory): 7-day - Recent decisions      ││
-│  │  ├─ Data: Decision records, context, insights               ││
-│  │  ├─ Access: Semantic search + temporal weighting            ││
-│  │  └─ Management: Periodic compression                        ││
-│  │                                                              ││
-│  │  Long-term (Knowledge Base): Permanent - Verified rules     ││
-│  │  ├─ Data: Refined rules, experience cards, SkillBank        ││
-│  │  ├─ Access: Exact queries + version control                 ││
-│  │  └─ Management: Immutable archive                           ││
-│  │                                                              ││
-│  │  Storage: JSON/JSONL / SQLite / Redis (extensible)         ││
-│  │  Modules: memory_tiers.py, storage.py                       ││
-│  └──────────────────────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────────────────────┘
-                           ▲
-                           │ (Read/Write operations)
-                ┌──────────┴──────────┐
-                │                     │
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                         Application Layer                         â”‚
+â”‚                   gcc-evo loop / commands                        â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                           â”‚
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  Layer 5: Orchestration (Automation & Scheduling)                 â”‚
+â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”â”‚
+â”‚  â”‚  Loop Closure Engine (6-step automation):                    â”‚â”‚
+â”‚  â”‚  Observe â†’ Audit â†’ Extract â†’ Verify â†’ Distill â†’ Report     â”‚â”‚
+â”‚  â”‚                                                              â”‚â”‚
+â”‚  â”‚  Pipeline DAG Scheduling / Task Dependencies / Retry Logic   â”‚â”‚
+â”‚  â”‚  Modules: pipeline.py, loop_engine.py                        â”‚â”‚
+â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                           â”‚ (Structured instructions + Verification)
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  Layer 4: Decision Making (LLM Reasoning & Verification)          â”‚
+â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”â”‚
+â”‚  â”‚  Skeptic Verification Gate:                                 â”‚â”‚
+â”‚  â”‚  - Confidence threshold judgment (default: 0.75)            â”‚â”‚
+â”‚  â”‚  - Human-in-the-Loop validation                            â”‚â”‚
+â”‚  â”‚  - Hallucination prevention mechanism                       â”‚â”‚
+â”‚  â”‚                                                              â”‚â”‚
+â”‚  â”‚  LLM decision reasoning + Multi-model comparison             â”‚â”‚
+â”‚  â”‚  Modules: skeptic.py, multi_model.py                        â”‚â”‚
+â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                           â”‚ (Decision requests + Verification)
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  Layer 3: Distillation (Knowledge Extraction & Compression)       â”‚
+â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”â”‚
+â”‚  â”‚  Experience Cards â†’ SkillBank Knowledge Library:            â”‚â”‚
+â”‚  â”‚  - Convert observations into reusable rules                 â”‚â”‚
+â”‚  â”‚  - Automatic version management                            â”‚â”‚
+â”‚  â”‚  - Accuracy tracking across versions                       â”‚â”‚
+â”‚  â”‚  - Mark deprecated rules                                   â”‚â”‚
+â”‚  â”‚                                                              â”‚â”‚
+â”‚  â”‚  LLM synthesis + Knowledge compression + Skill indexing     â”‚â”‚
+â”‚  â”‚  Modules: distiller.py, skillbank.py, experience_card.py   â”‚â”‚
+â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                           â”‚ (Rule queries + Retrieval parameters)
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  Layer 2: Retrieval (Multi-Strategy RAG)                          â”‚
+â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”â”‚
+â”‚  â”‚  Hybrid Retrieval Strategy:                                 â”‚â”‚
+â”‚  â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”â”‚â”‚
+â”‚  â”‚  â”‚ Semantic Similarity  Temporal Weighting  Keyword Match  â”‚â”‚â”‚
+â”‚  â”‚  â”‚   (embedding)       (recency bias)     (exact match)   â”‚â”‚â”‚
+â”‚  â”‚  â”‚        50%               30%               20%          â”‚â”‚â”‚
+â”‚  â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚â”‚
+â”‚  â”‚                                                              â”‚â”‚
+â”‚  â”‚  RAG pipeline + Context compression + Results ranking       â”‚â”‚
+â”‚  â”‚  Modules: retriever.py, rag_pipeline.py                     â”‚â”‚
+â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                           â”‚ (Queries + Query type)
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  Layer 1: Memory (Persistent Storage & Hierarchy)                 â”‚
+â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”â”‚
+â”‚  â”‚  Three-Tier Memory System:                                  â”‚â”‚
+â”‚  â”‚                                                              â”‚â”‚
+â”‚  â”‚  Sensory (Perception):  24-hour - Latest events             â”‚â”‚
+â”‚  â”‚  â”œâ”€ Data: Raw logs, real-time events                        â”‚â”‚
+â”‚  â”‚  â”œâ”€ Access: High-frequency, fast                            â”‚â”‚
+â”‚  â”‚  â””â”€ Management: Auto-expiration                             â”‚â”‚
+â”‚  â”‚                                                              â”‚â”‚
+â”‚  â”‚  Short-term (Working Memory): 7-day - Recent decisions      â”‚â”‚
+â”‚  â”‚  â”œâ”€ Data: Decision records, context, insights               â”‚â”‚
+â”‚  â”‚  â”œâ”€ Access: Semantic search + temporal weighting            â”‚â”‚
+â”‚  â”‚  â””â”€ Management: Periodic compression                        â”‚â”‚
+â”‚  â”‚                                                              â”‚â”‚
+â”‚  â”‚  Long-term (Knowledge Base): Permanent - Verified rules     â”‚â”‚
+â”‚  â”‚  â”œâ”€ Data: Refined rules, experience cards, SkillBank        â”‚â”‚
+â”‚  â”‚  â”œâ”€ Access: Exact queries + version control                 â”‚â”‚
+â”‚  â”‚  â””â”€ Management: Immutable archive                           â”‚â”‚
+â”‚  â”‚                                                              â”‚â”‚
+â”‚  â”‚  Storage: JSON/JSONL / SQLite / Redis (extensible)         â”‚â”‚
+â”‚  â”‚  Modules: memory_tiers.py, storage.py                       â”‚â”‚
+â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                           â–²
+                           â”‚ (Read/Write operations)
+                â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+                â”‚                     â”‚
           User Input            Execution Feedback
 ```
 
@@ -252,19 +252,19 @@ gcc-evo loop GCC-0002 --provider gemini --once
 
 ```
 Input Observation (logs, events)
-    ↓
+    â†“
 [L1] Store in Sensory Layer
-    ↓
+    â†“
 [L2] Retrieve related history (semantic + temporal)
-    ↓
+    â†“
 [L3] Load verified SkillBank rules
-    ↓
+    â†“
 [L4] LLM reasoning + Skeptic verification
-    ↓
-[L3] Distill new rules → SkillBank (if confidence >= 0.75)
-    ↓
+    â†“
+[L3] Distill new rules â†’ SkillBank (if confidence >= 0.75)
+    â†“
 [L1] Update Short-term and Long-term Layers
-    ↓
+    â†“
 Output Decision + Generate Report
 ```
 
@@ -423,8 +423,9 @@ GCC_LOOP_INTERVAL=300  # seconds
 touch .env
 echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env
 
-# Load
-gcc-evo init --config .env
+# Load environment then run gcc-evo
+export ANTHROPIC_API_KEY=sk-ant-...
+gcc-evo init
 ```
 
 ---
@@ -468,13 +469,13 @@ make clean            # Remove artifacts
 
 ## Licensing
 
-- **v5.295** — BUSL 1.1 (Business Source License)
+- **v5.295** â€” BUSL 1.1 (Business Source License)
   - Free for non-commercial use
   - Free for companies < $1M annual revenue
   - Commercial license available
   - Auto-converts to Apache 2.0 on 2028-05-01
 
-- **v6.0+** — Apache 2.0 (Full open source)
+- **v6.0+** â€” Apache 2.0 (Full open source)
 
 See [LICENSE](LICENSE) for details.
 
@@ -483,14 +484,14 @@ See [LICENSE](LICENSE) for details.
 ## Support & Contributing
 
 ### Documentation
-- **[QUICKSTART.en.md](QUICKSTART.en.md)** — 10-minute setup guide
-- **[TUTORIAL.en.md](TUTORIAL.en.md)** — In-depth learning guide
-- **[CHANGELOG.en.md](CHANGELOG.en.md)** — Version history
+- **[QUICKSTART.en.md](QUICKSTART.en.md)** â€” 10-minute setup guide
+- **[TUTORIAL.en.md](TUTORIAL.en.md)** â€” In-depth learning guide
+- **[CHANGELOG.en.md](CHANGELOG.en.md)** â€” Version history
 
 ### Getting Help
-- 🐛 **Bug Reports** → [GitHub Issues](https://github.com/baodexiang/gcc-evo/issues)
-- 💬 **Discussions** → [GitHub Discussions](https://github.com/baodexiang/gcc-evo/discussions)
-- 🔐 **Security Issues** → security@gcc-evo.dev (private)
+- ðŸ› **Bug Reports** â†’ [GitHub Issues](https://github.com/baodexiang/gcc-evo/issues)
+- ðŸ’¬ **Discussions** â†’ [GitHub Discussions](https://github.com/baodexiang/gcc-evo/discussions)
+- ðŸ” **Security Issues** â†’ security@gcc-evo.dev (private)
 
 ### Contributing
 - See [CONTRIBUTING.en.md](CONTRIBUTING.en.md)
@@ -502,13 +503,13 @@ See [LICENSE](LICENSE) for details.
 ## Roadmap
 
 ```
-v5.300 (Current) — Loop + Skeptic + Multi-Model
-    ↓
-v5.5 (Q2 2026) — Distributed Memory + Real-time Collaboration
-    ↓
-v6.0 (Q4 2026) — Apache 2.0 + Full Open Source
-    ↓
-v7.0 (2027) — Plugin Ecosystem + Enterprise Features
+v5.305 (Current) â€” Loop + Skeptic + Multi-Model
+    â†“
+v5.5 (Q2 2026) â€” Distributed Memory + Real-time Collaboration
+    â†“
+v6.0 (Q4 2026) â€” Apache 2.0 + Full Open Source
+    â†“
+v7.0 (2027) â€” Plugin Ecosystem + Enterprise Features
 ```
 
 ---
@@ -523,7 +524,7 @@ If you use gcc-evo in research or production, please cite:
   title = {gcc-evo: AI Self-Evolution Engine},
   year = {2026},
   url = {https://github.com/baodexiang/gcc-evo},
-  version = {5.300}
+  version = {5.305}
 }
 ```
 
@@ -535,21 +536,22 @@ If you use gcc-evo in research or production, please cite:
 
 | Tier | Price | Included | Best For |
 |------|-------|----------|----------|
-| **Community** | 🆓 Forever Free | L1-L5 foundation + Direction Anchor | Personal/Academic/<$1M revenue |
+| **Community** | ðŸ†“ Forever Free | L1-L5 foundation + Direction Anchor | Personal/Academic/<$1M revenue |
 | **Evolve** | $29/month | + KNN Evolution + Walk-Forward Testing | Small teams/traders |
 | **Pro** | $79/month | + Signal Evolution + Advanced SkillBank | Institutions/trading desks |
 | **Enterprise** | $500+/month | + Private deployment + Vertical optimization | Large funds/custom solutions |
 
-📖 **Full Details**: [PRICING.md](PRICING.md) | [PRICING.en.md](PRICING.en.md)
+ðŸ“– **Full Details**: [PRICING.md](PRICING.md) | [PRICING.en.md](PRICING.en.md)
 
 ### License
 - **Base**: [BUSL 1.1](LICENSE) with Additional Use Grant
-- **Change Date**: 2028-05-01 → auto-converts to Apache 2.0
+- **Change Date**: 2028-05-01 â†’ auto-converts to Apache 2.0
 - **Community Forever Free**: Individuals, academics, <$1M annual revenue
 - **See also**: [LICENSE](LICENSE) file for full terms
 
 ---
 
-**Made with ❤️ by [baodexiang](https://github.com/baodexiang)**
+**Made with â¤ï¸ by [baodexiang](https://github.com/baodexiang)**
 
-[English](README.md) | [中文](README.zh.md)
+[English](README.md) | [ä¸­æ–‡](README.zh.md)
+

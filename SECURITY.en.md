@@ -1,4 +1,4 @@
-# Security Policy
+﻿# Security Policy
 
 ## Reporting Security Vulnerabilities
 
@@ -6,7 +6,7 @@
 
 If you discover a security vulnerability in gcc-evo, please report it responsibly to:
 
-📧 **security@gcc-evo.dev**
+ðŸ“§ **security@gcc-evo.dev**
 
 Include:
 - Description of vulnerability
@@ -16,10 +16,10 @@ Include:
 - Suggested fix (optional)
 
 ### Response Timeline
-- **24 hours** — Acknowledgment of receipt
-- **72 hours** — Initial assessment and timeline
-- **30 days** — Patch release and disclosure
-- **90 days** — Public disclosure (if not patched earlier)
+- **24 hours** â€” Acknowledgment of receipt
+- **72 hours** â€” Initial assessment and timeline
+- **30 days** â€” Patch release and disclosure
+- **90 days** â€” Public disclosure (if not patched earlier)
 
 ---
 
@@ -27,14 +27,14 @@ Include:
 
 ### 1. Environment Variable Isolation
 
-**DO** ✅
+**DO** âœ…
 ```bash
 # Use environment variables
 export ANTHROPIC_API_KEY=sk-ant-...
 gcc-evo loop GCC-0001
 ```
 
-**DON'T** ❌
+**DON'T** âŒ
 ```bash
 # Hardcode API keys
 gcc-evo loop GCC-0001 --api-key sk-ant-...
@@ -43,7 +43,7 @@ grep "sk-ant" config.yaml
 
 ### 2. Memory Persistence Security
 
-**DO** ✅
+**DO** âœ…
 ```bash
 # Encrypt state files for production
 chmod 600 state/*.json
@@ -53,7 +53,7 @@ chmod 700 state/
 cp config/prod.yaml config/params.yaml
 ```
 
-**DON'T** ❌
+**DON'T** âŒ
 ```bash
 # Commit secrets to git
 git add .env
@@ -65,7 +65,7 @@ chmod 777 state/
 
 ### 3. Input Validation
 
-**DO** ✅
+**DO** âœ…
 ```python
 # Validate all external inputs
 def create_task(title, key_id):
@@ -75,7 +75,7 @@ def create_task(title, key_id):
     return store_task(title, key_id)
 ```
 
-**DON'T** ❌
+**DON'T** âŒ
 ```python
 # Accept untrusted input directly
 task_title = request.args.get('title')  # User input
@@ -84,7 +84,7 @@ eval(task_title)  # Dangerous!
 
 ### 4. API Communication
 
-**DO** ✅
+**DO** âœ…
 ```bash
 # Use HTTPS only
 export OPENAI_API_URL=https://api.openai.com/v1
@@ -93,7 +93,7 @@ export OPENAI_API_URL=https://api.openai.com/v1
 pip install certifi
 ```
 
-**DON'T** ❌
+**DON'T** âŒ
 ```bash
 # Use HTTP for sensitive data
 export OPENAI_API_URL=http://api.openai.com  # Insecure!
@@ -104,7 +104,7 @@ export CURL_CA_BUNDLE=""
 
 ### 5. Audit Logging
 
-**DO** ✅
+**DO** âœ…
 ```python
 # Log all LLM decisions
 log_audit_event(
@@ -116,7 +116,7 @@ log_audit_event(
 )
 ```
 
-**DON'T** ❌
+**DON'T** âŒ
 ```python
 # Silently process decisions
 llm_decision = get_decision()
@@ -170,17 +170,17 @@ echo ${{ secrets.ANTHROPIC_API_KEY }}
 
 ### Data Classification
 ```
-PUBLIC     → Configuration, schemas
-INTERNAL   → Audit logs, metrics
-SENSITIVE  → API keys, user data
-CRITICAL   → Security credentials, encryption keys
+PUBLIC     â†’ Configuration, schemas
+INTERNAL   â†’ Audit logs, metrics
+SENSITIVE  â†’ API keys, user data
+CRITICAL   â†’ Security credentials, encryption keys
 ```
 
 ### Retention Policy
 ```
-Sensory (24h)   → Raw logs, auto-purged
-Short-term (7d) → Discussion history, encrypted
-Long-term (∞)   → Verified patterns, immutable
+Sensory (24h)   â†’ Raw logs, auto-purged
+Short-term (7d) â†’ Discussion history, encrypted
+Long-term (âˆž)   â†’ Verified patterns, immutable
 ```
 
 ### Data Encryption
@@ -343,16 +343,16 @@ chmod -R u=rwX,g=,o= /opt/gcc-evo
 ## Vulnerability Disclosure
 
 ### Severity Levels
-- **CRITICAL** (9.0-10.0) — Authentication bypass, data breach risk
-- **HIGH** (7.0-8.9) — Unauthorized access, information disclosure
-- **MEDIUM** (4.0-6.9) — Reduced functionality, moderate impact
-- **LOW** (0.1-3.9) — Minor issues, cosmetic problems
+- **CRITICAL** (9.0-10.0) â€” Authentication bypass, data breach risk
+- **HIGH** (7.0-8.9) â€” Unauthorized access, information disclosure
+- **MEDIUM** (4.0-6.9) â€” Reduced functionality, moderate impact
+- **LOW** (0.1-3.9) â€” Minor issues, cosmetic problems
 
 ### Disclosure Timeline
-1. **Day 1** — Vulnerability reported to security@gcc-evo.dev
-2. **Day 2** — We confirm receipt and assess severity
-3. **Days 3-30** — Development and testing of fix
-4. **Day 31+** — Public disclosure and patch release
+1. **Day 1** â€” Vulnerability reported to security@gcc-evo.dev
+2. **Day 2** â€” We confirm receipt and assess severity
+3. **Days 3-30** â€” Development and testing of fix
+4. **Day 31+** â€” Public disclosure and patch release
 
 We appreciate responsible disclosure and will:
 - Credit reporters in security advisory
@@ -388,11 +388,12 @@ We appreciate responsible disclosure and will:
 ## Support
 
 For security questions or concerns:
-- 📧 **Email**: security@gcc-evo.dev
-- 🔗 **GitHub Security Advisory**: https://github.com/baodexiang/gcc-evo/security/advisories
-- 📋 **Responsible Disclosure**: https://github.com/baodexiang/gcc-evo/security/policy
+- ðŸ“§ **Email**: security@gcc-evo.dev
+- ðŸ”— **GitHub Security Advisory**: https://github.com/baodexiang/gcc-evo/security/advisories
+- ðŸ“‹ **Responsible Disclosure**: https://github.com/baodexiang/gcc-evo/security/policy
 
 ---
 
 **Last Updated**: 2026-03-05
-**Version**: 5.300
+**Version**: 5.305
+
