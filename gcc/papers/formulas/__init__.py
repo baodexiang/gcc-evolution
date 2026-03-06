@@ -24,6 +24,11 @@ from .P003_alphaforgebench import (
     eq_2_precision_recall_f1,
     eq_3_composite_benchmark_score,
 )
+from .P004_prompt_repetition import (
+    REP_EPSILON,
+    eq_1_repetition_performance_gain,
+    eq_2_optimal_repetition_count,
+)
 
 __all__ = [
     "ALPHA",
@@ -44,4 +49,7 @@ __all__ = [
     "eq_1_offline_pattern_score",
     "eq_2_precision_recall_f1",
     "eq_3_composite_benchmark_score",
+    "REP_EPSILON",
+    "eq_1_repetition_performance_gain",
+    "eq_2_optimal_repetition_count",
 ]
