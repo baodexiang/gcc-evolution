@@ -49092,7 +49092,7 @@ def health():
 # =========================================================
 # KEY-009: 审计Dashboard
 # =========================================================
-ROOT = Path(".")  # KEY-009路径基准
+ROOT = Path(__file__).resolve().parent  # KEY-009路径基准（固定到主程序目录）
 @app.route("/key009", methods=["GET"])
 def key009_dashboard():
     """KEY-009审计dashboard — 优先用缓存数据(后台5分钟刷新)，fallback实时计算"""
@@ -49165,7 +49165,7 @@ def key009_dashboard():
 
     # 读取dashboard HTML模板并注入多范围数据
     try:
-        html = open("key009_dashboard.html", "r", encoding="utf-8").read()
+        html = (ROOT / "key009_dashboard.html").read_text(encoding="utf-8")
         inject = (f"<script>window.MULTI_DATA = {json.dumps(multi_data, ensure_ascii=False)};"
                   f"window.EMBEDDED_DATA = window.MULTI_DATA['24h'];</script>")
         html = html.replace("</head>", inject + "\n</head>")
