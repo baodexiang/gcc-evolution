@@ -30,6 +30,16 @@ import time
 ENABLED = True      # Phase 2: 基准K线实际拦截
 DC_ENABLED = True   # Phase 2: 唐纳奇周期实际拦截
 
+# 基准价缓冲: 避免贴线抖动导致来回触发
+BUY_PRICE_BUFFER_STOCK = 0.0015    # 美股 BUY 需高于基准 +0.15%
+SELL_PRICE_BUFFER_STOCK = 0.0015   # 美股 SELL 需低于基准 -0.15%
+BUY_PRICE_BUFFER_CRYPTO = 0.0025   # 加密 BUY 需高于基准 +0.25%
+SELL_PRICE_BUFFER_CRYPTO = 0.0025  # 加密 SELL 需低于基准 -0.25%
+
+# DC优化: 仅在周期成熟后执行反向拦截，降低 young 噪声误拦
+DC_ENFORCE_MATURITY = {"mid", "mature"}
+DC_MIN_CYCLE_COUNTER = 3
+
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state", "baseline_state.json")
 
 # 文件mtime缓存: 文件变化即刷新，不等TTL
@@ -80,6 +90,26 @@ def _dc_check(state: dict, direction: str) -> str:
     return f"[DC_PASS:{info}]"
 
 
+def _is_crypto_symbol(symbol: str) -> bool:
+    s = (symbol or "").upper()
+    return s.endswith("USDC") or s.endswith("USDT") or s in {"BTCUSDC", "ETHUSDC", "SOLUSDC", "ZECUSDC"}
+
+
+def _price_buffer(symbol: str, direction: str) -> float:
+    is_crypto = _is_crypto_symbol(symbol)
+    if direction == "buy":
+        return BUY_PRICE_BUFFER_CRYPTO if is_crypto else BUY_PRICE_BUFFER_STOCK
+    return SELL_PRICE_BUFFER_CRYPTO if is_crypto else SELL_PRICE_BUFFER_STOCK
+
+
+def _dc_enforced(state: dict) -> bool:
+    if not DC_ENABLED:
+        return False
+    maturity = str(state.get("dc_maturity", "")).lower()
+    counter = int(state.get("dc_cycle_counter") or 0)
+    return maturity in DC_ENFORCE_MATURITY and counter >= DC_MIN_CYCLE_COUNTER
+
+
 def baseline_gate(current_price, direction, position_units, symbol) -> tuple:
     """
     返回 (pass: bool, reason: str)
@@ -110,7 +140,7 @@ def baseline_gate(current_price, direction, position_units, symbol) -> tuple:
         return True, ""
 
     dc_tag = _dc_check(state, direction)
-    dc_blocked = DC_ENABLED and "DC_BLOCK" in dc_tag
+    dc_blocked = _dc_enforced(state) and "DC_BLOCK" in dc_tag
 
     # ---- Step 3: 按结构+信号方向过滤 ----
     if structure == "bullish":
@@ -119,14 +149,16 @@ def baseline_gate(current_price, direction, position_units, symbol) -> tuple:
             # 顺结构: pos 0~3 放开，检查 price > buy_baseline
             if position_units not in [0, 1, 2, 3]:
                 return True, ""
-            if current_price <= state["buy_price"]:
-                msg = f"价格{current_price}<=基准Buy{state['buy_price']}(pos={position_units},看多顺结构) {dc_tag}"
+            buy_px = float(state["buy_price"])
+            buy_need = buy_px * (1.0 + _price_buffer(symbol, "buy"))
+            if current_price <= buy_need:
+                msg = f"价格{current_price}<=基准Buy阈值{buy_need:.6f}(raw={buy_px},pos={position_units},看多顺结构) {dc_tag}"
                 return (not ENABLED), msg
             # 基准通过，检查DC
             if dc_blocked:
                 msg = f"基准通过但DC拦截(pos={position_units},看多顺结构) {dc_tag}"
                 return False, msg
-            return True, f"通过基准Buy:{current_price}>{state['buy_price']}(pos={position_units},看多顺结构) {dc_tag}"
+            return True, f"通过基准Buy:{current_price}>{buy_need:.6f}(raw={buy_px},pos={position_units},看多顺结构) {dc_tag}"
         else:
             # SELL逆结构: 限制 pos[3,4]，无价格检查(无sell基准)
             if position_units not in [3, 4]:
@@ -143,13 +175,15 @@ def baseline_gate(current_price, direction, position_units, symbol) -> tuple:
             # 顺结构: pos 5,4,3,2 放开，检查 price < sell_baseline
             if position_units not in [5, 4, 3, 2]:
                 return True, ""
-            if current_price >= state["sell_price"]:
-                msg = f"价格{current_price}>=基准Sell{state['sell_price']}(pos={position_units},看空顺结构) {dc_tag}"
+            sell_px = float(state["sell_price"])
+            sell_need = sell_px * (1.0 - _price_buffer(symbol, "sell"))
+            if current_price >= sell_need:
+                msg = f"价格{current_price}>=基准Sell阈值{sell_need:.6f}(raw={sell_px},pos={position_units},看空顺结构) {dc_tag}"
                 return (not ENABLED), msg
             if dc_blocked:
                 msg = f"基准通过但DC拦截(pos={position_units},看空顺结构) {dc_tag}"
                 return False, msg
-            return True, f"通过基准Sell:{current_price}<{state['sell_price']}(pos={position_units},看空顺结构) {dc_tag}"
+            return True, f"通过基准Sell:{current_price}<{sell_need:.6f}(raw={sell_px},pos={position_units},看空顺结构) {dc_tag}"
         else:
             # BUY逆结构: 限制 pos[1,2]，无价格检查(无buy基准)
             if position_units not in [1, 2]:
@@ -165,22 +199,26 @@ def baseline_gate(current_price, direction, position_units, symbol) -> tuple:
         if direction == "buy":
             if position_units not in [1, 2]:
                 return True, ""
-            if current_price <= state["buy_price"]:
-                msg = f"价格{current_price}<=基准Buy{state['buy_price']}(pos={position_units},反转限制) {dc_tag}"
+            buy_px = float(state["buy_price"])
+            buy_need = buy_px * (1.0 + _price_buffer(symbol, "buy"))
+            if current_price <= buy_need:
+                msg = f"价格{current_price}<=基准Buy阈值{buy_need:.6f}(raw={buy_px},pos={position_units},反转限制) {dc_tag}"
                 return (not ENABLED), msg
             if dc_blocked:
                 msg = f"基准通过但DC拦截(pos={position_units},反转限制) {dc_tag}"
                 return False, msg
-            return True, f"通过基准Buy:{current_price}>{state['buy_price']}(pos={position_units},反转限制) {dc_tag}"
+            return True, f"通过基准Buy:{current_price}>{buy_need:.6f}(raw={buy_px},pos={position_units},反转限制) {dc_tag}"
         else:
             if position_units not in [3, 4]:
                 return True, ""
-            if current_price >= state["sell_price"]:
-                msg = f"价格{current_price}>=基准Sell{state['sell_price']}(pos={position_units},反转限制) {dc_tag}"
+            sell_px = float(state["sell_price"])
+            sell_need = sell_px * (1.0 - _price_buffer(symbol, "sell"))
+            if current_price >= sell_need:
+                msg = f"价格{current_price}>=基准Sell阈值{sell_need:.6f}(raw={sell_px},pos={position_units},反转限制) {dc_tag}"
                 return (not ENABLED), msg
             if dc_blocked:
                 msg = f"基准通过但DC拦截(pos={position_units},反转限制) {dc_tag}"
                 return False, msg
-            return True, f"通过基准Sell:{current_price}<{state['sell_price']}(pos={position_units},反转限制) {dc_tag}"
+            return True, f"通过基准Sell:{current_price}<{sell_need:.6f}(raw={sell_px},pos={position_units},反转限制) {dc_tag}"
 
     return True, ""
