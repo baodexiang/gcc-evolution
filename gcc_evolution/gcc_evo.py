@@ -1538,21 +1538,17 @@ def cmd_pipe_add(title, priority, desc, key):
 
 
 def _auto_export_dashboard():
-    """Pipeline变更后自动重新导出dashboard.html"""
+    """Pipeline变更后自动重新导出 .GCC/dashboard.html (唯一出口)"""
     try:
-        import shutil
-        _gcc = _gcc_dir()
-        src_tpl = _gcc / "gcc_dashboard.html"
-        dst_tpl = _gcc / "gcc_evolution" / "gcc_dashboard.html"
-        if src_tpl.exists() and dst_tpl.parent.exists():
-            shutil.copy2(src_tpl, dst_tpl)
-        from click.testing import CliRunner
-        runner = CliRunner()
-        result = runner.invoke(cmd_dashboard, ["--export"])
-        if result.exit_code == 0:
+        import subprocess as _sp
+        _r = _sp.run(
+            [sys.executable, "gen_dashboard.py", "--quiet"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if _r.returncode == 0:
             click.echo("  ✓ Dashboard 已自动更新")
         else:
-            click.echo(f"  ⚠ Dashboard 自动更新失败: {result.output}")
+            click.echo(f"  ⚠ Dashboard 自动更新失败: {_r.stderr[:200]}")
     except Exception as e:
         click.echo(f"  ⚠ Dashboard 自动更新跳过: {e}")
 
@@ -3167,401 +3163,27 @@ def cmd_dashboard(export, out, serve, port):
          improvements.json / tasks.jsonl / skillbank.jsonl
          suggestions.jsonl / handoff.md
     """
-    import shutil
+    import subprocess
     import webbrowser
 
-    # 找内置 HTML — 按优先级搜索 (优先用项目根目录的最新模板)
-    candidates = [
-        Path("gcc_dashboard_v497.html"),                                   # 项目根目录最新版
-        Path(__file__).parent / "gcc_evolution" / "gcc_dashboard.html",  # site-packages
-        Path(__file__).parent / "gcc_dashboard.html",                     # 同级目录
-        Path(".GCC") / "gcc_evolution" / "gcc_dashboard.html",            # 项目大写
-        Path(".gcc") / "gcc_evolution" / "gcc_dashboard.html",            # 项目小写
-    ]
-    builtin_html = next((p for p in candidates if p.exists()), None)
-    if not builtin_html:
-        click.echo("  ✗ 找不到内置 dashboard.html", err=True)
+    _gcc = _gcc_dir()
+    dest = Path(out) if out else _gcc / "dashboard.html"
+
+    # 统一委托 gen_dashboard.py 生成 (唯一数据嵌入逻辑)
+    gen_script = Path("gen_dashboard.py")
+    if not gen_script.exists():
+        click.echo(f"  ✗ 找不到 {gen_script}", err=True)
         return
 
-    # 输出路径 — 直接写入模板文件(gcc_evolution/gcc_dashboard.html)，打开即有数据
-    if out:
-        dest = Path(out)
-    elif _gcc_dir().exists():
-        dest = _gcc_dir() / "dashboard.html"
-    else:
-        dest = _gcc / "dashboard.html"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    # ── 尝试将 .gcc/ 数据内嵌到 HTML ──────────────────────
-    html = builtin_html.read_text(encoding="utf-8")
-
-    loaded = []
-    import json as _json
-
-    # 支持 .GCC 和 .gcc 两种大小写
-    _gcc = _gcc_dir()
-
-    all_tasks = []
-    ho_sessions = []
-    seen_tasks = set()
-
-    def _norm_prio(p):
-        return {'normal':'average','high':'high','low':'low'}.get((p or 'average').lower(), 'average')
-
-    def _add_task(t):
-        if not isinstance(t, dict): return
-        k = t.get("task_id") or t.get("id") or t.get("title") or t.get("description") or str(id(t))
-        if k in seen_tasks:
-            # Pipeline数据更丰富时覆盖handoff版本(如有steps/stage/description)
-            if t.get("steps") or t.get("stage") or (t.get("description") and t.get("source") == "pipeline"):
-                all_tasks[:] = [x for x in all_tasks if x.get("task_id") != k]
-            else:
-                return
-        seen_tasks.add(k)
-        _out = {
-            "task_id": t.get("task_id") or t.get("id", ""),
-            "title": t.get("title") or t.get("description") or "未命名",
-            "status": t.get("status", "pending"),
-            "priority": _norm_prio(t.get("priority")),
-            "key_id": t.get("key_id") or t.get("key") or t.get("anchor_key", ""),
-            "updated_at": (t.get("updated_at") or t.get("created_at") or "")[:10],
-            "current_step": (t.get("current_step") or t.get("instructions") or t.get("context") or "")[:200],
-            "source": t.get("source", ""),
-            "handoff_id": t.get("handoff_id", ""),
-            "progress": t.get("progress", ""),
-            "dependencies": t.get("dependencies", []),
-        }
-        # Pipeline-specific fields for detail rendering
-        if t.get("stage"):
-            _out["stage"] = t["stage"]
-        if t.get("module"):
-            _out["module"] = t["module"]
-        if t.get("description") and t.get("title"):
-            _out["description"] = t["description"][:300]
-        if t.get("gate_results"):
-            _out["gate_results"] = t["gate_results"]
-        if t.get("steps"):
-            _out["steps"] = t["steps"]
-        all_tasks.append(_out)
-
-    inject_lines = []
-
-    # ① improvements — from file OR DB fallback
-    # 优先 .GCC/improvements.json, 其次 state/improvements.json, 最后 gcc.db
-    imp_path = _gcc / "improvements.json"
-    if not imp_path.exists():
-        _state_imp = Path("state") / "improvements.json"
-        if _state_imp.exists():
-            imp_path = _state_imp
-    _imp_loaded = False
-    if imp_path.exists():
-        try:
-            d = _json.loads(imp_path.read_text(encoding="utf-8", errors="ignore"))
-            js = _json.dumps(d, ensure_ascii=False)
-            inject_lines.append(
-                f"try {{ const _d={js};"
-                f"DATA.improvements=Array.isArray(_d)?_d:flattenImprovements(_d);"
-                f"}} catch(e) {{}}"
-            )
-            loaded.append(imp_path.name)
-            _imp_loaded = True
-        except Exception as _e:
-            click.echo(f"  ⚠ improvements.json load error: {_e}", err=True)
-
-    # ①-b DB fallback for improvements (only if file not loaded)
-    if not _imp_loaded:
-        _db_path = _gcc / "gcc.db"
-        if _db_path.exists():
-            try:
-                import sqlite3 as _sql
-                _db = _sql.connect(str(_db_path))
-                _db.row_factory = _sql.Row
-                _imp_rows = [dict(r) for r in _db.execute(
-                    "SELECT id, parent_key, title, status, phase_text, note, item_type FROM improvements"
-                ).fetchall()]
-                _db.close()
-                if _imp_rows:
-                    for r in _imp_rows:
-                        r["status"] = (r.get("status") or "UNKNOWN").upper()
-                        r.pop("observations_json", None)
-                    js = _json.dumps(_imp_rows, ensure_ascii=False)
-                    inject_lines.append(f"DATA.improvements = {js};")
-                    loaded.append(f"gcc.db (improvements: {len(_imp_rows)})")
-            except Exception:
-                pass
-
-    # ①-c Cards + Skills — ALWAYS load from gcc.db + skill/cards/ (independent of improvements)
-    _cards_out = []
-    _skills_out = []
-    _db_path = _gcc / "gcc.db"
-    if _db_path.exists():
-        try:
-            import sqlite3 as _sql
-            _db = _sql.connect(str(_db_path))
-            _db.row_factory = _sql.Row
-            _card_rows = [dict(r) for r in _db.execute(
-                "SELECT id, key_id, title, card_type, layer_priority FROM cards"
-            ).fetchall()]
-            _db.close()
-            for c in _card_rows:
-                _cards_out.append({
-                    "key_id": c.get("key_id") or "",
-                    "title": c.get("title") or "",
-                    "card_type": c.get("card_type") or "knowledge",
-                    "layer_priority": c.get("layer_priority") or 2,
-                })
-        except Exception:
-            pass
-
-    # Scan skill/cards/ directories for knowledge cards (supplemental)
-    _skill_cards_dir = _gcc / "skill" / "cards"
-    _card_dirs_seen = set()
-    if _skill_cards_dir.exists():
-        for _md_file in _skill_cards_dir.rglob("*.md"):
-            _cat = _md_file.parent.name
-            _card_id = f"sk_{_md_file.stem[:40]}"
-            if _card_id not in _card_dirs_seen:
-                _card_dirs_seen.add(_card_id)
-                _cards_out.append({
-                    "key_id": _cat,
-                    "title": _md_file.stem.replace("_", " "),
-                    "card_type": "knowledge",
-                    "layer_priority": 2,
-                })
-        # Generate skill entries from card categories
-        _cat_counts = {}
-        for c in _cards_out:
-            k = c.get("key_id") or "general"
-            _cat_counts[k] = _cat_counts.get(k, 0) + 1
-        _sk_idx = 1
-        for _cat_name, _cnt in sorted(_cat_counts.items(), key=lambda x: -x[1])[:20]:
-            _skills_out.append({
-                "skill_id": f"SK-{_sk_idx:03d}",
-                "name": _cat_name,
-                "skill_type": "general",
-                "success_rate": 0.75,
-                "use_count": _cnt,
-                "confidence": 0.8,
-                "version": 1,
-                "source": "knowledge_cards",
-            })
-            _sk_idx += 1
-
-    if _cards_out:
-        inject_lines.append(f"DATA.cards = {_json.dumps(_cards_out, ensure_ascii=False)};")
-        loaded.append(f"cards: {len(_cards_out)}")
-    if _skills_out:
-        inject_lines.append(f"DATA.skills = {_json.dumps(_skills_out, ensure_ascii=False)};")
-        loaded.append(f"skills: {len(_skills_out)}")
-
-    # ①-d Skillbank from file (override generated skills if exists)
-    _sb_path = _gcc / "skillbank.jsonl"
-    if _sb_path.exists():
-        _sb_rows = []
-        for line in _sb_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            if line.strip():
-                try: _sb_rows.append(_json.loads(line))
-                except Exception: pass
-        if _sb_rows:
-            inject_lines.append(f"DATA.skills = {_json.dumps(_sb_rows, ensure_ascii=False)};")
-            loaded.append(f"skillbank.jsonl: {len(_sb_rows)}")
-
-    # ② tasks.jsonl
-    tasks_path = _gcc / "tasks.jsonl"
-    if tasks_path.exists():
-        for line in tasks_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            if line.strip():
-                try: _add_task(_json.loads(line))
-                except Exception: pass
-        loaded.append(tasks_path.name)
-
-    # ③ handoffs/*.json
-    # 过滤自动生成的机械化任务(config verify / docstring update / changelog / README)
-    _HO_NOISE_PREFIXES = (
-        "Verify config file",
-        "Update module docstrings",
-        "Add changelog entry",
-        "Update README",
+    result = subprocess.run(
+        [sys.executable, str(gen_script), "--quiet"],
+        capture_output=True, text=True, timeout=30,
     )
-    handoff_dir = _gcc / "handoffs"
-    if handoff_dir.exists():
-        ho_count = 0
-        for ho_file in sorted(handoff_dir.glob("HO_*.json"), reverse=True)[:30]:
-            try:
-                d = _json.loads(ho_file.read_text(encoding="utf-8", errors="ignore"))
-                for t in d.get("tasks", []):
-                    if not isinstance(t, dict): continue
-                    _t_title = t.get("title") or t.get("description") or ""
-                    if any(_t_title.startswith(pfx) for pfx in _HO_NOISE_PREFIXES):
-                        continue
-                    t["key_id"] = d.get("key", "")
-                    t["updated_at"] = (d.get("created_at") or "")[:10]
-                    t["source"] = "handoff"
-                    t["handoff_id"] = d.get("handoff_id", ho_file.stem)
-                    _add_task(t)
-                    ho_count += 1
-                ho_sessions.append({
-                    "handoff_id": d.get("handoff_id", ho_file.stem),
-                    "created_at": d.get("created_at", ""),
-                    "key": d.get("key", ""),
-                    "project": d.get("project", ""),
-                    "changes_summary": d.get("upstream", {}).get("changes_summary", ""),
-                    "task_count": len(d.get("tasks", [])),
-                    "done_count": sum(1 for t in d.get("tasks", []) if isinstance(t, dict) and t.get("status") in ("completed", "done")),
-                })
-            except Exception:
-                pass
-        if ho_count:
-            loaded.append(f"handoffs/ ({ho_count} tasks)")
-
-    # ④ pipeline/tasks.json
-    pipe_path = _gcc / "pipeline/tasks.json"
-    if pipe_path.exists():
-        try:
-            _pd = _json.loads(pipe_path.read_text(encoding="utf-8", errors="ignore"))
-            if isinstance(_pd, list):
-                _pt = _pd
-            elif isinstance(_pd, dict) and "tasks" in _pd:
-                _pt = _pd["tasks"]
-            elif isinstance(_pd, dict):
-                _pt = list(_pd.values())
-            else:
-                _pt = []
-            _stage_map = {'done':'completed','closed':'completed',
-                          'implement':'running','test':'running','testing':'running',
-                          'integrate':'running','analyze':'running','design':'running',
-                          'pending':'pending','suspended':'paused'}
-            _pipe_count = 0
-            for t in _pt:
-                if isinstance(t, dict):
-                    t.setdefault("source", "pipeline")
-                    if "stage" in t and "status" not in t:
-                        t["status"] = _stage_map.get(t["stage"], "pending")
-                    _add_task(t)
-                    _pipe_count += 1
-            if _pipe_count: loaded.append(f"pipeline/tasks.json ({_pipe_count})")
-        except Exception:
-            pass
-
-    # ⑤ inject tasks + sessions as plain JS objects
-    if all_tasks:
-        js = _json.dumps(all_tasks, ensure_ascii=False)
-        inject_lines.append(f"DATA.tasks = {js};")
-
-    if ho_sessions:
-        js = _json.dumps(ho_sessions, ensure_ascii=False)
-        inject_lines.append(f"DATA.sessions = {js};")
-
-    # ⑥ suggestions (skillbank already handled in ①-c/①-d)
-    _sug_path = _gcc / "suggestions.jsonl"
-    if _sug_path.exists():
-        _sug_rows = []
-        for line in _sug_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            if line.strip():
-                try: _sug_rows.append(_json.loads(line))
-                except Exception: pass
-        if _sug_rows:
-            inject_lines.append(f"DATA.suggestions = {_json.dumps(_sug_rows, ensure_ascii=False)};")
-            loaded.append(f"suggestions.jsonl: {len(_sug_rows)}")
-
-    # ⑦ GCC-0171: Vision Filter 准确率数据
-    _vf_acc_path = Path("state") / "vision_filter_accuracy.json"
-    if _vf_acc_path.exists():
-        try:
-            _vf_raw = _json.loads(_vf_acc_path.read_text(encoding="utf-8"))
-            _vf_dash = {
-                "last_review": _vf_raw.get("last_3day_review", 0),
-                "pending_count": sum(1 for e in _vf_raw.get("events", []) if e.get("result") == "pending"),
-                "total_events": len(_vf_raw.get("events", [])),
-                "symbols": _vf_raw.get("accuracy", {}),
-            }
-            inject_lines.append(f"DATA.vf_accuracy = {_json.dumps(_vf_dash, ensure_ascii=False)};")
-            loaded.append(f"vf_accuracy: {len(_vf_dash['symbols'])} symbols")
-        except Exception:
-            pass
-
-    # ⑧ GCC-0172: BrooksVision 形态回测准确率
-    _bv_acc_path = Path("state") / "bv_signal_accuracy.json"
-    if _bv_acc_path.exists():
-        try:
-            _bv_raw = _json.loads(_bv_acc_path.read_text(encoding="utf-8"))
-            inject_lines.append(f"DATA.bv_accuracy = {_json.dumps(_bv_raw, ensure_ascii=False)};")
-            loaded.append(f"bv_accuracy: {_bv_raw.get('overall', {}).get('total', 0)} signals")
-        except Exception:
-            pass
-
-    # ⑨ GCC-0173: MACD背离回测准确率
-    _macd_acc_path = Path("state") / "macd_signal_accuracy.json"
-    if _macd_acc_path.exists():
-        try:
-            _macd_raw = _json.loads(_macd_acc_path.read_text(encoding="utf-8"))
-            inject_lines.append(f"DATA.macd_accuracy = {_json.dumps(_macd_raw, ensure_ascii=False)};")
-            loaded.append(f"macd_accuracy: {_macd_raw.get('overall', {}).get('decisive', 0)} signals")
-        except Exception as _e:
-            loaded.append(f"macd_accuracy: load failed ({_e})")
-
-    # ⑩ GCC-0174 S5f: 知识卡准确率
-    _card_acc_path = Path("state") / "card_signal_accuracy.json"
-    if _card_acc_path.exists():
-        try:
-            _card_raw = _json.loads(_card_acc_path.read_text(encoding="utf-8"))
-            inject_lines.append(f"DATA.card_accuracy = {_json.dumps(_card_raw, ensure_ascii=False)};")
-            loaded.append(f"card_accuracy: {_card_raw.get('overall', {}).get('decisive', 0)} signals")
-        except Exception as _e:
-            loaded.append(f"card_accuracy: load failed ({_e})")
-
-    # ⑪ GCC-0197: 外挂信号准确率 (4H回填)
-    _plugin_acc_path = Path("state") / "plugin_signal_accuracy.json"
-    if _plugin_acc_path.exists():
-        try:
-            _plugin_raw = _json.loads(_plugin_acc_path.read_text(encoding="utf-8"))
-            _plugin_acc = _plugin_raw.get("accuracy", {})
-            inject_lines.append(f"DATA.plugin_accuracy = {_json.dumps(_plugin_acc, ensure_ascii=False)};")
-            _pa_total = sum(v.get("_overall", {}).get("total", 0) for v in _plugin_acc.values())
-            loaded.append(f"plugin_accuracy: {len(_plugin_acc)} sources, {_pa_total} decisive")
-        except Exception as _e:
-            loaded.append(f"plugin_accuracy: load failed ({_e})")
-
-    # ⑫ GCC-0197 S3: 外挂Phase状态
-    _plugin_phase_path = Path("state") / "plugin_phase_state.json"
-    if _plugin_phase_path.exists():
-        try:
-            _phase_raw = _json.loads(_plugin_phase_path.read_text(encoding="utf-8"))
-            inject_lines.append(f"DATA.plugin_phases = {_json.dumps(_phase_raw, ensure_ascii=False)};")
-            _downgraded = sum(1 for v in _phase_raw.values() if v.get("phase") == "DOWNGRADED")
-            loaded.append(f"plugin_phases: {len(_phase_raw)} plugins, {_downgraded} downgraded")
-        except Exception as _e:
-            loaded.append(f"plugin_phases: load failed ({_e})")
-
-    # inject BEFORE // INIT so render() sees the data
-    if inject_lines:
-        inject_js = "\n".join(inject_lines) + "\n"
-        if "// INIT\n" in html:
-            html = html.replace("// INIT\n", inject_js + "render();\n// INIT\n")
-        else:
-            html = html.replace(
-                "document.getElementById('lastUpdated').textContent = new Date().toLocaleString('zh-CN');",
-                inject_js + "render();\ndocument.getElementById('lastUpdated').textContent = new Date().toLocaleString('zh-CN');"
-            )
-
-    # GCC-0149: 增量导出 — 数据未变时跳过写入
-    import hashlib
-    _new_hash = hashlib.md5(html.encode("utf-8")).hexdigest()
-    _skip_write = False
-    if dest.exists():
-        _old_hash = hashlib.md5(dest.read_bytes()).hexdigest()
-        if _old_hash == _new_hash:
-            _skip_write = True
-
-    if _skip_write:
-        click.echo(f"  ✓ 看板数据未变，跳过写入: {dest}")
+    if result.returncode == 0:
+        click.echo(result.stdout.strip())
     else:
-        dest.write_text(html, encoding="utf-8")
-        if loaded:
-            click.echo(f"  ✓ 已内嵌数据: {', '.join(loaded)}")
-        else:
-            click.echo(f"  ℹ  未找到 .gcc/ 数据文件，看板将使用手动上传模式")
-        click.echo(f"  ✓ 看板已生成: {dest}")
+        click.echo(f"  ✗ 生成失败: {result.stderr[:300]}", err=True)
+        return
 
     if serve:
         # --serve: 启动本地HTTP服务器，支持刷新按钮fetch动态加载数据
@@ -3582,8 +3204,10 @@ def cmd_dashboard(export, out, serve, port):
                 req_path = self.path.lstrip("/").split("?")[0]
                 if req_path == _dash_rel:
                     try:
-                        from click.testing import CliRunner
-                        CliRunner().invoke(cmd_dashboard, ["--export"])
+                        subprocess.run(
+                            [sys.executable, str(gen_script), "--quiet"],
+                            capture_output=True, timeout=30,
+                        )
                     except Exception:
                         pass
                 super().do_GET()

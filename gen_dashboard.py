@@ -1,7 +1,8 @@
 """
-GCC Dashboard 生成器 v4.98
+GCC Dashboard 生成器 v4.99
 读取 .GCC/gcc.db (improvements/cards/tasks) + tasks.jsonl + handoffs + pipeline
-python gen_dashboard.py
+python gen_dashboard.py          # 生成并打开浏览器
+python gen_dashboard.py --quiet  # 生成但不打开浏览器 (供 hook/自动化调用)
 """
 import json, pathlib, webbrowser, sys, sqlite3
 
@@ -263,6 +264,58 @@ for key, fname in [("skills","skillbank.jsonl"),("suggestions","suggestions.json
             inject_lines.append(f"DATA.{key} = {json.dumps(rows, ensure_ascii=False)};")
             loaded.append(fname)
 
+# ══ STATE 准确率数据 (⑦-⑫) ═════════════════════════════
+STATE_DIR = pathlib.Path("state")
+
+def _load_state_json(filename, data_key, label):
+    fp = STATE_DIR / filename
+    if not fp.exists(): return
+    try:
+        raw = json.loads(fp.read_text(encoding="utf-8"))
+        inject_lines.append(f"DATA.{data_key} = {json.dumps(raw, ensure_ascii=False)};")
+        loaded.append(label)
+    except Exception:
+        pass
+
+# ⑦ GCC-0171: Vision Filter 准确率
+_vf_path = STATE_DIR / "vision_filter_accuracy.json"
+if _vf_path.exists():
+    try:
+        _vf_raw = json.loads(_vf_path.read_text(encoding="utf-8"))
+        _vf_dash = {
+            "last_review": _vf_raw.get("last_3day_review", 0),
+            "pending_count": sum(1 for e in _vf_raw.get("events", []) if e.get("result") == "pending"),
+            "total_events": len(_vf_raw.get("events", [])),
+            "symbols": _vf_raw.get("accuracy", {}),
+        }
+        inject_lines.append(f"DATA.vf_accuracy = {json.dumps(_vf_dash, ensure_ascii=False)};")
+        loaded.append(f"vf_accuracy: {len(_vf_dash['symbols'])} symbols")
+    except Exception:
+        pass
+
+# ⑧ GCC-0172: BrooksVision 形态回测准确率
+_load_state_json("bv_signal_accuracy.json", "bv_accuracy", "bv_accuracy")
+
+# ⑨ GCC-0173: MACD背离回测准确率
+_load_state_json("macd_signal_accuracy.json", "macd_accuracy", "macd_accuracy")
+
+# ⑩ GCC-0174: 知识卡准确率
+_load_state_json("card_signal_accuracy.json", "card_accuracy", "card_accuracy")
+
+# ⑪ GCC-0197: 外挂信号准确率
+_pa_path = STATE_DIR / "plugin_signal_accuracy.json"
+if _pa_path.exists():
+    try:
+        _pa_raw = json.loads(_pa_path.read_text(encoding="utf-8"))
+        _pa_acc = _pa_raw.get("accuracy", {})
+        inject_lines.append(f"DATA.plugin_accuracy = {json.dumps(_pa_acc, ensure_ascii=False)};")
+        loaded.append(f"plugin_accuracy: {len(_pa_acc)} sources")
+    except Exception:
+        pass
+
+# ⑫ GCC-0197: 外挂Phase状态
+_load_state_json("plugin_phase_state.json", "plugin_phases", "plugin_phases")
+
 # inject + render
 if inject_lines:
     inject_js = "\n".join(inject_lines) + "\n"
@@ -276,4 +329,5 @@ out.write_text(html, encoding="utf-8")
 print(f"已内嵌: {', '.join(loaded)}")
 print(f"improvements: {len(all_improvements)}, cards: {len(all_cards)}, tasks: {len(all_tasks)}, sessions: {len(ho_sessions)}")
 print(f"生成: {out}")
-webbrowser.open(out.resolve().as_uri())
+if "--quiet" not in sys.argv:
+    webbrowser.open(out.resolve().as_uri())
