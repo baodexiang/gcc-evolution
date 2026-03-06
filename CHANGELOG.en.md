@@ -9,6 +9,9 @@ All notable changes to this project are documented in this file. This project fo
 ### 🔧 Changed
 
 - Release version bumped to **5.310** (`setup.py`, `gcc_evolution/__init__.py`, dashboard label, init template version field).
+- Updated user manual deliverables to `v5_310`:
+  - `GCC_Beginners_Guide_v5_310.docx`
+  - `GCC_新手完全手册_v5_310.docx`
 - Regenerated source release archive as `gcc_evolution_v5310.zip` to include latest formula updates.
 
 ---

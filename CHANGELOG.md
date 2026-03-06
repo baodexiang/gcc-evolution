@@ -9,6 +9,9 @@
 ### 🔧 变更 (Changed)
 
 - 发布版本升级到 **5.310**（`setup.py`、`gcc_evolution/__init__.py`、Dashboard 版本展示、初始化模板版本字段）。
+- 用户手册交付升级到 `v5_310`：
+  - `GCC_Beginners_Guide_v5_310.docx`
+  - `GCC_新手完全手册_v5_310.docx`
 - 重新生成源码压缩包 `gcc_evolution_v5310.zip`，纳入最新公式模块变更。
 
 ---
