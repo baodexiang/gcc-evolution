@@ -146,7 +146,7 @@ def cmd_init(args):
     if not config_path.exists():
         config_path.write_text(
             "# gcc-evo configuration\n"
-            "version: '5.310'\n"
+            "version: '5.320'\n"
             "project: '{}'\n"
             "loop_interval: 300  # seconds\n"
             "skeptic_threshold: 0.75\n"
@@ -832,5 +832,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
