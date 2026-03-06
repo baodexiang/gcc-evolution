@@ -582,6 +582,30 @@ def compare_positions(portfolio: dict, state: dict) -> list:
             "in_state": symbol in state
         })
 
+    # 反向检查: state.json有仓位但Coinbase没持仓的品种 (防止虚假仓位)
+    compared_symbols = {c["symbol"] for c in comparisons}
+    for currency, symbol in SYMBOL_MAP.items():
+        if symbol in compared_symbols:
+            continue
+        state_data = state.get(symbol, {})
+        state_position_units = state_data.get("position_units", 0)
+        if state_position_units > 0:
+            comparisons.append({
+                "currency": currency,
+                "symbol": symbol,
+                "coinbase_amount": 0.0,
+                "coinbase_value": 0.0,
+                "coinbase_price": 0.0,
+                "unit_amount": UNIT_AMOUNTS.get(currency, 1),
+                "state_position_units": state_position_units,
+                "state_open_buys_count": len(state_data.get("open_buys", [])),
+                "state_open_buys": state_data.get("open_buys", []),
+                "calculated_units": 0,
+                "max_units": state_data.get("max_units", 5),
+                "is_match": False,
+                "in_state": True,
+            })
+
     return comparisons
 
 def sync_via_api(positions: dict) -> bool:
