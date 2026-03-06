@@ -49096,6 +49096,18 @@ ROOT = Path(".")  # KEY-009路径基准
 @app.route("/key009", methods=["GET"])
 def key009_dashboard():
     """KEY-009审计dashboard — 优先用缓存数据(后台5分钟刷新)，fallback实时计算"""
+    def _get_signal_filter_mode():
+        try:
+            if not signal_filter:
+                return "OFF"
+            try:
+                from AIPro import signal_direction_filter as _sdf
+            except Exception:
+                import signal_direction_filter as _sdf
+            return "OBSERVE" if getattr(_sdf, "OBSERVE_ONLY", True) else "ENFORCE"
+        except Exception:
+            return "OFF"
+
     # 优先读缓存(后台线程每5分钟刷新)
     _cache_path = os.path.join("state", "key009_audit.json")
     multi_data = None
@@ -49142,8 +49154,14 @@ def key009_dashboard():
         _retries = getattr(_autosave_worker, "_k9_collect_retries", 0) if callable(_autosave_worker) else 0
     except NameError:
         _phase, _slot, _retries = "UNKNOWN", "", 0
+    _sf_mode = _get_signal_filter_mode()
     for d in multi_data.values():
-        d["review_status"] = {"phase": _phase, "slot": _slot, "collect_retries": _retries}
+        d["review_status"] = {
+            "phase": _phase,
+            "slot": _slot,
+            "collect_retries": _retries,
+            "signal_filter": _sf_mode
+        }
 
     # 读取dashboard HTML模板并注入多范围数据
     try:
@@ -49159,6 +49177,18 @@ def key009_dashboard():
 @app.route("/key009/json", methods=["GET"])
 def key009_json():
     """KEY-009审计数据 — JSON API"""
+    def _get_signal_filter_mode():
+        try:
+            if not signal_filter:
+                return "OFF"
+            try:
+                from AIPro import signal_direction_filter as _sdf
+            except Exception:
+                import signal_direction_filter as _sdf
+            return "OBSERVE" if getattr(_sdf, "OBSERVE_ONLY", True) else "ENFORCE"
+        except Exception:
+            return "OFF"
+
     try:
         hours = int(request.args.get("hours", 24))
         from key009_audit import audit
@@ -49172,7 +49202,12 @@ def key009_json():
             _retries = getattr(_autosave_worker, "_k9_collect_retries", 0) if callable(_autosave_worker) else 0
         except NameError:
             _phase, _slot, _retries = "UNKNOWN", "", 0
-        data["review_status"] = {"phase": _phase, "slot": _slot, "collect_retries": _retries}
+        data["review_status"] = {
+            "phase": _phase,
+            "slot": _slot,
+            "collect_retries": _retries,
+            "signal_filter": _get_signal_filter_mode()
+        }
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)})

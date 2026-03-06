@@ -81,6 +81,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div id="review-bar" style="background:#ddf4ff;border:1px solid #54aeff;border-radius:8px;padding:8px 14px;margin-bottom:12px;font-size:0.85em;display:none">
 <span id="review-phase" style="font-weight:700;color:#0969da"></span>
 <span id="review-detail" style="color:#656d76;margin-left:8px"></span>
+<span id="review-sf-badge" class="badge" style="margin-left:10px;vertical-align:middle;display:none"></span>
 <a href="/key009/reject" id="reject-btn" style="float:right;color:#cf222e;font-weight:700;text-decoration:none;display:none">[REJECT]</a>
 </div>
 
@@ -405,6 +406,7 @@ function _doRender() {
     const bar = $('review-bar');
     const phaseEl = $('review-phase');
     const detailEl = $('review-detail');
+    const sfBadge = $('review-sf-badge');
     const rejectBtn = $('reject-btn');
     const phaseMap = {
         'IDLE': ['IDLE', '等待下一个4h slot'],
@@ -415,6 +417,20 @@ function _doRender() {
     const [pLabel, pDetail] = phaseMap[rs.phase] || ['UNKNOWN', ''];
     phaseEl.textContent = `Claude Review: ${pLabel}`;
     detailEl.textContent = `${pDetail} | Slot: ${rs.slot || '-'}`;
+    const sfMode = (rs.signal_filter || 'OFF').toUpperCase();
+    if (sfMode === 'OBSERVE') {
+        sfBadge.textContent = 'SignalFilter: OBSERVE';
+        sfBadge.className = 'badge badge-low';
+        sfBadge.style.display = 'inline-block';
+    } else if (sfMode === 'ENFORCE') {
+        sfBadge.textContent = 'SignalFilter: ENFORCE';
+        sfBadge.className = 'badge badge-ok';
+        sfBadge.style.display = 'inline-block';
+    } else {
+        sfBadge.textContent = 'SignalFilter: OFF';
+        sfBadge.className = 'badge badge-silent';
+        sfBadge.style.display = 'inline-block';
+    }
     bar.style.display = 'block';
     bar.style.background = rs.phase === 'WAITING' ? '#fff8c5' : rs.phase === 'FIXING' ? '#ffebe9' : '#ddf4ff';
     bar.style.borderColor = rs.phase === 'WAITING' ? '#d4a72c' : rs.phase === 'FIXING' ? '#cf222e' : '#54aeff';
