@@ -22,6 +22,7 @@ import re
 import json
 import time
 import argparse
+import importlib
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
@@ -2959,8 +2960,26 @@ def main():
         h_1m = max(int((now - month_start).total_seconds() / 3600), 1)
         ranges = {"24h": h_24, "1w": h_1w, "1m": h_1m}
         multi = {}
+        def _get_signal_filter_mode():
+            # 静态导出版也注入SignalFilter模式，避免dashboard标签缺失
+            try:
+                try:
+                    _sdf = importlib.import_module("AIPro.signal_direction_filter")
+                except Exception:
+                    _sdf = importlib.import_module("signal_direction_filter")
+                return "OBSERVE" if getattr(_sdf, "OBSERVE_ONLY", True) else "ENFORCE"
+            except Exception:
+                return "OFF"
+
+        _sf_mode = _get_signal_filter_mode()
         for label, h in ranges.items():
             multi[label] = audit(log_path, hours=h)
+            multi[label]["review_status"] = {
+                "phase": "STATIC_EXPORT",
+                "slot": "",
+                "collect_retries": 0,
+                "signal_filter": _sf_mode,
+            }
         EXPORT_FILE.write_text(json.dumps(multi, ensure_ascii=False), encoding="utf-8")
 
         # ── 闭环: 用1w数据写经验卡+生成规则 (避免三范围重复) ──
