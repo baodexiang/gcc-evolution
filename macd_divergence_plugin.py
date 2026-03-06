@@ -1216,8 +1216,9 @@ def macd_acc_price_backfill():
                 record_changed = True
 
                 sig_price = _coerce_price(r.get("price_at_signal", r.get("price", 0)))
-                if sig_price > 0:
-                    pct = (current_price - sig_price) / sig_price
+                cur_price = _coerce_price(current_price)
+                if sig_price > 0 and cur_price > 0:
+                    pct = (cur_price - sig_price) / sig_price
                     direction = str(r.get("direction", "BUY")).upper()
                     if direction == "BUY":
                         r["result"] = "CORRECT" if pct > 0.005 else ("INCORRECT" if pct < -0.005 else "NEUTRAL")
@@ -1226,7 +1227,7 @@ def macd_acc_price_backfill():
                     r["pct_change"] = round(pct * 100, 2)
                     _gcc173_log(
                         f"[GCC-0173][MACD_EVAL] {sym} {direction} "
-                        f"→ {r['result']} (信号价{sig_price:.2f} 4H后{current_price:.2f} "
+                        f"→ {r['result']} (信号价{sig_price:.2f} 4H后{cur_price:.2f} "
                         f"变动{r['pct_change']:+.2f}%)")
         except Exception as e:
             _gcc173_log(f"[GCC-0173][MACD_EVAL] {sym} 价格获取失败: {e}")
