@@ -1,123 +1,133 @@
-# CHANGELOG — gcc-evo Version History
+﻿# CHANGELOG â€” gcc-evo Version History
 
 All notable changes to this project are documented in this file. This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [5.300] — 2026-03-05
+## [5.301] — 2026-03-06
 
-### ✨ New Features
+### 🔧 Fixed
 
-- **L0 Setup Layer** — `gcc-evo setup` interactive wizard, mandatory L0 gate before every loop
-  - `SessionConfig` — stores `.GCC/state/session_config.json`, validates 3 required fields
-  - `gcc-evo setup KEY-010` — interactive wizard for goal/criteria/config
-  - `gcc-evo setup --show` — display current config
-  - `gcc-evo setup --edit` — edit individual fields
-  - `gcc-evo setup --reset` — delete config
-- **L6 Observation Layer** — complete real-time observation framework
-  - `EventBus` — thread-safe singleton event bus, <5ms emit, persists to `.GCC/logs/events.jsonl`
-  - `LayerEmitter` — semantic emit interfaces for all 7 layers (`emit_l0~l6`, `layer_start/done/error`)
-  - `RunTracer` — tracks full flow snapshots per loop_id
-  - `DashboardServer` — local HTTP server (port 7842), SSE real-time push, 15s heartbeat
-- **Real-time Dashboard** — 7-layer status visualization, dark theme, SSE auto-reconnect, run history panel
-- **`gcc-evo loop --dry-run`** — skip L0 gate check (for testing)
-
-### 🎯 Improvements
-
-- `gcc-evo version` — now shows L6:Observation layer status
-- `gcc-evo loop` — adds L0 gate: invalid config rejects startup and prompts `gcc-evo setup`
-- `cli.py` — new `setup` subcommand routing
-
-### 🔧 Technical Details
-
-- **EventBus `_writer_loop`** — cross-batch `unflushed` list accumulation, flushes at threshold, final flush on thread exit
-- **ThreadingHTTPServer** — `daemon_threads=True`, SSE threads don't block `stop()`; `stop()` calls `shutdown()` + `server_close()` for port reuse
-- **RunTracer `_on_event`** — auto-infers layer status (started/done/error/skipped) without manual `mark_layer` calls
+- **Added gcc-evo commit command**: when committing with GCC-xxxx and optional Sx, the CLI now auto-syncs .GCC/pipeline/tasks.json so dashboard task status updates immediately after commit.
+- **Auto handoff trigger**: when a task/step reference is present, the CLI now attempts gcc-evo ho create automatically (warning-only on failure; commit remains successful).
+- **Version bump**: upgraded package version from 5.300 to 5.301 (__init__.py, setup.py, dashboard version label, init template version).
 
 ---
 
-## [5.295] — 2026-03-03
+## [5.300] â€” 2026-03-05
 
-### ✨ New Features
+### âœ¨ New Features
 
-- **Loop Closure Command** — One-click complete improvement cycle (6 automated steps)
-  - `gcc-evo loop GCC-0001 --once` — Single iteration
-  - `gcc-evo loop GCC-0001` — Continuous (5-minute auto-repeat)
-- **Cross-Model Switching** — Seamless switching between Gemini/ChatGPT/Claude/DeepSeek
-- **Plugin Signal Quality Closure** — Automatic tracking and improvement of plugin signal quality
+- **L0 Setup Layer** â€” `gcc-evo setup` interactive wizard, mandatory L0 gate before every loop
+  - `SessionConfig` â€” stores `.GCC/state/session_config.json`, validates 3 required fields
+  - `gcc-evo setup KEY-010` â€” interactive wizard for goal/criteria/config
+  - `gcc-evo setup --show` â€” display current config
+  - `gcc-evo setup --edit` â€” edit individual fields
+  - `gcc-evo setup --reset` â€” delete config
+- **L6 Observation Layer** â€” complete real-time observation framework
+  - `EventBus` â€” thread-safe singleton event bus, <5ms emit, persists to `.GCC/logs/events.jsonl`
+  - `LayerEmitter` â€” semantic emit interfaces for all 7 layers (`emit_l0~l6`, `layer_start/done/error`)
+  - `RunTracer` â€” tracks full flow snapshots per loop_id
+  - `DashboardServer` â€” local HTTP server (port 7842), SSE real-time push, 15s heartbeat
+- **Real-time Dashboard** â€” 7-layer status visualization, dark theme, SSE auto-reconnect, run history panel
+- **`gcc-evo loop --dry-run`** â€” skip L0 gate check (for testing)
+
+### ðŸŽ¯ Improvements
+
+- `gcc-evo version` â€” now shows L6:Observation layer status
+- `gcc-evo loop` â€” adds L0 gate: invalid config rejects startup and prompts `gcc-evo setup`
+- `cli.py` â€” new `setup` subcommand routing
+
+### ðŸ”§ Technical Details
+
+- **EventBus `_writer_loop`** â€” cross-batch `unflushed` list accumulation, flushes at threshold, final flush on thread exit
+- **ThreadingHTTPServer** â€” `daemon_threads=True`, SSE threads don't block `stop()`; `stop()` calls `shutdown()` + `server_close()` for port reuse
+- **RunTracer `_on_event`** â€” auto-infers layer status (started/done/error/skipped) without manual `mark_layer` calls
+
+---
+
+## [5.295] â€” 2026-03-03
+
+### âœ¨ New Features
+
+- **Loop Closure Command** â€” One-click complete improvement cycle (6 automated steps)
+  - `gcc-evo loop GCC-0001 --once` â€” Single iteration
+  - `gcc-evo loop GCC-0001` â€” Continuous (5-minute auto-repeat)
+- **Cross-Model Switching** â€” Seamless switching between Gemini/ChatGPT/Claude/DeepSeek
+- **Plugin Signal Quality Closure** â€” Automatic tracking and improvement of plugin signal quality
   - Signal recording + 4H backfill validation + Phase promotion/demotion + Daily quality report
-- **Skeptic Verification Gate** — Prevents unverified conclusions from entering memory
-- **Visual Dashboard** — Single HTML file, no installation required
+- **Skeptic Verification Gate** â€” Prevents unverified conclusions from entering memory
+- **Visual Dashboard** â€” Single HTML file, no installation required
 
-### 🐛 Bug Fixes
+### ðŸ› Bug Fixes
 
-- Environment variable leakage — Sensitive variables now display as `[MASKED]` in error messages
-- N-structure gate quality threshold — Adjusted 0.65 → 0.55, allowing normal pullback edge signals
-- x4 large-timeframe direction limit — Disabled overly restrictive conditions, improved accuracy
-- Fixed label display issue — Fixed rules now show as resolved even without pattern matches
+- Environment variable leakage â€” Sensitive variables now display as `[MASKED]` in error messages
+- N-structure gate quality threshold â€” Adjusted 0.65 â†’ 0.55, allowing normal pullback edge signals
+- x4 large-timeframe direction limit â€” Disabled overly restrictive conditions, improved accuracy
+- Fixed label display issue â€” Fixed rules now show as resolved even without pattern matches
 
-### 🎯 Improvements
+### ðŸŽ¯ Improvements
 
-- **Memory Management** — Three-tier hierarchy (sensory/short/long) optimizes long-term retention
-- **Retrieval Accuracy** — RAG + semantic search + KNN historical similarity
-- **Experience Distillation** — Automatic extraction of reusable rules into SkillBank
-- **Audit Logging** — Structured JSON logs recording all LLM interactions
+- **Memory Management** â€” Three-tier hierarchy (sensory/short/long) optimizes long-term retention
+- **Retrieval Accuracy** â€” RAG + semantic search + KNN historical similarity
+- **Experience Distillation** â€” Automatic extraction of reusable rules into SkillBank
+- **Audit Logging** â€” Structured JSON logs recording all LLM interactions
 
-### 📚 Documentation
+### ðŸ“š Documentation
 
-- README.md — Complete project background and architecture explanation
-- QUICKSTART.md — 10-minute getting started guide
-- CONTRIBUTING.md — Contribution workflow and CLA process
-- SECURITY.md — Security policies and best practices
-- LICENSE — BUSL 1.1 + Additional Use Grant
-- CONTRIBUTOR_LICENSE_AGREEMENT.md — Individual CLA
-- ENTERPRISE_CONTRIBUTOR_LICENSE_AGREEMENT.md — Corporate CLA
+- README.md â€” Complete project background and architecture explanation
+- QUICKSTART.md â€” 10-minute getting started guide
+- CONTRIBUTING.md â€” Contribution workflow and CLA process
+- SECURITY.md â€” Security policies and best practices
+- LICENSE â€” BUSL 1.1 + Additional Use Grant
+- CONTRIBUTOR_LICENSE_AGREEMENT.md â€” Individual CLA
+- ENTERPRISE_CONTRIBUTOR_LICENSE_AGREEMENT.md â€” Corporate CLA
 
-### 🔧 Technical Details
+### ðŸ”§ Technical Details
 
-- **Memory Tiers** — Sensory (latest events) / Short-term (recent discussion) / Long-term (summarized knowledge)
-- **Retriever** — Semantic similarity + KNN time-weighted + BM25 keyword matching
-- **Distiller** — Experience cards → SkillBank with automatic versioning
-- **Skeptic** — Confidence threshold (default 0.75) + Human anchor verification
-- **Pipeline** — DAG task scheduling + dependency management + retry logic
-
----
-
-## [5.290] — 2026-03-01
-
-### ✨ New Features
-
-- **gcc-evo v5.290** — First complete production release of AI Self-Evolution Engine
-- **Loop Command Binding** — Associate tasks with improvement cycles
-- **Open Source Release Package** — Complete P0 documentation and toolset
-  - Paper Engine — Paper analysis and knowledge distillation
-  - Vision Analyzer — Image recognition and morphology analysis
-  - Plugin Registry — Plugin system and scoring mechanism
-
-### 🎯 Improvements
-
-- Repository structure reorganization — Separated `.GCC/`, `opensource/`, `modules/`
-- Version numbering standardization — Adopted `v X.YZZ` format (v5.290, v5.295)
-- Logging output standardization — Unified `[v5.xxx]` and `[symbol]` prefixes
-
-### 📦 Releases
-
-- gcc_evolution_v5290.zip — Open source documentation and license package
-- GCC_Beginners_Guide_v5_290.docx — English user manual
-- GCC_新手完全手册_v5_290.docx — Chinese user manual
+- **Memory Tiers** â€” Sensory (latest events) / Short-term (recent discussion) / Long-term (summarized knowledge)
+- **Retriever** â€” Semantic similarity + KNN time-weighted + BM25 keyword matching
+- **Distiller** â€” Experience cards â†’ SkillBank with automatic versioning
+- **Skeptic** â€” Confidence threshold (default 0.75) + Human anchor verification
+- **Pipeline** â€” DAG task scheduling + dependency management + retry logic
 
 ---
 
-## [4.98] — 2025-12-15
+## [5.290] â€” 2026-03-01
 
-### ✨ New Features
+### âœ¨ New Features
 
-- **Initial gcc-evo** — GCC Evolution Engine prototype version
-- **Basic Memory System** — In-session token management
-- **Simple Retrieval** — Keyword-based content lookup
-- **Experience Card System** — Manual creation and management
+- **gcc-evo v5.290** â€” First complete production release of AI Self-Evolution Engine
+- **Loop Command Binding** â€” Associate tasks with improvement cycles
+- **Open Source Release Package** â€” Complete P0 documentation and toolset
+  - Paper Engine â€” Paper analysis and knowledge distillation
+  - Vision Analyzer â€” Image recognition and morphology analysis
+  - Plugin Registry â€” Plugin system and scoring mechanism
 
-### 📝 Architecture Design
+### ðŸŽ¯ Improvements
+
+- Repository structure reorganization â€” Separated `.GCC/`, `opensource/`, `modules/`
+- Version numbering standardization â€” Adopted `v X.YZZ` format (v5.290, v5.295)
+- Logging output standardization â€” Unified `[v5.xxx]` and `[symbol]` prefixes
+
+### ðŸ“¦ Releases
+
+- gcc_evolution_v5290.zip â€” Open source documentation and license package
+- GCC_Beginners_Guide_v5_290.docx â€” English user manual
+- GCC_æ–°æ‰‹å®Œå…¨æ‰‹å†Œ_v5_290.docx â€” Chinese user manual
+
+---
+
+## [4.98] â€” 2025-12-15
+
+### âœ¨ New Features
+
+- **Initial gcc-evo** â€” GCC Evolution Engine prototype version
+- **Basic Memory System** â€” In-session token management
+- **Simple Retrieval** â€” Keyword-based content lookup
+- **Experience Card System** â€” Manual creation and management
+
+### ðŸ“ Architecture Design
 
 - Single-layer memory (session-level)
 - Keyword matching
@@ -126,16 +136,16 @@ All notable changes to this project are documented in this file. This project fo
 
 ---
 
-## [3.0] — 2025-10-01
+## [3.0] â€” 2025-10-01
 
-### ✨ New Features
+### âœ¨ New Features
 
-- **First Generation GCC** — Bug tracking and improvement record system
+- **First Generation GCC** â€” Bug tracking and improvement record system
   - Issue management
   - Fix logging
   - Validation workflow
 
-### 📝 Prototype
+### ðŸ“ Prototype
 
 - Text file storage
 - Manual organization
@@ -147,22 +157,22 @@ All notable changes to this project are documented in this file. This project fo
 
 ```
 v3.0 (Bug Tracker)
-    ↓
+    â†“
 v4.0 (Improvement Manager)
-    ↓
+    â†“
 v4.98 (GCC Prototype)
-    ↓
+    â†“
 v5.0 (Memory Tiers Introduction)
-    ↓
+    â†“
 v5.100 (Retrieval Layer)
-    ↓
+    â†“
 v5.200 (Distillation Engine)
-    ↓
+    â†“
 v5.290 (Open Source Release)
-    ↓
-v5.295 (Current) — Loop + Skeptic + Multi-Model
-    ↓
-v6.0 (Planned) — Distributed Memory + Real-time Collaboration
+    â†“
+v5.295 (Current) â€” Loop + Skeptic + Multi-Model
+    â†“
+v6.0 (Planned) â€” Distributed Memory + Real-time Collaboration
 ```
 
 ---
@@ -203,18 +213,18 @@ gcc-evo loop GCC-0001 &
 
 ### v5.295
 
-- **Token Window** — Single conversation still limited by LLM context (claude-opus: 200K tokens)
+- **Token Window** â€” Single conversation still limited by LLM context (claude-opus: 200K tokens)
   - Mitigation: Automatic memory compression and retrieval strategies
-- **LLM Hallucination** — Models may generate false content
+- **LLM Hallucination** â€” Models may generate false content
   - Mitigation: Skeptic verification gate (confidence < 0.75 blocks)
-- **Cold Start** — New projects require initialization on first run
+- **Cold Start** â€” New projects require initialization on first run
   - Mitigation: `gcc-evo init` automatic setup
 
 ### Performance
 
-- **First Retrieval** — ~2-3 seconds (KNN index construction)
-- **Distillation** — ~5-10 seconds (LLM invocation)
-- **Loop Cycle** — 5-15 minutes (depends on task complexity)
+- **First Retrieval** â€” ~2-3 seconds (KNN index construction)
+- **Distillation** â€” ~5-10 seconds (LLM invocation)
+- **Loop Cycle** â€” 5-15 minutes (depends on task complexity)
 
 ---
 
@@ -222,16 +232,16 @@ gcc-evo loop GCC-0001 &
 
 This project is developed by baodexiang with contributions from:
 
-- Research and paper selection — arXiv paper analysis (30+ papers rated 4.0+)
-- Plugin system design — Plugin Registry and KNN matching
-- User feedback and testing — Trading system and industrial diagnostics
+- Research and paper selection â€” arXiv paper analysis (30+ papers rated 4.0+)
+- Plugin system design â€” Plugin Registry and KNN matching
+- User feedback and testing â€” Trading system and industrial diagnostics
 
 ---
 
 ## License
 
-- **v5.295 and earlier** — BUSL 1.1 (auto-converts to Apache-2.0 on 2028-05-01)
-- **v6.0 and later** — Apache 2.0 (from planning stage)
+- **v5.295 and earlier** â€” BUSL 1.1 (auto-converts to Apache-2.0 on 2028-05-01)
+- **v6.0 and later** â€” Apache 2.0 (from planning stage)
 
 See [LICENSE](LICENSE) file for details.
 
@@ -239,12 +249,13 @@ See [LICENSE](LICENSE) file for details.
 
 ## Feedback and Reporting
 
-- 🐛 **Bug Reports** — GitHub Issues or baodexiang@hotmail.com
-- 💬 **Feature Requests** — GitHub Discussions
-- 🔐 **Security Issues** — security@gcc-evo.dev (private)
+- ðŸ› **Bug Reports** â€” GitHub Issues or baodexiang@hotmail.com
+- ðŸ’¬ **Feature Requests** â€” GitHub Discussions
+- ðŸ” **Security Issues** â€” security@gcc-evo.dev (private)
 
 ---
 
 **Last Updated**: 2026-03-03
 **Version**: 5.295
 **Maintainer**: baodexiang <baodexiang@hotmail.com>
+

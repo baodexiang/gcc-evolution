@@ -4,6 +4,16 @@
 
 ---
 
+## [5.301] — 2026-03-06
+
+### 🔧 修复 (Fixed)
+
+- **新增 `gcc-evo commit` 命令**：提交代码时可关联 `GCC-xxxx` 与 `Sx`，并在 commit 成功后自动同步 `.GCC/pipeline/tasks.json`，确保 Dashboard 任务状态实时更新。
+- **自动交接触发**：当 commit 识别到任务号/步骤号时，自动尝试执行 `gcc-evo ho create`（失败给出 warning，不影响 commit 成功）。
+- **版本更新**：包版本从 `5.300` 升级到 `5.301`（`__init__.py`、`setup.py`、Dashboard 版本展示、初始化模板版本号同步）。
+
+---
+
 ## [5.300] — 2026-03-05
 
 ### ✨ 新增 (New)

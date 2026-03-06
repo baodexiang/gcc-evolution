@@ -6,6 +6,7 @@ Usage:
     gcc-evo setup KEY [--show] [--edit] [--reset]
     gcc-evo init [--project NAME]
     gcc-evo loop TASK_ID [--once] [--provider PROVIDER] [--dry-run]
+    gcc-evo commit "MESSAGE" [--task-id GCC-0001] [--step-id S1]
     gcc-evo pipe task TITLE -k KEY -m MODULE -p PRIORITY
     gcc-evo pipe list
     gcc-evo pipe status TASK_ID
@@ -17,6 +18,8 @@ Usage:
 import sys
 import json
 import argparse
+import subprocess
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -132,7 +135,7 @@ def cmd_init(args):
     if not config_path.exists():
         config_path.write_text(
             "# gcc-evo configuration\n"
-            "version: '5.300'\n"
+            "version: '5.301'\n"
             "project: '{}'\n"
             "loop_interval: 300  # seconds\n"
             "skeptic_threshold: 0.75\n"
@@ -363,6 +366,145 @@ def cmd_pipe_status(args):
     print(f"Task {args.task_id} not found.")
 
 
+def _utc_now_iso() -> str:
+    return datetime.utcnow().isoformat()
+
+
+def _infer_task_ref(message: str) -> tuple[str | None, str | None]:
+    """Infer GCC task / pipeline step references from commit message."""
+    task_match = re.search(r"\bGCC-\d{4}\b", message, flags=re.IGNORECASE)
+    step_match = re.search(r"\bS\d+[a-z]?\b", message, flags=re.IGNORECASE)
+    task_id = task_match.group(0).upper() if task_match else None
+    step_id = step_match.group(0).upper() if step_match else None
+    return task_id, step_id
+
+
+def _update_pipeline_after_commit(task_id: str, step_id: str | None, commit_sha: str) -> tuple[bool, str]:
+    """Update .GCC/pipeline/tasks.json so dashboard reflects commit progress."""
+    tasks_path = Path(".GCC/pipeline/tasks.json")
+    if not tasks_path.exists():
+        return False, "Pipeline file not found (.GCC/pipeline/tasks.json). Skipped status sync."
+
+    data = json.loads(tasks_path.read_text(encoding="utf-8"))
+    tasks = data.get("tasks", [])
+    task = next((t for t in tasks if str(t.get("task_id", "")).upper() == task_id.upper()), None)
+    if not task:
+        return False, f"Task {task_id} not found in pipeline. Skipped status sync."
+
+    now = _utc_now_iso()
+    task["updated_at"] = now
+
+    if step_id:
+        steps = task.get("steps", [])
+        step = next((s for s in steps if str(s.get("id", "")).upper() == step_id.upper()), None)
+        if not step:
+            return False, f"Step {step_id} not found under {task_id}. Skipped step sync."
+        step["status"] = "done"
+        note = str(step.get("note", "")).strip()
+        tag = f"committed {commit_sha}"
+        step["note"] = f"{note} | {tag}" if note else tag
+
+        all_done = all(str(s.get("status", "")).lower() in {"done", "completed", "closed"} for s in steps)
+        if all_done:
+            task["stage"] = "done"
+            task["status"] = "done"
+            task["completed_at"] = now
+        else:
+            if str(task.get("stage", "")).lower() in {"pending", "planning"}:
+                task["stage"] = "implement"
+            task["status"] = "running"
+    else:
+        # Task-level commit means the GCC task is completed.
+        task["stage"] = "done"
+        task["status"] = "done"
+        task["completed_at"] = now
+        for step in task.get("steps", []):
+            if str(step.get("status", "")).lower() not in {"done", "completed", "closed"}:
+                step["status"] = "done"
+                note = str(step.get("note", "")).strip()
+                tag = f"committed {commit_sha}"
+                step["note"] = f"{note} | {tag}" if note else tag
+
+    tasks_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    if step_id:
+        return True, f"Synced dashboard state: {task_id}/{step_id} -> done"
+    return True, f"Synced dashboard state: {task_id} -> done"
+
+
+def _run_ho_create() -> tuple[bool, str]:
+    """
+    Best-effort handoff generation.
+    Preference: call `gcc-evo ho create` directly so existing full CLI handles it.
+    """
+    candidates = [
+        ["gcc-evo", "ho", "create"],
+        [sys.executable, "-m", "gcc_evolution.gcc_evo", "ho", "create"],
+    ]
+    for cmd in candidates:
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True)
+        except Exception:
+            continue
+        if res.returncode == 0:
+            output = (res.stdout or "").strip()
+            return True, output or "Executed: gcc-evo ho create"
+    return False, "Failed to run `gcc-evo ho create` automatically."
+
+
+def cmd_commit(args):
+    """Git commit and sync pipeline/dashboard status."""
+    message = args.message.strip()
+    if not message:
+        print("Error: commit message cannot be empty.")
+        sys.exit(1)
+
+    task_id = args.task_id
+    step_id = args.step_id
+    inferred_task, inferred_step = _infer_task_ref(message)
+    if not task_id:
+        task_id = inferred_task
+    if not step_id:
+        step_id = inferred_step
+
+    if step_id and not task_id:
+        print("Error: --step-id requires --task-id (or a GCC-xxxx reference in message).")
+        sys.exit(1)
+
+    if not args.no_add:
+        add_res = subprocess.run(["git", "add", "-A"], capture_output=True, text=True)
+        if add_res.returncode != 0:
+            print("git add failed:")
+            print(add_res.stderr.strip() or add_res.stdout.strip())
+            sys.exit(add_res.returncode)
+
+    commit_cmd = ["git", "commit", "-m", message]
+    if args.no_verify:
+        commit_cmd.append("--no-verify")
+    commit_res = subprocess.run(commit_cmd, capture_output=True, text=True)
+    if commit_res.returncode != 0:
+        print("git commit failed:")
+        print(commit_res.stderr.strip() or commit_res.stdout.strip())
+        sys.exit(commit_res.returncode)
+
+    sha_res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
+    commit_sha = sha_res.stdout.strip() if sha_res.returncode == 0 else "HEAD"
+    print(commit_res.stdout.strip() or f"Committed: {commit_sha}")
+
+    if task_id:
+        ok, msg = _update_pipeline_after_commit(task_id=task_id, step_id=step_id, commit_sha=commit_sha)
+        if ok:
+            print(msg)
+        else:
+            print(f"Status sync warning: {msg}")
+        ho_ok, ho_msg = _run_ho_create()
+        if ho_ok:
+            print("Auto handoff: success")
+        else:
+            print(f"Auto handoff: warning ({ho_msg})")
+    else:
+        print("No GCC task reference found; skipped dashboard status sync and ho create.")
+
+
 def cmd_memory_compact(args):
     """Compact memory tiers."""
     state_dir = Path("state")
@@ -465,6 +607,18 @@ def main():
     loop_parser.add_argument("--dry-run", action="store_true", default=False,
                              help="Skip L0 gate check")
 
+    # commit
+    commit_parser = subparsers.add_parser("commit", help="Git commit + dashboard/pipeline sync")
+    commit_parser.add_argument("message", type=str, help="Commit message")
+    commit_parser.add_argument("--task-id", type=str, default=None,
+                               help="GCC task id, e.g. GCC-0155")
+    commit_parser.add_argument("--step-id", type=str, default=None,
+                               help="Pipeline step id, e.g. S3")
+    commit_parser.add_argument("--no-add", action="store_true", default=False,
+                               help="Skip implicit 'git add -A'")
+    commit_parser.add_argument("--no-verify", action="store_true", default=False,
+                               help="Pass --no-verify to git commit")
+
     # pipe
     pipe_parser = subparsers.add_parser("pipe", help="Pipeline management")
     pipe_sub = pipe_parser.add_subparsers(dest="pipe_command")
@@ -500,6 +654,8 @@ def main():
         cmd_init(args)
     elif args.command == "loop":
         cmd_loop(args)
+    elif args.command == "commit":
+        cmd_commit(args)
     elif args.command == "pipe":
         if args.pipe_command == "task":
             cmd_pipe_task(args)
