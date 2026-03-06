@@ -49889,6 +49889,27 @@ def handle_p0_signal():
                     pass
 
                 if not reason:
+                    # KEY-010 S8: BUY方向卡门（观察模式：仅记录，不真实拦截）
+                    if signal_filter and ValidSignal and direction_result:
+                        try:
+                            _buy_allowed = signal_filter.filter_signal(
+                                ValidSignal(
+                                    signal_id=str(uuid.uuid4())[:8],
+                                    timestamp=datetime.now().isoformat(),
+                                    direction="buy",
+                                    source=signal_type,
+                                ),
+                                direction_result
+                            )
+                            if not _buy_allowed:
+                                log_to_server(
+                                    f"[方向过滤][观察] BUY本应拦截 | 原因:{direction_result.direction} "
+                                    f"| 4h Buy {direction_result.buy_ratio_4h:.1%} "
+                                    f"Week Buy {direction_result.buy_ratio_week:.1%}"
+                                )
+                        except Exception as _sf_buy_e:
+                            log_to_server(f"[SignalFilter] BUY过滤调用失败: {_sf_buy_e}")
+
                     # 执行买入
                     log_to_server(f"[P0] 执行买入: {symbol} pos={position_units}")
                     try:
