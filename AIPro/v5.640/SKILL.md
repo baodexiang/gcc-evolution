@@ -15,10 +15,6 @@ version: 5.640
 - 移动止损/止盈: 保持运行，并进入 Signal Gate / FilterChain 审核
 - FilterChain豁免: 当前为 BrooksVision / VisionPattern / 双底双顶，移动止损/止盈不豁免
 - P0-CycleSwitch: 触发入口仍在，但 _run_cycle_switch_analysis() 内下单开关已关闭
-- KEY-010 方向过滤: `AIPro/signal_direction_filter.py` 已接入 `/p0_signal`（S6/S7/S8/S9）
-- KEY-010 模式: `OBSERVE_ONLY=True`（观察模式，仅记录 would_block）
-- KEY-009 Dashboard: `/key009` 与 `/key009/json` 返回 `review_status.signal_filter`
-- L2评分当前生效口径: 总分 `±16`（历史 `±22` 仅用于回顾）
 - 说明: 下方历史章节用于回溯，不代表全部“当前运行态”
 
 ## DeepSeek API处理
@@ -97,27 +93,7 @@ GCC-0194核心变更: L1趋势与外挂解耦, 外挂不依赖趋势方向判断
 | 每日偏向分 | ±2 | 复盘设置的方向 |
 | **总分** | **±16** | STRONG阈值±8 |
 
-> 当前生效口径（实盘）：总分 `±16`。  
-> 历史章节出现的 `±22` 为旧阶段口径，仅用于版本追溯，不作为当前执行标准。
-
-## KEY-010: Signal Direction Filter（观察模式）
-
-```text
-模块:
-  AIPro/signal_direction_filter.py
-
-接入:
-  llm_server_v3640.py -> /p0_signal -> handle_p0_signal()
-  S6 record_signal / S7 evaluate_direction / S8 BUY观察 / S9 SELL观察
-
-可观测:
-  /key009 + /key009/json -> review_status.signal_filter
-  key009_dashboard 显示 SignalFilter: OBSERVE/ENFORCE/OFF
-
-当前行为:
-  OBSERVE_ONLY=True
-  仅记录 would_block 事件，不真实拦截下单
-```
+> v3.500移除唐纳奇通道分(±3)，与位置分重复计算pos_in_channel
 
 ---
 

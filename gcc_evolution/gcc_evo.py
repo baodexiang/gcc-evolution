@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gcc-evo v5.280 — GCC Evolution Engine with Visual Dashboard"""
+"""gcc-evo v5.305 — GCC Evolution Engine with Visual Dashboard"""
 from __future__ import annotations
 
 import json

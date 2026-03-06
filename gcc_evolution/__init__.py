@@ -20,7 +20,7 @@ v4.6:  + Constraints, Skill Registry, Self-Check, STATUS.md
 v4.5:  Smart handoff + params
 """
 
-__version__ = "5.050"
+__version__ = "5.305"
 
 from .models import (
     CardStatus,
@@ -42,7 +42,7 @@ from .selfcheck import run_self_check, generate_status_md
 from .human_anchor import HumanAnchor, HumanAnchorStore, AnchorPauseSignal, NLQParser
 try:
     from .backtest_store import (
-        DomainEvent, BacktestStore,
+        TradeEvent, BacktestStore,
         CounterfactualEngine, CounterfactualResult,
         DrawdownAnalyzer, DrawdownAttribution, PatternStats,
     )
@@ -80,7 +80,7 @@ __all__ = [
     "HumanAnchorStore",
     "AnchorPauseSignal",
     "NLQParser",
-    "DomainEvent",
+    "TradeEvent",
     "BacktestStore",
     "CounterfactualEngine",
     "CounterfactualResult",
