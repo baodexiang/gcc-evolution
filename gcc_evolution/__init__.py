@@ -1,5 +1,5 @@
 ﻿"""
-gcc-evo â€” AI Self-Evolution Engine v5.305
+gcc-evo â€” AI Self-Evolution Engine v5.320
 
 Open-source framework for LLM agent persistent memory + continuous learning.
 
@@ -17,7 +17,7 @@ Layers:
   Direction Anchor (constitutional principles)
 """
 
-__version__ = "5.305"
+__version__ = "5.320"
 __author__ = "baodexiang"
 __license__ = "BUSL-1.1"
 
@@ -76,5 +76,6 @@ __all__ = [
     # Anchor
     "DirectionAnchor", "PrincipleSet",
 ]
+
 
 

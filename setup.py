@@ -10,7 +10,7 @@ from pathlib import Path
 
 # Pin release version for this source package.
 # Do not infer from external files to avoid accidental parse errors.
-version = "5.305"
+version = "5.320"
 
 # Read long description from README
 readme_file = Path(__file__).parent / "README.md"
@@ -111,5 +111,6 @@ setup(
 
     zip_safe=False,
 )
+
 
 

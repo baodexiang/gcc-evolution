@@ -18,6 +18,31 @@ from .P002_nowcasting import (
     eq_2_fusion_weights,
     eq_3_confidence_interval,
 )
+from .P003_alphaforgebench import (
+    BENCH_EPSILON,
+    eq_1_offline_pattern_score,
+    eq_2_precision_recall_f1,
+    eq_3_composite_benchmark_score,
+)
+from .P004_prompt_repetition import (
+    REP_EPSILON,
+    eq_1_repetition_performance_gain,
+    eq_2_optimal_repetition_count,
+)
+from .P005_dualpath_kvcache import (
+    KV_EPSILON,
+    eq_1_dualpath_allocation_ratio,
+    eq_2_cache_hit_objective,
+    eq_3_inference_latency_estimate,
+)
+from .P006_drift_aware import (
+    DRIFT_EPSILON,
+    eq_1_stl_residual,
+    eq_2_psi_score,
+    eq_3_ks_statistic,
+    eq_4_adaptive_window_size,
+    eq_5_drift_detected,
+)
 
 __all__ = [
     "ALPHA",
@@ -34,4 +59,21 @@ __all__ = [
     "eq_1_realtime_state_estimate",
     "eq_2_fusion_weights",
     "eq_3_confidence_interval",
+    "BENCH_EPSILON",
+    "eq_1_offline_pattern_score",
+    "eq_2_precision_recall_f1",
+    "eq_3_composite_benchmark_score",
+    "REP_EPSILON",
+    "eq_1_repetition_performance_gain",
+    "eq_2_optimal_repetition_count",
+    "KV_EPSILON",
+    "eq_1_dualpath_allocation_ratio",
+    "eq_2_cache_hit_objective",
+    "eq_3_inference_latency_estimate",
+    "DRIFT_EPSILON",
+    "eq_1_stl_residual",
+    "eq_2_psi_score",
+    "eq_3_ks_statistic",
+    "eq_4_adaptive_window_size",
+    "eq_5_drift_detected",
 ]
