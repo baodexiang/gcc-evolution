@@ -31,6 +31,30 @@ logger = logging.getLogger("gcc.retriever")
 
 # E1 (Engram#1 P0): normalize_key from P001_engram eq.(7)
 # E5 (Engram#5 P1): session_prefetch_priority from P001_engram eq.(11)
+# P002 (Nowcasting): fusion_weights softmax from P002 eq.(2)
+# P003 (AlphaForgeBench): offline pattern score from P003 eq.(1)
+try:
+    from .papers.formulas.P002_nowcasting import eq_2_fusion_weights as _fusion_weights
+except Exception:
+    def _fusion_weights(signal_scores, temperature=1.0):  # inline fallback
+        import math as _math
+        scores = [float(s) for s in signal_scores]
+        if not scores:
+            return []
+        temp = max(float(temperature), 1e-8)
+        scaled = [s / temp for s in scores]
+        pivot = max(scaled)
+        exps = [_math.exp(s - pivot) for s in scaled]
+        denom = sum(exps) or 1.0
+        return [e / denom for e in exps]
+
+try:
+    from .papers.formulas.P003_alphaforgebench import eq_1_offline_pattern_score as _pattern_score
+except Exception:
+    def _pattern_score(hit_rate: float, novelty: float, stability: float) -> float:
+        h, n, s = max(0.0, hit_rate), max(0.0, novelty), max(0.0, stability)
+        return (h * n * s) ** (1.0 / 3.0) if h > 0 and n > 0 and s > 0 else 0.0
+
 try:
     from .papers.formulas.P001_engram import (
         eq_7_normalize_key as _normalize_key,
@@ -861,6 +885,17 @@ class Retriever:
             + conf * w["confidence"] + status_score * w["status"]
             + freshness * w["freshness"] + downstream * w["downstream"]
         )
+
+        # P002 eq.(2): softmax fusion blend (70% weighted-sum + 30% softmax)
+        _components = [kw_score, emb_score, conf, status_score, freshness, downstream]
+        _fw = _fusion_weights(_components)
+        _fused = sum(c * fw for c, fw in zip(_components, _fw))
+        base_score = 0.7 * base_score + 0.3 * _fused
+
+        # P003 eq.(1): offline pattern score boost (hit_rate=kw, novelty=1-reuse, stability=conf)
+        _novelty = max(0.0, 1.0 - math.log2(max(card.use_count, 0) + 1) * 0.1)
+        _pattern_boost = _pattern_score(kw_score, _novelty, conf) * 0.05
+        base_score += _pattern_boost
 
         # v4.85: Hierarchical priority weights (AdaptiveNN coarse-to-fine)
         # Direction layer (C1) > Project layer (C2) > Execution layer (C3)

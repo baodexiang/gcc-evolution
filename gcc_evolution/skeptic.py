@@ -52,6 +52,46 @@ except ImportError:
 
 # E4 (Engram#4 P1): soft gating from P001_engram eq.(9)
 # 替换硬阈值 confidence >= 0.5 → sigmoid alpha门控（更平滑）
+# P002 (Nowcasting): confidence interval from P002_nowcasting eq.(3)
+# P003 (AlphaForgeBench): precision/recall/f1 + composite score from P003 eq.(2)(3)
+# P006 (Drift-Aware): distribution drift detection from P006 eq.(2)(3)(5)
+try:
+    from .papers.formulas.P006_drift_aware_streaming import (
+        eq_2_psi as _drift_psi,
+        eq_3_ks_statistic as _drift_ks,
+        eq_5_drift_detected as _drift_detected,
+    )
+except Exception:
+    import math as _math
+    def _drift_psi(expected, actual, n_bins=10): return 0.0
+    def _drift_ks(sample_a, sample_b): return 0.0
+    def _drift_detected(psi: float, ks: float) -> bool: return False
+
+try:
+    from .papers.formulas.P003_alphaforgebench import (
+        eq_2_precision_recall_f1 as _prf1,
+        eq_3_composite_benchmark_score as _composite_score,
+    )
+except Exception:
+    def _prf1(tp: int, fp: int, fn: int):
+        tp_f, fp_f, fn_f = float(max(tp,0)), float(max(fp,0)), float(max(fn,0))
+        p = tp_f / (tp_f + fp_f) if (tp_f + fp_f) > 0 else 0.0
+        r = tp_f / (tp_f + fn_f) if (tp_f + fn_f) > 0 else 0.0
+        f1 = 2*p*r/(p+r) if (p+r) > 0 else 0.0
+        return p, r, f1
+    def _composite_score(pattern_score: float, f1_score: float, latency_ms: float = 0.0, latency_budget_ms: float = 50.0) -> float:
+        return 0.6 * max(0.0, pattern_score) + 0.4 * max(0.0, f1_score)
+
+try:
+    from .papers.formulas.P002_nowcasting import eq_3_confidence_interval as _confidence_interval
+except Exception:
+    import math as _math
+    def _confidence_interval(mean: float, variance: float, sample_size: int, z_score: float = 1.96):
+        n = max(int(sample_size), 1)
+        margin = abs(float(z_score)) * _math.sqrt(max(float(variance), 0.0) / n)
+        m = float(mean)
+        return (m - margin, m + margin)
+
 try:
     from .papers.formulas.P001_engram import eq_9_soft_gate as _soft_gate
 except Exception:
@@ -210,6 +250,21 @@ class SkepticVerdict:
     auto_constraints: list[str] = field(default_factory=list)   # 生成的DO NOT规则ID
     confidence_delta: float = 0.0                               # 对card confidence的调整量
     new_pitfalls: list[str] = field(default_factory=list)
+
+    # P002 eq.(3): 置信区间 (delta scores的95% CI)
+    ci_low: float = 0.0
+    ci_high: float = 0.0
+
+    # P003 eq.(2)+(3): precision/recall/f1 + composite benchmark score
+    precision: float = 0.0
+    recall: float = 0.0
+    f1: float = 0.0
+    composite_score: float = 0.0
+
+    # P006 eq.(2)(3)(5): distribution drift detection
+    drift_detected: bool = False
+    drift_psi: float = 0.0
+    drift_ks: float = 0.0
 
     # 审计
     verdict_file: str = ""
@@ -523,6 +578,37 @@ class Skeptic:
                         f"{d.before:.3f} → {d.after:.3f} "
                         f"({d.delta_pct:+.1%})"
                     )
+
+        # P003 eq.(2): precision/recall/f1 (tp=passed_required, fp=optional_improved, fn=failed_required)
+        _tp = verdict.required_passed
+        _fn = verdict.required_total - verdict.required_passed
+        _fp = verdict.optional_improved
+        verdict.precision, verdict.recall, verdict.f1 = _prf1(_tp, _fp, _fn)
+
+        # P003 eq.(3): composite benchmark score (pattern=pass_ratio, f1=f1, latency=0)
+        _pass_ratio = verdict.required_passed / max(verdict.required_total, 1)
+        verdict.composite_score = _composite_score(_pass_ratio, verdict.f1, 0.0)
+
+        # P002 eq.(3): 95% CI on delta scores
+        _scores = [d.after for d in deltas if d.after is not None]
+        if len(_scores) >= 2:
+            _mean = sum(_scores) / len(_scores)
+            _var = sum((s - _mean) ** 2 for s in _scores) / len(_scores)
+            verdict.ci_low, verdict.ci_high = _confidence_interval(_mean, _var, len(_scores))
+        elif _scores:
+            verdict.ci_low = verdict.ci_high = _scores[0]
+
+        # P006 eq.(2)(3)(5): detect distribution drift between before and after metrics
+        _before = [d.before for d in deltas if d.before is not None and d.after is not None]
+        _after  = [d.after  for d in deltas if d.before is not None and d.after is not None]
+        if len(_before) >= 2:
+            verdict.drift_psi = _drift_psi(_before, _after)
+            verdict.drift_ks  = _drift_ks(_before, _after)
+            verdict.drift_detected = _drift_detected(verdict.drift_psi, verdict.drift_ks)
+            if verdict.drift_detected:
+                verdict.new_pitfalls.append(
+                    f"Metric drift detected: PSI={verdict.drift_psi:.3f} KS={verdict.drift_ks:.3f}"
+                )
 
         return verdict
 

@@ -41,6 +41,27 @@ def _tid() -> str:
     return f"T{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
 
 
+# ── P004 (Prompt Repetition): diminishing-return retry budget ──────────────
+try:
+    from .papers.formulas.P004_prompt_repetition import (
+        eq_1_repetition_performance_gain as _retry_gain,
+        eq_2_optimal_repetition_count as _optimal_retries,
+    )
+except Exception:
+    import math as _math
+    def _retry_gain(repetition_count: int, max_gain: float = 1.0, decay_rate: float = 0.35) -> float:
+        return max_gain * (1.0 - _math.exp(-decay_rate * max(0, int(repetition_count))))
+    def _optimal_retries(max_search: int = 12, max_gain: float = 1.0, decay_rate: float = 0.35, cost_per_repeat: float = 0.05) -> int:
+        best_n, best_u = 0, -1e18
+        for n in range(max(1, max_search) + 1):
+            u = _retry_gain(n, max_gain, decay_rate) - n * cost_per_repeat
+            if u > best_u:
+                best_u, best_n = u, n
+        return best_n
+
+# 预计算最优重试上限 (decay=0.35, cost=0.05 → typically 5-6次)
+MAX_RETRY_STEPS: int = _optimal_retries()
+
 # ── E2/E3/E6 (Engram#2/3/6) helpers ──────────────────────────────────────
 
 # E6: Two-task routing keywords
@@ -247,9 +268,19 @@ class Orchestrator:
         task = self._tasks.get(task_id)
         if not task or step_index >= len(task.steps):
             return False
-        task.steps[step_index].status      = StepStatus.FAILED
-        task.steps[step_index].error       = error
-        task.steps[step_index].finished_at = _now()
+        step = task.steps[step_index]
+        step.status      = StepStatus.FAILED
+        step.error       = error
+        step.finished_at = _now()
+
+        # P004 eq.(1): 计算当前重试次数的预期收益，记录是否值得继续
+        _retry_count = int(step.metadata.get("retry_count", 0))
+        _gain = _retry_gain(_retry_count)
+        _worth_retry = _retry_count < MAX_RETRY_STEPS and _gain < 0.95
+        step.metadata["retry_count"] = _retry_count
+        step.metadata["retry_gain"] = round(_gain, 4)
+        step.metadata["worth_retry"] = _worth_retry
+
         task.status     = TaskStatus.FAILED
         task.updated_at = _now()
         self._save_task(task)

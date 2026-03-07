@@ -34,6 +34,44 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# P002 (Nowcasting): EWMA quality tracking from P002_nowcasting eq.(1)
+try:
+    from .papers.formulas.P002_nowcasting import eq_1_realtime_state_estimate as _ewma_quality
+except Exception:
+    def _ewma_quality(prev_state: float, observation: float, alpha: float = 0.3) -> float:
+        a = max(0.0, min(1.0, float(alpha)))
+        return a * float(observation) + (1.0 - a) * float(prev_state)
+
+# P005 (DualPath KV-Cache): hot/cold allocation from P005 eq.(1)(2)(3)
+# P006 (Drift-Aware): STL trend tracking from P006 eq.(1)
+try:
+    from .papers.formulas.P005_dualpath_kvcache import (
+        eq_1_dualpath_allocation_ratio as _kv_ratio,
+        eq_2_cache_hit_objective as _kv_hit_obj,
+        eq_3_inference_latency_estimate as _kv_latency,
+    )
+except Exception:
+    def _kv_ratio(hot_score: float, cold_score: float) -> float:
+        h, c = max(0.0, hot_score), max(0.0, cold_score)
+        return h / (h + c) if (h + c) > 1e-8 else 0.5
+    def _kv_hit_obj(hit_rate_hot: float, hit_rate_cold: float, ratio_hot: float) -> float:
+        rh = max(0.0, min(1.0, ratio_hot))
+        return rh * max(0.0, min(1.0, hit_rate_hot)) + (1.0 - rh) * max(0.0, min(1.0, hit_rate_cold))
+    def _kv_latency(base_latency_ms: float, hit_rate_objective: float, miss_penalty_ms: float) -> float:
+        return max(0.0, base_latency_ms) + (1.0 - max(0.0, min(1.0, hit_rate_objective))) * max(0.0, miss_penalty_ms)
+
+try:
+    from .papers.formulas.P006_drift_aware_streaming import eq_1_stl_trend as _stl_trend
+except Exception:
+    def _stl_trend(series, alpha: float = 0.3) -> float:
+        if not series:
+            return 0.0
+        a = max(1e-8, min(1.0, float(alpha)))
+        level = float(series[0])
+        for x in series[1:]:
+            level = a * float(x) + (1.0 - a) * level
+        return level
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -380,6 +418,36 @@ class MemoryTiers:
         except Exception as e:
             logger.warning("[MEMORY] skill redist failed: %s", e)
 
+        # P002 eq.(1): EWMA rolling quality state
+        # P006 eq.(1): STL trend level of confidence history
+        if card_data:
+            _avg_conf = sum(c["confidence"] for c in card_data) / len(card_data)
+            _qfile = self._gcc_dir / "memory_quality_state.json"
+            try:
+                _qdata = json.loads(_qfile.read_text("utf-8"))
+                _prev = float(_qdata.get("quality", _avg_conf))
+                _history = _qdata.get("history", [])
+            except Exception:
+                _prev, _history = _avg_conf, []
+            _new_q = _ewma_quality(_prev, _avg_conf, alpha=0.3)
+            _history.append(round(_avg_conf, 4))
+            if len(_history) > 20:
+                _history = _history[-20:]
+            _trend = _stl_trend(_history) if len(_history) >= 2 else _new_q
+            try:
+                _qfile.write_text(
+                    json.dumps({
+                        "quality": round(_new_q, 4),
+                        "trend": round(_trend, 4),
+                        "history": _history,
+                        "updated": _now()
+                    }, ensure_ascii=False),
+                    "utf-8"
+                )
+                result.details.append(f"Quality EWMA: {_new_q:.3f} trend: {_trend:.3f}")
+            except Exception:
+                pass
+
         return result
 
     def should_consolidate(self) -> bool:
@@ -608,7 +676,15 @@ class MemoryStack:
         Returns list of promoted keys.
         """
         promoted = []
-        for key in self.archival.hot_keys():
+        stats = self.archival.access_stats()
+        hot_keys = self.archival.hot_keys()
+        total = len(stats)
+        n_hot = len(hot_keys)
+
+        # P005 eq.(1): hot/cold allocation ratio
+        _ratio = _kv_ratio(float(n_hot), float(max(total - n_hot, 0)))
+
+        for key in hot_keys:
             value = self.archival.retrieve(key)
             if value is not None:
                 # Promote to L3 via MemoryTiers.observe()
@@ -618,3 +694,20 @@ class MemoryStack:
                 except Exception:
                     pass
         return promoted
+
+    def cache_efficiency(self,
+                         hit_rate_hot: float = 0.8,
+                         hit_rate_cold: float = 0.3,
+                         base_latency_ms: float = 5.0,
+                         miss_penalty_ms: float = 20.0) -> dict:
+        """
+        P005 eq.(2)(3): evaluate current cache efficiency.
+        Returns hit_objective and estimated latency.
+        """
+        stats = self.archival.access_stats()
+        n_hot = len(self.archival.hot_keys())
+        total = len(stats)
+        ratio = _kv_ratio(float(n_hot), float(max(total - n_hot, 0)))
+        hit_obj = _kv_hit_obj(hit_rate_hot, hit_rate_cold, ratio)
+        latency = _kv_latency(base_latency_ms, hit_obj, miss_penalty_ms)
+        return {"ratio_hot": round(ratio, 4), "hit_objective": round(hit_obj, 4), "latency_ms": round(latency, 2)}
