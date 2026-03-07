@@ -15,7 +15,7 @@ into the canonical model: `UI/L0/L1/L2/L3/L4/L5/DA` plus `free/paid/legacy`.
 | `L0` | free | `gcc_evolution/free/l0/setup_wizard.py` | `gcc_evolution/setup_wizard.py` |
 | `L0` | free | `gcc_evolution/free/l0/governance.py` | `gcc_evolution/l0_governance.py` |
 | `L0` | paid | `gcc_evolution/paid/l0/phase2_quality.py` | paid boundary stub |
-| `L0` | paid | `gcc_evolution/paid/l0/phase3_math.py` | paid boundary stub |
+| `L0` | paid | `gcc_evolution/paid/l0/phase3_math.py` | `gcc/papers/formulas/P002_nowcasting.py` modeling entrypoint |
 | `L0` | paid | `gcc_evolution/paid/l0/phase4_truth_table.py` | paid boundary stub |
 | `L1` | free | `gcc_evolution/free/l1/memory_tiers.py` | `gcc_evolution/L1_memory/memory_tiers.py` |
 | `L1` | free | `gcc_evolution/free/l1/storage.py` | `gcc_evolution/L1_memory/storage.py` |
