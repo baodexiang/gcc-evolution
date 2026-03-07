@@ -4,17 +4,29 @@ GCC Dashboard 生成器 v4.99
 python gen_dashboard.py          # 生成并打开浏览器
 python gen_dashboard.py --quiet  # 生成但不打开浏览器 (供 hook/自动化调用)
 """
-import json, pathlib, webbrowser, sys, sqlite3
+import json, pathlib, webbrowser, sys, sqlite3, hashlib
 
 SCRIPT_DIR = pathlib.Path(__file__).parent
 TEMPLATE = SCRIPT_DIR / ".GCC" / "gcc_dashboard.html"
+
+# ── Dashboard 格式锁 (2026-03-07 确认为最佳格式) ──────────────────────────
+# 修改模板前必须经用户明确同意，确认后更新此 hash
+TEMPLATE_HASH_LOCK = "666ce27d74a7d0befc6436efefac5d8dd1836c19eecccf26d73559c467fc6674"
 
 if not TEMPLATE.exists():
     print(f"错误：找不到 {TEMPLATE}")
     sys.exit(1)
 
+_template_bytes = TEMPLATE.read_bytes()
+_actual_hash = hashlib.sha256(_template_bytes).hexdigest()
+if _actual_hash != TEMPLATE_HASH_LOCK:
+    print(f"⚠️  [DASHBOARD FORMAT LOCK] 模板 hash 不匹配!")
+    print(f"   期望: {TEMPLATE_HASH_LOCK}")
+    print(f"   实际: {_actual_hash}")
+    print(f"   模板已被修改。如已确认变更，请更新 gen_dashboard.py 中的 TEMPLATE_HASH_LOCK。")
+
 print(f"模板: {TEMPLATE}")
-html = TEMPLATE.read_text(encoding="utf-8")
+html = _template_bytes.decode("utf-8")
 
 GCC_DIR = pathlib.Path(".GCC")
 HANDOFF_DIR = GCC_DIR / "handoffs"
