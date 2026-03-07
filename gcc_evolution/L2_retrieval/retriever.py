@@ -12,6 +12,26 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Tuple, Optional
 import math
 
+# E1 (Engram#1): normalize_key from P001_engram eq.(7)
+# E5 (Engram#5): session_prefetch_priority from P001_engram eq.(11)
+try:
+    from gcc.papers.formulas.P001_engram import (
+        eq_7_normalize_key as _normalize_key,
+        eq_11_session_prefetch_priority as _prefetch_score,
+    )
+except ImportError:
+    import re as _re, math as _math
+    def _normalize_key(context: str) -> str:  # inline fallback
+        if context is None:
+            return ""
+        return _re.sub(r"\s+", " ", str(context).strip().lower())
+    def _prefetch_score(recency_hours: float, access_count: int, confidence: float) -> float:
+        recency_term = _math.exp(-max(0.0, recency_hours) / 24.0)
+        freq_term = _math.log1p(max(0, access_count))
+        x = (confidence - 0.5) / 0.15
+        gate = (1.0 / (1.0 + _math.exp(-x))) if x >= 0 else (_math.exp(x) / (1.0 + _math.exp(x)))
+        return max(0.0, recency_term * freq_term * gate)
+
 
 class BaseRetriever(ABC):
     """Abstract retriever interface."""
@@ -73,7 +93,8 @@ class KeywordRetriever(BaseRetriever):
 
     def retrieve(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """Retrieve documents matching query terms."""
-        query_terms = set(query.lower().split())
+        query = _normalize_key(query)  # E1: normalize before matching
+        query_terms = set(query.split())
         scores = []
 
         for i, doc in enumerate(self.documents):
@@ -120,11 +141,22 @@ class HybridRetriever(BaseRetriever):
         self.keyword = KeywordRetriever()
         self.documents = []
         self.weights = {"semantic": 0.5, "temporal": 0.3, "keyword": 0.2}
+        self.alias_map: Dict[str, str] = {}  # E1: alias → canonical key dedup
+
+    def add_alias(self, alias: str, canonical: str) -> None:
+        """E1: Register alias so both keys resolve to the same canonical context."""
+        self.alias_map[_normalize_key(alias)] = _normalize_key(canonical)
+
+    def _resolve_query(self, query: str) -> str:
+        """E1: Normalize and resolve alias before retrieval."""
+        key = _normalize_key(query)
+        return self.alias_map.get(key, key)
 
     def retrieve(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """Retrieve using hybrid scoring."""
         if not self.documents:
             return []
+        query = self._resolve_query(query)  # E1: normalize + alias resolution
 
         # Get results from each retriever
         semantic_results = self.semantic.retrieve(query, top_k * 2)
@@ -175,3 +207,26 @@ class HybridRetriever(BaseRetriever):
         self.documents = documents
         self.semantic.index(documents)
         self.keyword.index(documents)
+
+    def prefetch_session_top_k(self, top_k: int = 10) -> List[Dict[str, Any]]:
+        """
+        E5: Session Prefetch — rank indexed documents by eq_11 priority score.
+
+        Each document may carry:
+          • recency_hours  (float, default 0)
+          • access_count   (int, default 0)
+          • confidence     (float, default 0.5)
+
+        Returns top-k documents sorted by prefetch priority (highest first).
+        Called once at session start to warm the retrieval context.
+        """
+        scored = []
+        for doc in self.documents:
+            score = _prefetch_score(
+                recency_hours=float(doc.get("recency_hours", 0)),
+                access_count=int(doc.get("access_count", 0)),
+                confidence=float(doc.get("confidence", 0.5)),
+            )
+            scored.append((score, doc))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [doc for _, doc in scored[:top_k]]

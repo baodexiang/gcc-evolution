@@ -24,6 +24,16 @@ class TestEq3MemoryUpdate:
         result = eq_3_memory_update(old=1.0, new=0.5, decay=0.7, gate=0.0)
         assert result == pytest.approx(1.0)
 
+    def test_negative_decay_clamped_to_zero(self):
+        # _clamp01: value < 0.0 → 0.0 (line 33)
+        result = eq_3_memory_update(old=1.0, new=0.5, decay=-1.0, gate=1.0)
+        assert result == pytest.approx(1.0)  # clamped decay=0 → no update
+
+    def test_decay_above_one_clamped(self):
+        # _clamp01: value > 1.0 → 1.0 (line 35)
+        result = eq_3_memory_update(old=1.0, new=0.5, decay=5.0, gate=1.0)
+        assert result == pytest.approx(0.5)  # clamped decay=1 → full update
+
 
 class TestEq5DecayFactor:
     def test_monotonic_decrease(self):
@@ -50,6 +60,10 @@ class TestEq7NormalizeKey:
         result = eq_7_normalize_key("")
         assert isinstance(result, str)
         assert result == ""
+
+    def test_none_returns_empty(self):
+        # line 73: context is None → return ""
+        assert eq_7_normalize_key(None) == ""
 
 
 class TestEq9SoftGate:

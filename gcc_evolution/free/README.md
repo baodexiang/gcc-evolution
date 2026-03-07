@@ -5,10 +5,9 @@
 ## Included Units
 
 - `ui`
-- `l0` Phase 1
-- `l1` base memory
-- `l2` base retrieval
-- `l3` base distillation
-- `l5` base orchestration
+- `l0`
+- `l1`
+- `l2`
+- `l3`
 
 If a feature is not represented here, it must not be described as part of the free canonical release surface.

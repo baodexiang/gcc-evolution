@@ -6,8 +6,20 @@ Validates decision quality before execution.
 
 from typing import Dict, List, Any, Optional, Tuple
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
+
+# E4 (Engram#4): soft gating from P001_engram eq.(9)
+try:
+    from gcc.papers.formulas.P001_engram import eq_9_soft_gate as _soft_gate
+except ImportError:
+    import math as _math
+    def _soft_gate(confidence: float, center: float = 0.5, temperature: float = 0.15) -> float:
+        x = (float(confidence) - float(center)) / max(float(temperature), 1e-8)
+        if x >= 0.0:
+            return 1.0 / (1.0 + _math.exp(-x))
+        z = _math.exp(x)
+        return z / (1.0 + z)
 
 
 @dataclass
@@ -15,9 +27,10 @@ class ValidationResult:
     """Output of skeptic validation."""
 
     is_valid: bool
-    confidence: float  # 0-1, higher = more confident in validity
+    confidence: float       # 0-1, raw accumulated confidence score
     issues: List[str]
     suggestions: List[str]
+    soft_score: float = 0.0  # E4: sigmoid gate weight (eq.9), smoother than hard threshold
 
 
 class ValidatorRule(ABC):
@@ -235,11 +248,14 @@ class SkepticValidator:
         # Generate suggestions
         suggestions = self._generate_suggestions(issues, decision)
 
+        raw_confidence = max(0.0, confidence)
+        soft_score = _soft_gate(raw_confidence)  # E4: sigmoid replaces hard >= 0.5 gate
         return ValidationResult(
-            is_valid=confidence >= 0.5,
-            confidence=max(0.0, confidence),
+            is_valid=soft_score >= 0.5,
+            confidence=raw_confidence,
             issues=issues,
             suggestions=suggestions,
+            soft_score=soft_score,
         )
 
     def _generate_suggestions(self, issues: List[str], decision: Dict[str, Any]) -> List[str]:
