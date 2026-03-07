@@ -34,6 +34,7 @@ into the canonical model: `UI/L0/L1/L2/L3/L4/L5/DA` plus `free/paid/legacy`.
 | `L4` | paid | `gcc_evolution/paid/l4/adaptive_dag.py` | `gcc_evolution/enterprise/adaptive_dag.py` |
 | `L5` | free | `gcc_evolution/free/l5/pipeline.py` | `gcc_evolution/L5_orchestration/pipeline.py` |
 | `L5` | free | `gcc_evolution/free/l5/loop_engine.py` | `gcc_evolution/L5_orchestration/loop_engine_base.py` |
+| `L5` | paid | `gcc_evolution/paid/l5/drift_gate.py` | `gcc/papers/formulas/P006_drift_aware_streaming.py` orchestration drift gate |
 | `L5` | paid | `gcc_evolution/paid/l5/pipeline.py` | `gcc_evolution/L5_orchestration/pipeline.py` + `gcc_evolution/enterprise/adaptive_dag.py` |
 | `L5` | paid | `gcc_evolution/paid/l5/loop_engine.py` | `gcc_evolution/L5_orchestration/loop_engine_base.py` |
 | `DA` | paid | `gcc_evolution/paid/da/anchor.py` | `gcc_evolution/direction_anchor/anchor.py` |
