@@ -3889,7 +3889,8 @@ class YFinanceDataFetcher:
             return cached
         
         def _fetch(sym):
-            ticker = yf.Ticker(sym)
+            yf_sym = CRYPTO_SYMBOL_MAP.get(sym, sym)
+            ticker = yf.Ticker(yf_sym)
             
             # 方法1: 从 info 获取
             try:
@@ -4274,7 +4275,7 @@ class YFinanceDataFetcher:
                             bars.append(b)
                     return bars
                 except Exception as e:
-                    logger.debug(f"[yf] {sym} 获取1小时数据失败 (period={period}): {e}")
+                    logger.debug(f"[yf] {sym}/{yf_sym} 获取1小时数据失败 (period={period}): {e}")
                     continue
             return None
 
@@ -4337,7 +4338,8 @@ class YFinanceDataFetcher:
             logger.info(f"[COINBASE] {symbol} 4H失败, 降级yfinance")
 
         def _fetch(sym):
-            ticker = yf.Ticker(sym)
+            yf_sym = CRYPTO_SYMBOL_MAP.get(sym, sym)
+            ticker = yf.Ticker(yf_sym)
 
             # 4小时K线: yfinance没有原生4h，需要用1h重采样
             # v21.1: 美股用交易时间顺序合并(每4根1h→1根4h)，加密用日历resample
@@ -4395,7 +4397,7 @@ class YFinanceDataFetcher:
 
                     return bars
                 except Exception as e:
-                    logger.debug(f"[yf] {sym} 获取4小时数据失败 (period={period}): {e}")
+                    logger.debug(f"[yf] {sym}/{yf_sym} 获取4小时数据失败 (period={period}): {e}")
                     continue
 
             return None
@@ -4435,7 +4437,8 @@ class YFinanceDataFetcher:
 
             def _fetch(sym):
                 import yfinance as yf
-                ticker = yf.Ticker(sym)
+                yf_sym = CRYPTO_SYMBOL_MAP.get(sym, sym)
+                ticker = yf.Ticker(yf_sym)
                 # 需要足够的1h数据来重采样
                 hours_needed = lookback_bars * (timeframe_minutes / 60) * 1.5
                 period = "1mo" if hours_needed <= 500 else "3mo"

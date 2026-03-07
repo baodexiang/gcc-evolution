@@ -4322,6 +4322,55 @@ def fetch_ohlcv_from_api(symbol: str, timeframe: int, limit: int = 120):
             _flush_data_source_health()
             return bars
         _bump_data_source_stat("crypto", "coinbase", ok=False)
+        # Coinbase失败后，回退到 yfinance（加密双源兜底）
+        try:
+            symbol_map = {
+                "BTCUSDC": "BTC-USD",
+                "ETHUSDC": "ETH-USD",
+                "SOLUSDC": "SOL-USD",
+                "ZECUSDC": "ZEC-USD",
+            }
+            yf_symbol = symbol_map.get(symbol, symbol.replace("USDC", "-USD").replace("USDT", "-USD"))
+
+            yf_interval_map = {
+                15: ("15m", "5d"),
+                30: ("30m", "7d"),
+                60: ("1h", "1mo"),
+                90: ("90m", "1mo"),
+                120: ("1h", "1mo"),   # yfinance无2h，使用1h
+                240: ("4h", "3mo"),
+                1440: ("1d", "1y"),
+            }
+            if timeframe in yf_interval_map:
+                interval, period = yf_interval_map[timeframe]
+            else:
+                supported_tfs = sorted(yf_interval_map.keys())
+                closest_tf = min(supported_tfs, key=lambda x: abs(x - timeframe))
+                interval, period = yf_interval_map[closest_tf]
+
+            df = _fetch_yfinance_history(yf_symbol, period=period, interval=interval)
+            if df is not None and len(df) >= 10:
+                bars = []
+                for idx, row in df.tail(limit).iterrows():
+                    bar = {
+                        "open": float(row.get("Open", 0)),
+                        "high": float(row.get("High", 0)),
+                        "low": float(row.get("Low", 0)),
+                        "close": float(row.get("Close", 0)),
+                        "volume": float(row.get("Volume", 0)),
+                        "sr_zone": "MID",
+                        "timestamp": int(idx.timestamp()) if hasattr(idx, "timestamp") else 0,
+                    }
+                    if bar["close"] > 0 and bar["high"] > 0 and bar["low"] > 0 and bar["high"] >= bar["low"]:
+                        bars.append(bar)
+                if bars:
+                    _bump_data_source_stat("crypto", "yfinance", ok=True)
+                    print(f"[v3.472] {symbol} 从yfinance回退获取 {len(bars)} 根K线")
+                    _flush_data_source_health()
+                    return bars
+        except Exception as e:
+            print(f"[v3.472] crypto yfinance回退失败 {symbol}: {e}")
+        _bump_data_source_stat("crypto", "yfinance", ok=False)
     else:
         # 美股用 yfinance
         try:
