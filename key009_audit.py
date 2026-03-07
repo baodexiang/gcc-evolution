@@ -23,10 +23,19 @@ import json
 import time
 import argparse
 import importlib
+import io
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
 from zoneinfo import ZoneInfo
+
+if sys.platform == "win32":
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 NY_TZ = ZoneInfo("America/New_York")
 ROOT = Path(__file__).parent
@@ -178,6 +187,11 @@ def parse_timestamp(line: str):
         except ValueError:
             pass
     return None
+
+
+def _is_crypto_symbol_like(sym: str) -> bool:
+    s = (sym or "").upper()
+    return s.endswith("USDC") or s.endswith("-USD")
 
 
 def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
@@ -704,16 +718,38 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
             issues.append({"task": "BV", "type": "RISK", "category": "signal",
                            "msg": f"BrooksVision准确率{bv_acc:.0%}({bv_stats['eval']['CORRECT']}/{bv_decisive} decisive), 低于40%"})
 
-    # 门控风险: 某品种被大量拦截 → execution(SignalStack/3Commas相关) 或 signal(其他门控)
-    for gname, sym_counts in gates.items():
-        for sym, cnt in sym_counts.items():
-            if cnt >= 10:
-                _gate_cat = "execution" if gname in ("SignalStack", "3Commas", "SS-FREEZE", "SS-COOLDOWN") else "signal"
-                issues.append({"task": f"GATE-{gname}", "type": "RISK", "category": _gate_cat,
-                               "msg": f"{sym} 被{gname}拦截{cnt}次, 检查是否合理"})
+    _is_weekend = _now_ny.weekday() >= 5
+    stale_adjusted_by_symbol = {}
+    stale_adjusted_total = 0
+    for sym, cnt in gates.get("DATA-STALE", {}).items():
+        # 周末美股休盘: 不计入DATA-STALE风险
+        if _is_weekend and not _is_crypto_symbol_like(sym):
+            continue
+        stale_adjusted_by_symbol[sym] = cnt
+        stale_adjusted_total += cnt
 
-    # DATA-STALE风险 → data
-    stale_total = gate_totals.get("DATA-STALE", 0)
+    # 门控风险: 某品种被大量拦截 → execution(SignalStack/3Commas相关) / data(DATA-STALE) / signal(其他门控)
+    for gname, sym_counts in gates.items():
+        _iter_items = stale_adjusted_by_symbol.items() if gname == "DATA-STALE" else sym_counts.items()
+        for sym, cnt in _iter_items:
+            if gname == "DATA-STALE":
+                _th = 20 if _is_crypto_symbol_like(sym) else 40
+            else:
+                _th = 10
+            if cnt < _th:
+                continue
+            if gname in ("SignalStack", "3Commas", "SS-FREEZE", "SS-COOLDOWN"):
+                _gate_cat = "execution"
+            elif gname == "DATA-STALE":
+                _gate_cat = "data"
+            else:
+                _gate_cat = "signal"
+            issues.append({"task": f"GATE-{gname}", "type": "RISK", "category": _gate_cat,
+                           "msg": f"{sym} 被{gname}拦截{cnt}次, 检查是否合理"})
+
+    # DATA-STALE风险 → data（周末美股休盘已过滤）
+    stale_total = stale_adjusted_total
+    gate_totals["DATA-STALE-ADJUSTED"] = stale_total
     if stale_total > 5:
         issues.append({"task": "DATA-STALE", "type": "RISK", "category": "data",
                        "msg": f"数据过期拦截{stale_total}次, 数据源可能不稳定"})
@@ -748,7 +784,8 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
 
     # 外挂风险: 某外挂触发率极低 → market(0触发=市场无趋势) / execution(发送0执行)
     for pname, pdata in scan_plugins.items():
-        if pdata["scan"] > 50 and pdata["trigger"] == 0:
+        # 仅当“扫描高 + 完全无触发/无派发/无执行”才告警，避免误报(已有dispatch/executed仍被判0触发)
+        if pdata["scan"] > 50 and pdata["trigger"] == 0 and pdata["dispatch"] == 0 and pdata["executed"] == 0:
             issues.append({"task": f"PLUGIN-{pname}", "type": "RISK", "category": "market",
                            "msg": f"{pname} 扫描{pdata['scan']}次但0触发, 可能阈值过高"})
         if pdata["dispatch"] > 5 and pdata["executed"] == 0:
@@ -808,7 +845,8 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
         if pstat["total"] >= 5 and pstat["win_rate"] < 0.25:
             issues.append({"task": "TRADE", "type": "RISK", "category": "signal",
                            "msg": f"插件 {pname} 胜率异常: {pstat['win_rate']:.1%} ({pstat['winners']}/{pstat['total']})"})
-    if ta["avg_hold_min"] > 480 and ta["total"] >= 5:
+    # 样本过少时平均持仓时长波动大，提升到10笔再告警
+    if ta["avg_hold_min"] > 480 and ta["total"] >= 10:
         issues.append({"task": "TRADE", "type": "RISK", "category": "signal",
                        "msg": f"平均持仓过长: {ta['avg_hold_min']:.0f}分钟 ({ta['avg_hold_min']/60:.1f}小时)"})
 
@@ -2682,6 +2720,10 @@ def _build_result(now_str, hours, tasks, summary_metrics,
         "brooks_vision": _bv,
         "gates": {
             "totals": gate_totals,
+            "totals_adjusted": {
+                **gate_totals,
+                "DATA-STALE": gate_totals.get("DATA-STALE-ADJUSTED", gate_totals.get("DATA-STALE", 0)),
+            },
             "detail": _gates,
         },
         "arbiter": {
@@ -2963,6 +3005,12 @@ def main():
         def _get_signal_filter_mode():
             # 静态导出版也注入SignalFilter模式，避免dashboard标签缺失
             try:
+                _mode_state = ROOT / ".GCC" / "signal_filter" / "mode_state.json"
+                if _mode_state.exists():
+                    _ms = json.loads(_mode_state.read_text(encoding="utf-8"))
+                    _m = str(_ms.get("mode", "")).upper().strip()
+                    if _m in ("OBSERVE", "ENFORCE"):
+                        return _m
                 try:
                     _sdf = importlib.import_module("AIPro.signal_direction_filter")
                 except Exception:
