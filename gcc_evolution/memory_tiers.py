@@ -527,3 +527,94 @@ def format_consolidation_report(result: ConsolidationResult) -> str:
         if len(result.details) > 10:
             lines.append(f"    ... and {len(result.details) - 10} more")
     return "\n".join(lines)
+
+
+# ── E7: Infinite Memory — 4-tier architecture ─────────────────────────────
+# Engram#7 (P2): L1=Working / L2=Episodic / L3=Semantic / L4=Archival
+# Write-once archival tier with access-count-driven promotion to semantic tier.
+
+class ArchivalMemory:
+    """
+    E7 — L4 Archival tier.
+
+    Write-once, unbounded, rarely accessed historical records.
+    Tracks access count per key for promotion/eviction decisions.
+    """
+
+    PROMOTE_THRESHOLD: int = 3  # accesses before promoting to semantic tier
+
+    def __init__(self) -> None:
+        self._archive: dict[str, Any] = {}
+        self._access_count: dict[str, int] = {}
+        self._stored_at: dict[str, datetime] = {}
+
+    def store(self, key: str, value: Any) -> None:
+        """Archive value; does not overwrite existing entry (write-once)."""
+        if key not in self._archive:
+            self._archive[key] = value
+            self._access_count[key] = 0
+            self._stored_at[key] = datetime.now(timezone.utc)
+
+    def retrieve(self, key: str) -> Any | None:
+        """Read archived value and increment access count."""
+        if key in self._archive:
+            self._access_count[key] += 1
+            return self._archive[key]
+        return None
+
+    def access_stats(self) -> dict[str, int]:
+        """Return access count per key (used by MemoryStack for promotion)."""
+        return dict(self._access_count)
+
+    def hot_keys(self) -> list[str]:
+        """Keys that have reached the promotion threshold."""
+        return [k for k, c in self._access_count.items() if c >= self.PROMOTE_THRESHOLD]
+
+
+class MemoryStack:
+    """
+    E7: Infinite Memory Stack — 4-tier promotion manager.
+
+    Tiers (Engram naming):
+      L1 = Working   → SensoryMemory   (real-time, latest observation per key)
+      L2 = Episodic  → ShortTermMemory (sliding window, FIFO eviction)
+      L3 = Semantic  → LongTermMemory  (persistent knowledge)
+      L4 = Archival  → ArchivalMemory  (write-once historical records)
+
+    Promotion rule: L4 key with access_count >= PROMOTE_THRESHOLD → copy to L3 (MemoryTiers).
+    """
+
+    def __init__(self, gcc_dir: str | None = None) -> None:
+        self.tiers = MemoryTiers(gcc_dir=gcc_dir)  # L1-L3 via existing MemoryTiers
+        self.archival = ArchivalMemory()            # L4
+
+    def archive(self, key: str, value: Any) -> None:
+        """Store value in L4 archival tier."""
+        self.archival.store(key, value)
+
+    def recall(self, key: str) -> tuple[Any | None, int]:
+        """
+        Recall value searching L4 archival, return (value, tier).
+        Returns (None, -1) if not found.
+        """
+        v = self.archival.retrieve(key)
+        if v is not None:
+            return v, 4
+        return None, -1
+
+    def promote_hot_archival(self) -> list[str]:
+        """
+        Promotion: move frequently-accessed L4 keys to L3 (MemoryTiers sensory observe).
+        Returns list of promoted keys.
+        """
+        promoted = []
+        for key in self.archival.hot_keys():
+            value = self.archival.retrieve(key)
+            if value is not None:
+                # Promote to L3 via MemoryTiers.observe()
+                try:
+                    self.tiers.observe(str(value), key=key)
+                    promoted.append(key)
+                except Exception:
+                    pass
+        return promoted

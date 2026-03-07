@@ -29,6 +29,19 @@ from .models import CardStatus, ExperienceCard, ExperienceType
 
 logger = logging.getLogger("gcc.retriever")
 
+# E1 (Engram#1 P0): normalize_key from P001_engram eq.(7)
+# E5 (Engram#5 P1): session_prefetch_priority from P001_engram eq.(11)
+try:
+    from .papers.formulas.P001_engram import (
+        eq_7_normalize_key as _normalize_key,
+        eq_11_session_prefetch_priority as _prefetch_score,
+    )
+except Exception:
+    def _normalize_key(context: str) -> str:  # inline fallback
+        return re.sub(r"[^a-z0-9_]", "_", context.lower().strip())
+    def _prefetch_score(recency: float, relevance: float, freq: float) -> float:
+        return 0.5 * relevance + 0.3 * recency + 0.2 * freq
+
 
 # v4.98: layer_weights从config.yaml读取, fallback到默认值
 _DEFAULT_LAYER_WEIGHTS = {
@@ -323,6 +336,16 @@ class Retriever:
         self.graph_hop_depth = (
             getattr(config, 'graph_hop_depth', 1) if config else 1)
         self.embedder = EmbedderFactory.create(config)
+        self.alias_map: dict[str, str] = {}  # E1: alias → canonical key dedup
+
+    def register_alias(self, alias: str, canonical: str) -> None:
+        """E1: Register context key alias for deduplication."""
+        self.alias_map[_normalize_key(alias)] = _normalize_key(canonical)
+
+    def resolve_key(self, query: str) -> str:
+        """E1: Resolve alias → canonical key."""
+        key = _normalize_key(query)
+        return self.alias_map.get(key, key)
 
     # ════════════════════════════════════════════════════════
     # Dual-layer Retrieval (v4.0, from Agent KB)
@@ -335,6 +358,7 @@ class Retriever:
         """
         k = top_k or self.top_k
         result = RetrievalResult()
+        task = self.resolve_key(task)  # E1: normalize + alias dedup
 
         candidates = self._get_candidates(project)
         if not candidates:
@@ -560,15 +584,22 @@ class Retriever:
             return result
 
         combined_query = f"{task_context} {step_goal}".strip() or step_goal
+        combined_query = self.resolve_key(combined_query)  # E1
         q_emb = self.embedder.embed(combined_query)
         step_kw = set(re.findall(r'\w{3,}', step_goal.lower()))
         task_kw = set(re.findall(r'\w{3,}', task_context.lower()))
 
+        _now_ts = datetime.now(timezone.utc).timestamp()
         scored: list[tuple[float, ExperienceCard]] = []
         for card in candidates:
             score = self._score(card, q_emb, step_kw | task_kw)
             step_boost = self._goal_relevance(card, step_kw)
-            final = score + step_boost * 0.15
+            # E5: session prefetch priority boost (eq.11)
+            _age = max(0.0, (_now_ts - (card.created_at.timestamp() if hasattr(card.created_at, 'timestamp') else _now_ts)) / 86400)
+            _recency = max(0.0, 1.0 - _age / 30.0)
+            _freq = min(1.0, getattr(card, 'use_count', 0) / 20.0)
+            prefetch_boost = _prefetch_score(_recency, score, _freq) * 0.10
+            final = score + step_boost * 0.15 + prefetch_boost
             scored.append((final, card))
 
         scored.sort(key=lambda x: x[0], reverse=True)

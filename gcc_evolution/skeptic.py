@@ -50,6 +50,16 @@ except ImportError:
     ParamStore = None
     ParamGate = None
 
+# E4 (Engram#4 P1): soft gating from P001_engram eq.(9)
+# 替换硬阈值 confidence >= 0.5 → sigmoid alpha门控（更平滑）
+try:
+    from .papers.formulas.P001_engram import eq_9_soft_gate as _soft_gate
+except Exception:
+    import math
+    def _soft_gate(confidence: float, center: float = 0.5, temperature: float = 0.15) -> float:
+        x = (confidence - center) / max(temperature, 1e-6)
+        return 1.0 / (1.0 + math.exp(-x))
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -487,14 +497,17 @@ class Skeptic:
             and required_no_regression
         )
 
-        # Confidence调整（确定性规则）
+        # E4: Confidence调整 — soft gate (eq.9) 替代硬阈值 ≥0.5
+        # sigmoid alpha ∈ (0,1) 平滑映射 pass_ratio → confidence_delta
+        pass_ratio = (verdict.required_passed / max(verdict.required_total, 1))
+        soft_score = _soft_gate(pass_ratio)  # E4: sigmoid gate weight
         if verdict.passed:
-            # 基础通过 +0.05，每个可选指标改善额外 +0.02
-            verdict.confidence_delta = 0.05 + verdict.optional_improved * 0.02
+            # 基础通过 +0.05 × soft_score 加权，每个可选指标改善额外 +0.02
+            verdict.confidence_delta = 0.05 * soft_score + verdict.optional_improved * 0.02
             verdict.confidence_delta = min(verdict.confidence_delta, 0.15)
         else:
-            # 失败 -0.15，每个regression额外 -0.05
-            verdict.confidence_delta = -0.15 - len(verdict.regressions) * 0.05
+            # 失败 soft_score 越低惩罚越重（-0.15 × (1-soft_score)），每个regression额外 -0.05
+            verdict.confidence_delta = -0.15 * (1.0 - soft_score) - len(verdict.regressions) * 0.05
             verdict.confidence_delta = max(verdict.confidence_delta, -0.35)
 
             # 生成pitfall描述

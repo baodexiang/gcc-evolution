@@ -41,6 +41,48 @@ def _tid() -> str:
     return f"T{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
 
 
+# ── E2/E3/E6 (Engram#2/3/6) helpers ──────────────────────────────────────
+
+# E6: Two-task routing keywords
+_REASONING_KEYWORDS = frozenset({"why", "how", "explain", "analyze", "reason", "think", "infer"})
+_MEMORY_KEYWORDS    = frozenset({"recall", "remember", "history", "previous", "last", "before", "stored"})
+
+def classify_task_route(query: str) -> str:
+    """
+    E6: Two-task classification routing.
+    Returns 'memory' (retrieval needed) or 'reasoning' (skip retrieval).
+    """
+    q = query.lower()
+    words = set(q.split())
+    if words & _MEMORY_KEYWORDS:
+        return "memory"
+    if words & _REASONING_KEYWORDS and not (words & _MEMORY_KEYWORDS):
+        return "reasoning"
+    return "memory"  # default: retrieve context
+
+
+def build_prompt_with_context(context: str, user_query: str) -> str:
+    """
+    E2: Prompt injection order — verified context block BEFORE user query.
+    Prevents context burial when query appears first.
+    """
+    if not context:
+        return user_query
+    return f"{context}\n\n---\n{user_query}"
+
+
+def track_memory_ratio(memory_tokens: int, total_tokens: int,
+                       target: float = 0.22) -> dict[str, float]:
+    """
+    E3: Track memory/reasoning token ratio. Target: 20-25% (default 0.22).
+    Returns ratio info for monitoring.
+    """
+    if total_tokens <= 0:
+        return {"ratio": 0.0, "target": target, "delta": 0.0}
+    ratio = memory_tokens / total_tokens
+    return {"ratio": round(ratio, 4), "target": target, "delta": round(ratio - target, 4)}
+
+
 class TaskStatus(str, Enum):
     PENDING    = "pending"     # 创建未开始
     RUNNING    = "running"     # 进行中
