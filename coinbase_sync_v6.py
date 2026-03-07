@@ -98,7 +98,7 @@ UNIT_AMOUNTS = {
     "BTC": 0.02,
     "ETH": 1,
     "SOL": 15,
-    "ZEC": 5,
+    "ZEC": 15,
 }
 
 # v6新增: API超时和重试配置

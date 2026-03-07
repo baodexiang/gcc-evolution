@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
@@ -12,7 +12,7 @@ WARNING_THRESHOLD = 0.50
 RETENTION_DAYS = 7
 WINDOW_4H = 4
 WINDOW_WEEK = 24 * 7
-OBSERVE_ONLY = True
+OBSERVE_ONLY = False
 
 
 @dataclass
@@ -42,6 +42,31 @@ class SignalDirectionFilter:
         self.valid_path = self.data_dir / "valid_signals.jsonl"
         self.filtered_path = self.data_dir / "filtered_signals.jsonl"
         self.direction_log_path = self.data_dir / "direction_log.jsonl"
+        self.mode_state_path = self.data_dir / "mode_state.json"
+        # Runtime mode lives on the instance and is persisted for dashboard/audit readers.
+        self.observe_only = bool(OBSERVE_ONLY)
+        self._sync_mode_state()
+
+    def _sync_mode_state(self) -> None:
+        payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "observe_only": bool(self.observe_only),
+            "mode": "OBSERVE" if self.observe_only else "ENFORCE",
+        }
+        try:
+            self.mode_state_path.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def set_observe_only(self, observe_only: bool) -> None:
+        self.observe_only = bool(observe_only)
+        self._sync_mode_state()
+
+    def get_mode(self) -> str:
+        return "OBSERVE" if self.observe_only else "ENFORCE"
 
     def _parse_ts(self, ts: str) -> datetime:
         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -211,6 +236,7 @@ class SignalDirectionFilter:
             (direction_result.direction == "BUY_DOMINANT" and signal_dir == "sell")
             or (direction_result.direction == "SELL_DOMINANT" and signal_dir == "buy")
         )
+        blocked = would_block and (not self.observe_only)
 
         if would_block:
             self._append_jsonl(
@@ -222,9 +248,9 @@ class SignalDirectionFilter:
                     "direction": signal_dir,
                     "result": direction_result.direction,
                     "reason": direction_result.reason,
-                    "observe_only": OBSERVE_ONLY,
+                    "observe_only": self.observe_only,
                     "would_block": True,
-                    "blocked": False,
+                    "blocked": blocked,
                     "buy_ratio_4h": direction_result.buy_ratio_4h,
                     "buy_ratio_week": direction_result.buy_ratio_week,
                     "sell_ratio_4h": direction_result.sell_ratio_4h,
@@ -232,5 +258,4 @@ class SignalDirectionFilter:
                 },
             )
 
-        # 观察模式：不做真实拦截，只记录would_block事件
-        return True
+        return not blocked

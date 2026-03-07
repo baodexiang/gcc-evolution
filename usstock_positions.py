@@ -24,16 +24,16 @@ SERVER_URL = "http://localhost:6001"
 # v2.840: 美股仍为5档，加密货币为5档
 POSITION_CONFIG = {
     "TSLA": 1,
-    "COIN": 3,
-    "RDDT": 2,
-    "AMD": 1,
-    "NBIS": 0,
-    "CRWV": 0,
-    "RKLB": 1,
-    "HIMS": 5,
-    "OPEN": 2,
+    "COIN": 4,
+    "RDDT": 3,
+    "AMD": 0,
+    "NBIS": 1,
+    "CRWV": 1,
+    "RKLB": 4,
+    "HIMS": 4,
+    "OPEN": 1,
     "ONDS": 3,
-    "PLTR": 2
+    "PLTR": 3
 }
 
 # ============================================================

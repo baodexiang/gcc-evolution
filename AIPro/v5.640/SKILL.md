@@ -6,9 +6,9 @@ description: L1趋势/震荡判断准确性分析与系统自我进化工具。*
 ---
 
 
-## 当前运行实况 (2026-03-05)
+## 当前运行实况 (2026-03-07)
 
-- 主程序: llm_server_v3640.py = 3.677
+- 主程序: llm_server_v3640.py = 3.677 + GCC-0197 log tag fix ([GCC-0197] 替换 [KEY-009][S4])
 - 扫描引擎: price_scan_engine_v21.py = 21.27
 - P0-Tracking: 默认关闭（P0_TRACKING_ENABLED=False）
 - 移动止损/止盈: 运行中，且纳入 FilterChain 审核

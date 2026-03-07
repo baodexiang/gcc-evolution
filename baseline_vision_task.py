@@ -285,14 +285,73 @@ def _update_symbol(symbol: str, bars: list, log_fn=None) -> bool:
         sell_found = True
         log_fn(f"[BASELINE] {symbol} Sell: vision={v_sell_ago} data={d_sell_ago} → 取最近ago={sell_bars_ago}")
 
+    def _fallback_buy_under(max_sell_price: float):
+        cands = []
+        for i, b in enumerate(closed_bars):
+            ago = n - 1 - i
+            if ago < _MIN_BARS_AGO:
+                continue
+            # 优先阳线，其次任意K线
+            is_bull = b["close"] > b["open"]
+            if b["close"] < max_sell_price:
+                cands.append((ago, b["close"], is_bull))
+        if not cands:
+            return None, None
+        bull = [x for x in cands if x[2]]
+        pick = min(bull, key=lambda x: x[0]) if bull else min(cands, key=lambda x: x[0])
+        return pick[0], pick[1]
+
+    def _fallback_sell_over(min_buy_price: float):
+        cands = []
+        for i, b in enumerate(closed_bars):
+            ago = n - 1 - i
+            if ago < _MIN_BARS_AGO:
+                continue
+            # 优先阴线，其次任意K线
+            is_bear = b["close"] < b["open"]
+            if b["close"] > min_buy_price:
+                cands.append((ago, b["close"], is_bear))
+        if not cands:
+            return None, None
+        bear = [x for x in cands if x[2]]
+        pick = min(bear, key=lambda x: x[0]) if bear else min(cands, key=lambda x: x[0])
+        return pick[0], pick[1]
+
     # 合理性: buy < sell
     if buy_found and sell_found and buy_price >= sell_price:
-        log_fn(f"[BASELINE] {symbol} buy={buy_price:.2f}>=sell={sell_price:.2f}, 保留更极端侧")
-        mid = sum(b["close"] for b in closed_bars) / n
-        if abs(buy_price - mid) > abs(sell_price - mid):
-            sell_price = None; sell_found = False; sell_bars_ago = None
+        log_fn(f"[BASELINE] {symbol} buy={buy_price:.2f}>=sell={sell_price:.2f}, 尝试补齐双侧")
+        alt_buy_ago, alt_buy_price = _fallback_buy_under(sell_price)
+        alt_sell_ago, alt_sell_price = _fallback_sell_over(buy_price)
+
+        if alt_buy_price is not None and alt_sell_price is not None:
+            # 选更近期的替代
+            if alt_buy_ago <= alt_sell_ago:
+                buy_bars_ago, buy_price, buy_found = alt_buy_ago, alt_buy_price, True
+            else:
+                sell_bars_ago, sell_price, sell_found = alt_sell_ago, alt_sell_price, True
+        elif alt_buy_price is not None:
+            buy_bars_ago, buy_price, buy_found = alt_buy_ago, alt_buy_price, True
+        elif alt_sell_price is not None:
+            sell_bars_ago, sell_price, sell_found = alt_sell_ago, alt_sell_price, True
         else:
-            buy_price = None; buy_found = False; buy_bars_ago = None
+            log_fn(f"[BASELINE] {symbol} 补齐失败, 保留更极端侧")
+            mid = sum(b["close"] for b in closed_bars) / n
+            if abs(buy_price - mid) > abs(sell_price - mid):
+                sell_price = None; sell_found = False; sell_bars_ago = None
+            else:
+                buy_price = None; buy_found = False; buy_bars_ago = None
+
+    # 单侧缺失时尝试补齐，减少dashboard“未找到”
+    if buy_found and not sell_found:
+        alt_sell_ago, alt_sell_price = _fallback_sell_over(buy_price)
+        if alt_sell_price is not None:
+            sell_bars_ago, sell_price, sell_found = alt_sell_ago, alt_sell_price, True
+            log_fn(f"[BASELINE] {symbol} Sell补齐: ago={sell_bars_ago}")
+    elif sell_found and not buy_found:
+        alt_buy_ago, alt_buy_price = _fallback_buy_under(sell_price)
+        if alt_buy_price is not None:
+            buy_bars_ago, buy_price, buy_found = alt_buy_ago, alt_buy_price, True
+            log_fn(f"[BASELINE] {symbol} Buy补齐: ago={buy_bars_ago}")
 
     if not buy_found and not sell_found:
         log_fn(f"[BASELINE] {symbol} 未找到基准, 跳过")
@@ -369,5 +428,18 @@ def update_all_symbols(symbol_state: dict, log_fn=None) -> None:
 
         # 避免API限速
         time.sleep(2)
+
+    # 只保留当前活跃品种，清理历史残留，避免dashboard展示过期“未找到”
+    try:
+        active = set(symbol_state.keys())
+        state = _load_state()
+        stale_keys = [k for k in list(state.keys()) if k not in active]
+        if stale_keys:
+            for k in stale_keys:
+                state.pop(k, None)
+            _save_state(state)
+            log_fn(f"[BASELINE] 清理历史残留: {len(stale_keys)}个({','.join(stale_keys[:8])})")
+    except Exception as e:
+        log_fn(f"[BASELINE][WARN] 清理历史残留失败: {e}")
 
     log_fn(f"[BASELINE] 全品种扫描完成: {success_count}成功 {fail_count}失败")
