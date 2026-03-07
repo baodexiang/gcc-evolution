@@ -3604,6 +3604,56 @@ def _refresh_l1_full_analysis(symbol: str, timeframe: int):
                         f"(warn>{_STALE_WARN_SEC}s, block>{_STALE_BLOCK_SEC}s)"
                     )
                     if _stale_age > _STALE_BLOCK_SEC:
+                        # 加密品种在硬拦截前做一次API自救刷新，避免因单次推送中断长期卡死
+                        _is_crypto_sym = symbol.endswith("USDC") or symbol.endswith("USDT")
+                        if _is_crypto_sym:
+                            try:
+                                _rescued = False
+                                _api_bars = fetch_ohlcv_from_api(symbol, timeframe, limit=3)
+                                if _api_bars:
+                                    with _ohlcv_lock:
+                                        _existing = window.get_bars()
+                                        _last_ts = 0
+                                        if _existing:
+                                            _last = _existing[-1]
+                                            _last_ts = _last.get("timestamp") or _last.get("ts") or _last.get("time") or 0
+                                        for _b in _api_bars[-2:]:
+                                            _new_ts = _b.get("timestamp") or _b.get("ts") or _b.get("time") or 0
+                                            if _new_ts and _last_ts and _new_ts <= _last_ts:
+                                                continue
+                                            window.append(_b)
+                                            _rescued = True
+                                if _rescued:
+                                    _staleness2 = window.check_staleness(max_age_seconds=_STALE_WARN_SEC)
+                                    if not _staleness2.get("stale"):
+                                        log_to_server(f"[DATA_STALE_RECOVER][{symbol}] api_backfill success，继续L1执行")
+                                    else:
+                                        log_to_server(
+                                            f"[DATA_STALE_RECOVER][{symbol}] api_backfill未恢复 "
+                                            f"age={_staleness2.get('age_seconds', -1)}s"
+                                        )
+                                        log_to_server(
+                                            f"[DATA_STALE_BLOCK][{symbol}] 数据过期{_stale_age}s>{_STALE_BLOCK_SEC}s，跳过L1执行"
+                                        )
+                                        return False
+                                else:
+                                    log_to_server(
+                                        f"[DATA_STALE_RECOVER][{symbol}] api_backfill no_new_bars"
+                                    )
+                                    log_to_server(
+                                        f"[DATA_STALE_BLOCK][{symbol}] 数据过期{_stale_age}s>{_STALE_BLOCK_SEC}s，跳过L1执行"
+                                    )
+                                    return False
+                            except Exception as _stale_recover_e:
+                                log_to_server(f"[DATA_STALE_RECOVER][{symbol}] 异常: {_stale_recover_e}")
+                                log_to_server(
+                                    f"[DATA_STALE_BLOCK][{symbol}] 数据过期{_stale_age}s>{_STALE_BLOCK_SEC}s，跳过L1执行"
+                                )
+                                return False
+                            # 自救成功后重新检查并刷新本地bars快照
+                            if window.check_staleness(max_age_seconds=_STALE_WARN_SEC).get("stale"):
+                                return False
+                            ohlcv_bars = window.get_bars()
                         log_to_server(
                             f"[DATA_STALE_BLOCK][{symbol}] 数据过期{_stale_age}s>{_STALE_BLOCK_SEC}s，跳过L1执行"
                         )
@@ -4073,6 +4123,178 @@ V4+auZ+gdWHPb5UXeVIWwMQhEe+a9xp34g==
         return None
 
 
+_DATA_SOURCE_HEALTH_PATH = os.path.join("state", "data_source_health.json")
+_data_source_stats = {
+    "updated_at": 0.0,
+    "crypto": {
+        "coinbase": {"success": 0, "fail": 0, "last_success_ts": 0.0, "last_fail_ts": 0.0},
+        "yfinance": {"success": 0, "fail": 0, "last_success_ts": 0.0, "last_fail_ts": 0.0},
+    },
+    "stock": {
+        "yfinance": {"success": 0, "fail": 0, "last_success_ts": 0.0, "last_fail_ts": 0.0},
+        "schwab": {"success": 0, "fail": 0, "last_success_ts": 0.0, "last_fail_ts": 0.0},
+        "fallback_alert": {"last_alert_ts": 0.0, "no_success_hours_threshold": 6},
+    },
+}
+
+
+def _bump_data_source_stat(market: str, provider: str, ok: bool):
+    import time as _t
+    try:
+        bucket = _data_source_stats.get(market, {}).get(provider, {})
+        if not bucket:
+            return
+        now_ts = _t.time()
+        if ok:
+            bucket["success"] = int(bucket.get("success", 0)) + 1
+            bucket["last_success_ts"] = now_ts
+        else:
+            bucket["fail"] = int(bucket.get("fail", 0)) + 1
+            bucket["last_fail_ts"] = now_ts
+        _data_source_stats["updated_at"] = now_ts
+    except Exception:
+        pass
+
+
+def _flush_data_source_health():
+    try:
+        os.makedirs(os.path.dirname(_DATA_SOURCE_HEALTH_PATH), exist_ok=True)
+        with open(_DATA_SOURCE_HEALTH_PATH, "w", encoding="utf-8") as f:
+            json.dump(_data_source_stats, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _get_data_source_health_snapshot():
+    import time as _t
+    now_ts = _t.time()
+    snap = json.loads(json.dumps(_data_source_stats, ensure_ascii=False))
+    try:
+        for mk in ("crypto", "stock"):
+            for pr, v in snap.get(mk, {}).items():
+                if not isinstance(v, dict) or pr == "fallback_alert":
+                    continue
+                lss = float(v.get("last_success_ts", 0.0) or 0.0)
+                v["last_success_age_min"] = round((now_ts - lss) / 60.0, 1) if lss > 0 else None
+                lfs = float(v.get("last_fail_ts", 0.0) or 0.0)
+                v["last_fail_age_min"] = round((now_ts - lfs) / 60.0, 1) if lfs > 0 else None
+    except Exception:
+        pass
+    return snap
+
+
+def _fetch_stock_ohlcv_from_schwab(symbol: str, timeframe: int, limit: int = 120):
+    """
+    股票数据二级回退：Schwab（统一入口）
+    """
+    import time as _t
+    import pandas as _pd
+
+    interval_map = {
+        1: "1m",
+        5: "5m",
+        10: "10m",
+        15: "15m",
+        30: "30m",
+        60: "30m",   # Schwab适配层无1h，回退用30m
+        90: "30m",
+        120: "30m",
+        240: "4h",
+        1440: "1d",
+    }
+    interval = interval_map.get(int(timeframe), "1d")
+    bars_need = max(int(limit or 120), 10)
+    try:
+        from schwab_data_provider import get_provider
+        provider = get_provider()
+        if not hasattr(_fetch_stock_ohlcv_from_schwab, "_mode_logged"):
+            log_to_server("[SCHWAB_FALLBACK] mode=active provider_available=True")
+            _fetch_stock_ohlcv_from_schwab._mode_logged = True
+
+        if interval in ("1d", "1wk"):
+            df = provider.download(symbol, period="6mo", interval=interval)
+            if df is not None and not df.empty and len(df) > bars_need:
+                df = df.tail(bars_need)
+        else:
+            df = provider.get_kline(symbol, interval=interval, bars=bars_need)
+
+        if df is None or getattr(df, "empty", True):
+            _bump_data_source_stat("stock", "schwab", ok=False)
+            log_to_server(f"[SCHWAB_FALLBACK] {symbol} tf={timeframe} no_data")
+            return None
+
+        out = []
+        for idx, row in df.tail(bars_need).iterrows():
+            close_val = float(row.get("close", row.get("Close", 0))) if not _pd.isna(row.get("close", row.get("Close", 0))) else 0
+            if close_val <= 0:
+                continue
+            open_val = float(row.get("open", row.get("Open", close_val))) if not _pd.isna(row.get("open", row.get("Open", close_val))) else close_val
+            high_val = float(row.get("high", row.get("High", close_val))) if not _pd.isna(row.get("high", row.get("High", close_val))) else close_val
+            low_val = float(row.get("low", row.get("Low", close_val))) if not _pd.isna(row.get("low", row.get("Low", close_val))) else close_val
+            if any(math.isinf(x) for x in (open_val, high_val, low_val, close_val)):
+                continue
+            if high_val > 0 and low_val > 0 and high_val < low_val:
+                continue
+            ts = idx.timestamp() if hasattr(idx, "timestamp") else 0
+            out.append({
+                "open": open_val,
+                "high": high_val,
+                "low": low_val,
+                "close": close_val,
+                "volume": float(row.get("volume", row.get("Volume", 0))) if not _pd.isna(row.get("volume", row.get("Volume", 0))) else 0,
+                "sr_zone": "MID",
+                "timestamp": int(ts),
+            })
+
+        if out:
+            _bump_data_source_stat("stock", "schwab", ok=True)
+            log_to_server(f"[SCHWAB_FALLBACK] {symbol} tf={timeframe} success bars={len(out)} interval={interval}")
+            return out
+
+        _bump_data_source_stat("stock", "schwab", ok=False)
+        log_to_server(f"[SCHWAB_FALLBACK] {symbol} tf={timeframe} no_valid_bars interval={interval}")
+        return None
+    except Exception as e:
+        _bump_data_source_stat("stock", "schwab", ok=False)
+        log_to_server(f"[SCHWAB_FALLBACK] {symbol} tf={timeframe} failed: {e}")
+        return None
+    finally:
+        _data_source_stats["updated_at"] = _t.time()
+        _flush_data_source_health()
+
+
+def _check_stock_fallback_health_alert():
+    import time as _t
+    now_ts = _t.time()
+    try:
+        cfg = _data_source_stats.get("stock", {}).get("fallback_alert", {})
+        threshold_h = int(cfg.get("no_success_hours_threshold", 6) or 6)
+        last_success = float(_data_source_stats.get("stock", {}).get("schwab", {}).get("last_success_ts", 0.0) or 0.0)
+        if last_success <= 0:
+            first_seen = float(_data_source_stats.get("updated_at", 0.0) or 0.0)
+            fail_cnt = int(_data_source_stats.get("stock", {}).get("schwab", {}).get("fail", 0) or 0)
+            if first_seen <= 0 or fail_cnt <= 0:
+                return
+            silent_sec = now_ts - first_seen
+        else:
+            silent_sec = now_ts - last_success
+        if silent_sec < threshold_h * 3600:
+            return
+        last_alert = float(cfg.get("last_alert_ts", 0.0) or 0.0)
+        if (now_ts - last_alert) < 3600:
+            return
+        cfg["last_alert_ts"] = now_ts
+        _data_source_stats["updated_at"] = now_ts
+        log_to_server(
+            f"[RISK][DATA-SOURCE] stock schwab fallback no_success_for={silent_sec/3600:.1f}h "
+            f"threshold={threshold_h}h (check token/provider/env)"
+        )
+    except Exception:
+        pass
+    finally:
+        _flush_data_source_health()
+
+
 def fetch_ohlcv_from_api(symbol: str, timeframe: int, limit: int = 120):
     """
     v3.472: 统一的OHLCV获取接口
@@ -4095,8 +4317,11 @@ def fetch_ohlcv_from_api(symbol: str, timeframe: int, limit: int = 120):
         granularity = timeframe * 60  # 分钟转秒
         bars = _fetch_coinbase_candles(symbol, granularity=granularity, limit=limit)
         if bars:
+            _bump_data_source_stat("crypto", "coinbase", ok=True)
             print(f"[v3.472] {symbol} 从Coinbase获取 {len(bars)} 根K线")
+            _flush_data_source_health()
             return bars
+        _bump_data_source_stat("crypto", "coinbase", ok=False)
     else:
         # 美股用 yfinance
         try:
@@ -4133,11 +4358,19 @@ def fetch_ohlcv_from_api(symbol: str, timeframe: int, limit: int = 120):
                     }
                     if bar["close"] > 0:
                         bars.append(bar)
+                _bump_data_source_stat("stock", "yfinance", ok=True)
                 print(f"[v3.472] {symbol} 从yfinance获取 {len(bars)} 根K线")
+                _flush_data_source_health()
                 return bars
         except Exception as e:
             print(f"[v3.472] yfinance获取失败 {symbol}: {e}")
+        _bump_data_source_stat("stock", "yfinance", ok=False)
+        schwab_bars = _fetch_stock_ohlcv_from_schwab(symbol, timeframe=timeframe, limit=limit)
+        if schwab_bars:
+            print(f"[v3.472] {symbol} 从Schwab回退获取 {len(schwab_bars)} 根K线")
+            return schwab_bars
 
+    _flush_data_source_health()
     return None
 
 
@@ -4293,13 +4526,37 @@ def preload_ohlcv_from_yfinance(symbols: list, timeframe: int = 30):
                     hist = future.result(timeout=YFINANCE_TIMEOUT)
             except FuturesTimeoutError:
                 print(f"[v3.445] ⚠️ {symbol}: yfinance 超时 ({YFINANCE_TIMEOUT}秒)，跳过")
+                if symbol not in crypto_symbols:
+                    _bump_data_source_stat("stock", "yfinance", ok=False)
+                    schwab_bars = _fetch_stock_ohlcv_from_schwab(symbol, timeframe=symbol_tf, limit=120)
+                    if schwab_bars:
+                        for bar in schwab_bars:
+                            window.append(bar)
+                        print(f"[v3.445] ✅ {symbol}: Schwab预加载 {window.size()} 根K线 (周期={symbol_tf}min)")
+                        loaded_count += 1
                 continue
             except Exception as e:
                 print(f"[v3.445] ⚠️ {symbol}: yfinance 错误 - {e}")
+                if symbol not in crypto_symbols:
+                    _bump_data_source_stat("stock", "yfinance", ok=False)
+                    schwab_bars = _fetch_stock_ohlcv_from_schwab(symbol, timeframe=symbol_tf, limit=120)
+                    if schwab_bars:
+                        for bar in schwab_bars:
+                            window.append(bar)
+                        print(f"[v3.445] ✅ {symbol}: Schwab预加载 {window.size()} 根K线 (周期={symbol_tf}min)")
+                        loaded_count += 1
                 continue
 
             if hist is None or hist.empty:
                 print(f"[v3.445] {symbol}: yfinance 无历史数据")
+                if symbol not in crypto_symbols:
+                    _bump_data_source_stat("stock", "yfinance", ok=False)
+                    schwab_bars = _fetch_stock_ohlcv_from_schwab(symbol, timeframe=symbol_tf, limit=120)
+                    if schwab_bars:
+                        for bar in schwab_bars:
+                            window.append(bar)
+                        print(f"[v3.445] ✅ {symbol}: Schwab预加载 {window.size()} 根K线 (周期={symbol_tf}min)")
+                        loaded_count += 1
                 continue
 
             # 填充数据 (v3.445: 添加数据质量验证)
@@ -4340,8 +4597,18 @@ def preload_ohlcv_from_yfinance(symbols: list, timeframe: int = 30):
             # 显示有效/跳过的K线数
             if skipped_bars > 0:
                 print(f"[v3.445] ⚠️ {symbol}: 跳过 {skipped_bars} 根无效K线")
-            print(f"[v3.445] ✅ {symbol}: yfinance 预加载 {window.size()} 根K线 (周期={symbol_tf}min)")
-            loaded_count += 1
+            if valid_bars > 0:
+                _bump_data_source_stat("stock", "yfinance", ok=True)
+                print(f"[v3.445] ✅ {symbol}: yfinance 预加载 {window.size()} 根K线 (周期={symbol_tf}min)")
+                loaded_count += 1
+            elif symbol not in crypto_symbols:
+                _bump_data_source_stat("stock", "yfinance", ok=False)
+                schwab_bars = _fetch_stock_ohlcv_from_schwab(symbol, timeframe=symbol_tf, limit=120)
+                if schwab_bars:
+                    for bar in schwab_bars:
+                        window.append(bar)
+                    print(f"[v3.445] ✅ {symbol}: Schwab预加载 {window.size()} 根K线 (周期={symbol_tf}min)")
+                    loaded_count += 1
 
         except Exception as e:
             print(f"[v3.445] ❌ {symbol}: 预加载失败 - {e}")
@@ -4443,6 +4710,7 @@ def _preload_single_symbol(symbol: str, timeframe: int, force_update: bool = Fal
             hist = future.result(timeout=YFINANCE_TIMEOUT)
 
         if hist is not None and not hist.empty:
+            valid_bars = 0
             for idx, row in hist.iterrows():
                 try:
                     close_val = float(row["Close"]) if not pd.isna(row["Close"]) else 0
@@ -4466,9 +4734,21 @@ def _preload_single_symbol(symbol: str, timeframe: int, force_update: bool = Fal
                         "timestamp": idx.timestamp() if hasattr(idx, 'timestamp') else 0,
                     }
                     window.append(bar)
+                    valid_bars += 1
                 except Exception:  # v3.560 P2-2
                     pass
-            print(f"[v3.445] ✅ {symbol}: yfinance预加载 {window.size()}根 {timeframe}min K线")
+            if valid_bars > 0:
+                if symbol not in crypto_symbols:
+                    _bump_data_source_stat("stock", "yfinance", ok=True)
+                print(f"[v3.445] ✅ {symbol}: yfinance预加载 {window.size()}根 {timeframe}min K线")
+                return
+        if symbol not in crypto_symbols:
+            _bump_data_source_stat("stock", "yfinance", ok=False)
+            schwab_bars = _fetch_stock_ohlcv_from_schwab(symbol, timeframe=timeframe, limit=_buf_size)
+            if schwab_bars:
+                for bar in schwab_bars:
+                    window.append(bar)
+                print(f"[v3.445] ✅ {symbol}: Schwab预加载 {window.size()}根 {timeframe}min K线")
     except Exception as e:
         print(f"[v3.445] ⚠️ {symbol}: 预加载失败 - {e}")
 
@@ -4626,6 +4906,8 @@ def _background_ohlcv_updater():
                     # 每个请求间隔1秒，避免API限流
                     time.sleep(1)
 
+            _check_stock_fallback_health_alert()
+
             if update_count > 0:
                 print(f"[v3.470] ✅ 后台OHLCV更新完成: {update_count}个周期")
 
@@ -4767,8 +5049,14 @@ def _update_latest_bar(symbol: str, timeframe: int, window: 'OHLCVWindow'):
                         "sr_zone": "MID",
                         "timestamp": idx.timestamp() if hasattr(idx, 'timestamp') else 0,
                     })
+                if bars and symbol not in crypto_symbols:
+                    _bump_data_source_stat("stock", "yfinance", ok=True)
         except Exception as e:
             pass
+
+    if not bars and symbol not in crypto_symbols:
+        _bump_data_source_stat("stock", "yfinance", ok=False)
+        bars = _fetch_stock_ohlcv_from_schwab(symbol, timeframe=timeframe, limit=3) or []
 
     # v3.472: 更新最新K线到窗口（不覆盖TV数据）
     # 使用统一的_last_tv_update_time检查所有维护周期
@@ -49187,6 +49475,7 @@ def key009_dashboard():
     except NameError:
         _phase, _slot, _retries = "UNKNOWN", "", 0
     _sf_mode = _get_signal_filter_mode()
+    _ds_health = _get_data_source_health_snapshot()
     for d in multi_data.values():
         d["review_status"] = {
             "phase": _phase,
@@ -49194,6 +49483,7 @@ def key009_dashboard():
             "collect_retries": _retries,
             "signal_filter": _sf_mode
         }
+        d["data_source_health"] = _ds_health
 
     # 读取dashboard HTML模板并注入多范围数据
     try:
@@ -49248,6 +49538,7 @@ def key009_json():
             "collect_retries": _retries,
             "signal_filter": _get_signal_filter_mode()
         }
+        data["data_source_health"] = _get_data_source_health_snapshot()
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)})

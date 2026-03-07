@@ -465,6 +465,37 @@ def _yahoo_quote_fast(ticker: str) -> Dict[str, Any]:
     raise ValueError(f"quote endpoint unavailable for {ticker}")
 
 
+def _yfinance_daily_closes(ticker: str) -> list[float]:
+    """Yahoo接口受限(401等)时，回退到yfinance拉取日线收盘。"""
+    global _yf_cookie_refreshed_ts
+    try:
+        import yfinance as yf
+    except Exception as exc:
+        raise ValueError("yfinance package not available") from exc
+
+    def _fetch_once() -> list[float]:
+        hist = yf.Ticker(ticker).history(period="1y", interval="1d")
+        if hist is None or hist.empty or "Close" not in hist.columns:
+            return []
+        closes = [float(v) for v in hist["Close"].tolist() if isinstance(v, (int, float))]
+        return closes
+
+    closes = _fetch_once()
+    if len(closes) >= 130:
+        return closes
+
+    # cookie刷新后重试一次（5分钟内只刷新一次）
+    import time as _time_yf
+    if _time_yf.time() - _yf_cookie_refreshed_ts > 300:
+        _yf_cookie_refreshed_ts = _time_yf.time()
+        _refresh_yfinance_cookies()
+        closes = _fetch_once()
+        if len(closes) >= 130:
+            return closes
+
+    raise ValueError(f"insufficient yfinance daily close data for {ticker}")
+
+
 def _yahoo_daily_closes(ticker: str) -> list[float]:
     params = {
         "range": "1y",
@@ -473,15 +504,19 @@ def _yahoo_daily_closes(ticker: str) -> list[float]:
         "events": "div,splits",
     }
     url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?{urlencode(params)}"
-    raw = _read_json(url)
-    result = raw.get("chart", {}).get("result")
-    if not (isinstance(result, list) and result and isinstance(result[0], dict)):
-        raise ValueError(f"chart unavailable for {ticker}")
-    closes = result[0].get("indicators", {}).get("quote", [{}])[0].get("close", [])
-    out = [float(v) for v in closes if isinstance(v, (int, float))]
-    if len(out) < 130:
-        raise ValueError(f"insufficient daily close data for {ticker}")
-    return out
+    try:
+        raw = _read_json(url)
+        result = raw.get("chart", {}).get("result")
+        if not (isinstance(result, list) and result and isinstance(result[0], dict)):
+            raise ValueError(f"chart unavailable for {ticker}")
+        closes = result[0].get("indicators", {}).get("quote", [{}])[0].get("close", [])
+        out = [float(v) for v in closes if isinstance(v, (int, float))]
+        if len(out) < 130:
+            raise ValueError(f"insufficient daily close data for {ticker}")
+        return out
+    except Exception:
+        # 关键兜底：Yahoo接口401/限流时，改走yfinance历史接口
+        return _yfinance_daily_closes(ticker)
 
 
 def fetch_us_equity_profile_live(ticker: str) -> Dict[str, Any]:
@@ -490,7 +525,10 @@ def fetch_us_equity_profile_live(ticker: str) -> Dict[str, Any]:
     try:
         summary = _yahoo_quote_summary(ticker)
     except Exception:
-        quote_fast = _yahoo_quote_fast(ticker)
+        try:
+            quote_fast = _yahoo_quote_fast(ticker)
+        except Exception:
+            quote_fast = {}
 
     closes = _yahoo_daily_closes(ticker)
 

@@ -446,6 +446,11 @@ function _doRender() {
     const rh = DATA.rob_hoffman || {};
     const l1d = DATA.l1_diagnosis || {};
     const va = DATA.value_analysis || {};
+    const dsh = DATA.data_source_health || {};
+    const stockDS = (dsh.stock || {});
+    const yfStock = stockDS.yfinance || {};
+    const swStock = stockDS.schwab || {};
+    const swAgeMin = (swStock.last_success_age_min == null) ? '-' : swStock.last_success_age_min;
 
     // ── Summary cards ──
     const hasErrors = DATA.total_errors > 0;
@@ -461,6 +466,7 @@ function _doRender() {
         <div class="card"><div class="label">仲裁HOLD率</div><div class="value ${arb.hold_rate>0.9?'yellow':'green'}">${(arb.hold_rate*100||0).toFixed(0)}%</div><div class="sub">${arb.total||0}次决策</div></div>
         <div class="card"><div class="label">L1 HOLD率</div><div class="value ${l1d.total>0&&(l1d.by_signal||{}).HOLD/l1d.total>0.95?'yellow':'green'}">${l1d.total>0?(((l1d.by_signal||{}).HOLD||0)/l1d.total*100).toFixed(0):0}%</div><div class="sub">${l1d.total||0}次诊断</div></div>
         <div class="card"><div class="label">估值Fallback</div><div class="value ${va.fallback>10?'red':'green'}">${va.fallback||0}</div><div class="sub">${va.batch_total||0}批 失败${va.batch_failed||0}</div></div>
+        <div class="card"><div class="label">股票双源健康</div><div class="value ${((swStock.success||0)>0||(yfStock.success||0)>0)?'blue':'yellow'}">${(yfStock.success||0)}/${(swStock.success||0)}</div><div class="sub">YF/Schwab, Schwab成功距今 ${swAgeMin}m</div></div>
     `;
 
     // ── 外挂运行 Tab ──
@@ -1120,10 +1126,11 @@ function _doRender() {
         }).join('');
         sigaccBody.innerHTML = rows || '<tr><td colspan="8" style="color:#656d76">暂无信号数据 (需scan engine重启后积累)</td></tr>';
         const overallAcc = totalDecisive > 0 ? (totalCorrect / totalDecisive * 100).toFixed(0) : 'N/A';
+        const overallAccText = overallAcc === 'N/A' ? 'N/A' : `${overallAcc}%`;
         if (sigaccSummary) {
             sigaccSummary.innerHTML = `
                 <div class="card"><div class="label">总样本</div><div class="value">${totalDecisive}</div></div>
-                <div class="card"><div class="label">整体准确率</div><div class="value">${overallAcc}%</div></div>
+                <div class="card"><div class="label">整体准确率</div><div class="value">${overallAccText}</div></div>
                 <div class="card"><div class="label">外挂数</div><div class="value">${srcs.length}</div></div>
                 <div class="card"><div class="label" style="color:${downgraded>0?'#cf222e':'#1a7f37'}">降级中</div><div class="value">${downgraded}</div></div>`;
         }
@@ -1152,10 +1159,25 @@ function _doRender() {
     // 基准状态表 + 唐安琪周期 (GCC-0200)
     const trendLabel = {1:'上升', '-1':'下降', 0:'震荡'};
     const matColor = {'young':'#0969da','mid':'#9a6700','mature':'#1a7f37'};
+    function _baselineMissReason(side, s) {
+        const foundKey = side === 'BUY' ? 'buy_found' : 'sell_found';
+        if (s && s[foundKey] === false) return '视觉未识别';
+        if (s && s.buy_price != null && s.sell_price != null && s.buy_price >= s.sell_price) return '结构冲突单边保留';
+        if (!s || !s.updated_at) return '无更新时间';
+        try {
+            const h = (Date.now() - new Date(s.updated_at).getTime()) / 3600000;
+            if (isFinite(h) && h > 24) return '基准已过期';
+        } catch (e) {}
+        return '等待下次4h刷新';
+    }
     let blStateHTML = '';
     for (const [sym, s] of Object.entries(blState).sort()) {
-        const bp = s.buy_price != null ? s.buy_price.toFixed(2) : '<span style="color:#cf222e">未找到</span>';
-        const sp = s.sell_price != null ? s.sell_price.toFixed(2) : '<span style="color:#cf222e">未找到</span>';
+        const bp = s.buy_price != null
+            ? s.buy_price.toFixed(2)
+            : `<span style="color:#cf222e">未找到</span><span style="font-size:0.72em;color:#656d76;margin-left:4px">${_baselineMissReason('BUY', s)}</span>`;
+        const sp = s.sell_price != null
+            ? s.sell_price.toFixed(2)
+            : `<span style="color:#cf222e">未找到</span><span style="font-size:0.72em;color:#656d76;margin-left:4px">${_baselineMissReason('SELL', s)}</span>`;
         const ba = s.buy_bars_ago != null ? s.buy_bars_ago + '根' : '-';
         const sa = s.sell_bars_ago != null ? s.sell_bars_ago + '根' : '-';
         const dcAvg = s.dc_hl_avg != null ? s.dc_hl_avg.toFixed(1) : '-';
