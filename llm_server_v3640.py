@@ -3581,17 +3581,33 @@ def _refresh_l1_full_analysis(symbol: str, timeframe: int):
         print(f"[v3.493] {symbol}: 获取到 {len(ohlcv_bars)} 根K线")
 
         # v3.654: 数据新鲜度检测 (SYS-021)
-        # v3.668: 超1小时陈旧数据硬拦截 - 防止用过期数据做L1决策
-        _STALE_BLOCK_SEC = 3600  # 1小时
+        # v3.668+: 按主周期动态阈值，避免4H等长周期被固定5分钟/1小时误拦截
+        _tf_sec = max(60, int(timeframe) * 60)
+        _STALE_WARN_SEC = max(300, _tf_sec + 300)   # 至少1个bar+5分钟
+        _STALE_BLOCK_SEC = max(3600, _tf_sec * 2)   # 至少2个bar才硬拦截
         if window:
-            _staleness = window.check_staleness(max_age_seconds=300)
-            system_availability_record("data", success=not _staleness.get("stale"))
+            _skip_stale_gate = False
+            if is_us_stock(symbol) and not _is_us_market_open():
+                _skip_stale_gate = True
+            _staleness = window.check_staleness(max_age_seconds=_STALE_WARN_SEC)
+            system_availability_record("data", success=(_skip_stale_gate or not _staleness.get("stale")))
             if _staleness.get("stale"):
                 _stale_age = _staleness.get("age_seconds", 0)
-                log_to_server(f"[DATA_STALE][{symbol}] {_staleness['reason']}")
-                if _stale_age > _STALE_BLOCK_SEC:
-                    log_to_server(f"[DATA_STALE_BLOCK][{symbol}] 数据过期{_stale_age}s>1h，跳过L1执行")
-                    return False
+                if _skip_stale_gate:
+                    log_to_server(
+                        f"[DATA_STALE_SKIP][{symbol}] market_closed age={_stale_age}s "
+                        f"warn>{_STALE_WARN_SEC}s block>{_STALE_BLOCK_SEC}s"
+                    )
+                else:
+                    log_to_server(
+                        f"[DATA_STALE][{symbol}] {_staleness['reason']} "
+                        f"(warn>{_STALE_WARN_SEC}s, block>{_STALE_BLOCK_SEC}s)"
+                    )
+                    if _stale_age > _STALE_BLOCK_SEC:
+                        log_to_server(
+                            f"[DATA_STALE_BLOCK][{symbol}] 数据过期{_stale_age}s>{_STALE_BLOCK_SEC}s，跳过L1执行"
+                        )
+                        return False
 
         # 2. 获取当前价格和仓位信息
         current_price = float(ohlcv_bars[-1].get("close", ohlcv_bars[-1].get("c", 0)))
@@ -49100,6 +49116,14 @@ def key009_dashboard():
         try:
             if not signal_filter:
                 return "OFF"
+            _gm = getattr(signal_filter, "get_mode", None)
+            if callable(_gm):
+                _mode = str(_gm()).upper()
+                if _mode in ("OBSERVE", "ENFORCE"):
+                    return _mode
+            _obs = getattr(signal_filter, "observe_only", None)
+            if isinstance(_obs, bool):
+                return "OBSERVE" if _obs else "ENFORCE"
             try:
                 from AIPro import signal_direction_filter as _sdf
             except Exception:
@@ -49128,11 +49152,19 @@ def key009_dashboard():
             import pytz as _tz
             _ny = _tz.timezone("America/New_York")
             _now = datetime.now(_ny)
-            _week_start = _now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=_now.weekday())
-            _month_start = _now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            _today_8 = _now.replace(hour=8, minute=0, second=0, microsecond=0)
+            _day_start = (_today_8 - timedelta(days=1)) if _now < _today_8 else _today_8
+            _week_start = _now.replace(hour=8, minute=0, second=0, microsecond=0) - timedelta(days=_now.weekday())
+            if _now < _week_start:
+                _week_start -= timedelta(weeks=1)
+            _month_start = _now.replace(day=1, hour=8, minute=0, second=0, microsecond=0)
+            if _now < _month_start:
+                _lm = (_now.replace(day=1) - timedelta(days=1))
+                _month_start = _lm.replace(day=1, hour=8, minute=0, second=0, microsecond=0)
+            _h_24 = max(int((_now - _day_start).total_seconds() / 3600), 1)
             _h_1w = max(int((_now - _week_start).total_seconds() / 3600), 1)
             _h_1m = max(int((_now - _month_start).total_seconds() / 3600), 1)
-            ranges = {"24h": 24, "1w": _h_1w, "1m": _h_1m}
+            ranges = {"24h": _h_24, "1w": _h_1w, "1m": _h_1m}
             _log_paths = "logs/server.log,logs/price_scan_engine.log,logs/deepseek_arbiter.log,logs/macd_divergence.log,logs/rob_hoffman_plugin.log,logs/l1_module_diagnosis.log,logs/value_analysis.log"
             multi_data = {}
             for label, h in ranges.items():
@@ -49181,6 +49213,14 @@ def key009_json():
         try:
             if not signal_filter:
                 return "OFF"
+            _gm = getattr(signal_filter, "get_mode", None)
+            if callable(_gm):
+                _mode = str(_gm()).upper()
+                if _mode in ("OBSERVE", "ENFORCE"):
+                    return _mode
+            _obs = getattr(signal_filter, "observe_only", None)
+            if isinstance(_obs, bool):
+                return "OBSERVE" if _obs else "ENFORCE"
             try:
                 from AIPro import signal_direction_filter as _sdf
             except Exception:
@@ -49924,7 +49964,7 @@ def handle_p0_signal():
                     pass
 
                 if not reason:
-                    # KEY-010 S8: BUY方向卡门（观察模式：仅记录，不真实拦截）
+                    # KEY-010 S8: BUY方向卡门（ENFORCE会真实拦截，OBSERVE仅记录）
                     if signal_filter and ValidSignal and direction_result:
                         try:
                             _buy_allowed = signal_filter.filter_signal(
@@ -49938,9 +49978,14 @@ def handle_p0_signal():
                             )
                             if not _buy_allowed:
                                 log_to_server(
-                                    f"[方向过滤][观察] BUY本应拦截 | 原因:{direction_result.direction} "
+                                    f"[方向过滤][拦截] {symbol} BUY | 原因:{direction_result.direction} "
                                     f"| 4h Buy {direction_result.buy_ratio_4h:.1%} "
                                     f"Week Buy {direction_result.buy_ratio_week:.1%}"
+                                )
+                                reason = (
+                                    f"方向过滤拦截: {direction_result.direction} "
+                                    f"(4h Buy {direction_result.buy_ratio_4h:.1%}, "
+                                    f"Week Buy {direction_result.buy_ratio_week:.1%})"
                                 )
                         except Exception as _sf_buy_e:
                             log_to_server(f"[SignalFilter] BUY过滤调用失败: {_sf_buy_e}")
@@ -50053,7 +50098,7 @@ def handle_p0_signal():
                     pass
 
                 if not reason:
-                    # KEY-010 S9: SELL方向卡门（观察模式：仅记录，不真实拦截）
+                    # KEY-010 S9: SELL方向卡门（ENFORCE会真实拦截，OBSERVE仅记录）
                     if signal_filter and ValidSignal and direction_result:
                         try:
                             _sell_allowed = signal_filter.filter_signal(
@@ -50067,9 +50112,14 @@ def handle_p0_signal():
                             )
                             if not _sell_allowed:
                                 log_to_server(
-                                    f"[方向过滤][观察] SELL本应拦截 | 原因:{direction_result.direction} "
+                                    f"[方向过滤][拦截] {symbol} SELL | 原因:{direction_result.direction} "
                                     f"| 4h Sell {direction_result.sell_ratio_4h:.1%} "
                                     f"Week Sell {direction_result.sell_ratio_week:.1%}"
+                                )
+                                reason = (
+                                    f"方向过滤拦截: {direction_result.direction} "
+                                    f"(4h Sell {direction_result.sell_ratio_4h:.1%}, "
+                                    f"Week Sell {direction_result.sell_ratio_week:.1%})"
                                 )
                         except Exception as _sf_sell_e:
                             log_to_server(f"[SignalFilter] SELL过滤调用失败: {_sf_sell_e}")

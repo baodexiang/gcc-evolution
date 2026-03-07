@@ -618,6 +618,14 @@ except ImportError:
     print("请安装 pytz: pip install pytz")
     sys.exit(1)
 
+# GCC-0205: 股票数据源双源fallback（yfinance -> Schwab）
+try:
+    from schwab_data_provider import get_provider as get_schwab_provider
+    _schwab_provider_available = True
+except Exception:
+    get_schwab_provider = None
+    _schwab_provider_available = False
+
 # v12.0: Chandelier+ZLSMA剥头皮外挂
 try:
     from chandelier_zlsma_plugin import get_chandelier_zlsma_plugin
@@ -3706,6 +3714,10 @@ class YFinanceDataFetcher:
     # key = f"{symbol}_{interval}_{lookback}", value = bars list
     _scan_cycle_cache: Dict[str, Any] = {}
     _scan_cycle_id: int = 0  # 每次scan_once递增，缓存自动失效
+    # GCC-0205: SCHWAB_FALLBACK_MODE=off|observe|active(默认active)
+    _schwab_fallback_mode: str = (os.getenv("SCHWAB_FALLBACK_MODE", "active") or "active").strip().lower()
+    _schwab_status_logged: bool = False
+    _schwab_unavailable_warned: bool = False
     
     @staticmethod
     def _get_cached_price(symbol: str) -> Optional[float]:
@@ -3726,6 +3738,12 @@ class YFinanceDataFetcher:
         """v16.2: 开始新的扫描周期，清空OHLCV缓存"""
         YFinanceDataFetcher._scan_cycle_id += 1
         YFinanceDataFetcher._scan_cycle_cache.clear()
+        if not YFinanceDataFetcher._schwab_status_logged:
+            logger.info(
+                f"[SCHWAB_FALLBACK] mode={YFinanceDataFetcher._schwab_fallback_mode} "
+                f"provider_available={_schwab_provider_available}"
+            )
+            YFinanceDataFetcher._schwab_status_logged = True
 
     @staticmethod
     def _get_ohlcv_cache(symbol: str, interval: str, lookback: int) -> Optional[List]:
@@ -3738,6 +3756,81 @@ class YFinanceDataFetcher:
         """v16.2: 设置扫描周期OHLCV缓存"""
         key = f"{symbol}_{interval}_{lookback}"
         YFinanceDataFetcher._scan_cycle_cache[key] = bars
+
+    @staticmethod
+    def _schwab_mode_enabled() -> bool:
+        return YFinanceDataFetcher._schwab_fallback_mode in ("observe", "active")
+
+    @staticmethod
+    def _schwab_mode_active() -> bool:
+        return YFinanceDataFetcher._schwab_fallback_mode == "active"
+
+    @staticmethod
+    def _fetch_from_schwab_ohlcv(symbol: str, interval: str, lookback_bars: int) -> Optional[List[Dict]]:
+        """GCC-0205: 股票数据yfinance失败后的Schwab后备通道（加密直接跳过）"""
+        if is_crypto_symbol(symbol):
+            return None
+        if not YFinanceDataFetcher._schwab_mode_enabled():
+            return None
+        if not _schwab_provider_available:
+            if not YFinanceDataFetcher._schwab_unavailable_warned:
+                logger.warning(
+                    "[SCHWAB_FALLBACK] provider unavailable; "
+                    "check schwab_data_provider deps/env/token"
+                )
+                YFinanceDataFetcher._schwab_unavailable_warned = True
+            return None
+        try:
+            provider = get_schwab_provider()
+            df = provider.get_kline(symbol, interval=interval, bars=max(lookback_bars, 10))
+            if df is None or df.empty:
+                return None
+            recent = df.tail(lookback_bars)
+            bars: List[Dict] = []
+            for idx, row in recent.iterrows():
+                try:
+                    b = {
+                        "open": float(row["open"]),
+                        "high": float(row["high"]),
+                        "low": float(row["low"]),
+                        "close": float(row["close"]),
+                        "volume": float(row.get("volume", 0.0) or 0.0),
+                        "timestamp": str(idx),
+                    }
+                    if b["close"] > 0 and b["high"] >= b["low"]:
+                        bars.append(b)
+                except Exception:
+                    continue
+            return bars if bars else None
+        except Exception as e:
+            logger.warning(f"[SCHWAB_FALLBACK] {symbol} {interval} fetch error: {e}")
+            return None
+
+    @staticmethod
+    def _fetch_from_schwab_price(symbol: str) -> Optional[float]:
+        """GCC-0205: 当前价后备通道（仅股票）"""
+        if is_crypto_symbol(symbol):
+            return None
+        if not YFinanceDataFetcher._schwab_mode_enabled():
+            return None
+        if not _schwab_provider_available:
+            if not YFinanceDataFetcher._schwab_unavailable_warned:
+                logger.warning(
+                    "[SCHWAB_FALLBACK] provider unavailable; "
+                    "check schwab_data_provider deps/env/token"
+                )
+                YFinanceDataFetcher._schwab_unavailable_warned = True
+            return None
+        try:
+            provider = get_schwab_provider()
+            df = provider.get_kline(symbol, interval="1m", bars=2)
+            if df is None or df.empty:
+                return None
+            price = float(df["close"].iloc[-1])
+            return price if price > 0 else None
+        except Exception as e:
+            logger.warning(f"[SCHWAB_FALLBACK] {symbol} price fetch error: {e}")
+            return None
 
     @staticmethod
     def _fetch_with_timeout(func, timeout: int = None):
@@ -3823,7 +3916,18 @@ class YFinanceDataFetcher:
         price = YFinanceDataFetcher._retry_fetch(_fetch, symbol)
         if price:
             YFinanceDataFetcher._set_cached_price(symbol, price)
-        return price
+            return price
+
+        # GCC-0205: yfinance失败后尝试Schwab（默认observe仅记录，不替换）
+        schwab_price = YFinanceDataFetcher._fetch_from_schwab_price(symbol)
+        if schwab_price is not None:
+            logger.info(
+                f"[SCHWAB_FALLBACK] price {symbol} success mode={YFinanceDataFetcher._schwab_fallback_mode}"
+            )
+            if YFinanceDataFetcher._schwab_mode_active():
+                YFinanceDataFetcher._set_cached_price(symbol, schwab_price)
+                return schwab_price
+        return None
 
     @staticmethod
     def get_1m_close_price(symbol: str) -> Optional[float]:
@@ -4175,6 +4279,15 @@ class YFinanceDataFetcher:
             return None
 
         result = YFinanceDataFetcher._retry_fetch(_fetch, symbol)
+        if result is None:
+            schwab_bars = YFinanceDataFetcher._fetch_from_schwab_ohlcv(symbol, "1h", lookback_bars)
+            if schwab_bars:
+                logger.info(
+                    f"[SCHWAB_FALLBACK] 1h {symbol} success bars={len(schwab_bars)} "
+                    f"mode={YFinanceDataFetcher._schwab_fallback_mode}"
+                )
+                if YFinanceDataFetcher._schwab_mode_active():
+                    result = schwab_bars
         if result is not None:
             YFinanceDataFetcher._set_ohlcv_cache(symbol, "1h", lookback_bars, result)
         return result
@@ -4287,6 +4400,9 @@ class YFinanceDataFetcher:
 
             return None
 
+        # 4H不走Schwab fallback：
+        # TradingView webhook为主链路，Schwab无原生4H且会映射到1D，易引入周期失真。
+        # 因此4H仅保留 Coinbase -> yfinance 流程。
         result = YFinanceDataFetcher._retry_fetch(_fetch, symbol)
         # v16.2: 缓存结果（包括None，避免重复失败调用）
         if result is not None:
