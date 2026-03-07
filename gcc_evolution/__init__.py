@@ -1,4 +1,4 @@
-"""
+﻿"""
 GCC v4.95 — Agentic AI Layer with Hierarchical Memory, RAG Retrieval & SkillBank
 从被动记录到主动进化：跨会话记忆闭环 + 双通道约束 + 方向可控进化
 
@@ -20,7 +20,7 @@ v4.6:  + Constraints, Skill Registry, Self-Check, STATUS.md
 v4.5:  Smart handoff + params
 """
 
-__version__ = "5.305"
+__version__ = "5.325"
 
 from .models import (
     CardStatus,
@@ -90,3 +90,4 @@ __all__ = [
 ]
 
 from gcc_evolution.gcc_db import GccDb, auto_import
+

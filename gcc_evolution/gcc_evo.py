@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-"""gcc-evo v5.305 — GCC Evolution Engine with Visual Dashboard"""
+﻿#!/usr/bin/env python3
+"""gcc-evo v5.325 — GCC Evolution Engine with Visual Dashboard"""
 from __future__ import annotations
 
 import json
@@ -5994,3 +5994,4 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
 
 if __name__ == "__main__":
     main()
+

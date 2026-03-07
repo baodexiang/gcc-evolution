@@ -1,10 +1,10 @@
-[build-system]
+﻿[build-system]
 requires = ["setuptools>=62.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gcc-evo"
-version = "5.295"
+version = "5.325"
 description = "AI Self-Evolution Engine — Persistent memory + continuous learning for LLM"
 readme = "opensource/README.md"
 requires-python = ">=3.9"
@@ -203,3 +203,4 @@ exclude_dirs = [
 
 [tool.bandit.assert_used]
 skips = ["*/tests/*"]
+
