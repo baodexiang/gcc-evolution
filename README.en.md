@@ -1,5 +1,8 @@
 ﻿# gcc-evo v5.325
 
+See also: [FRAMEWORK_BOUNDARY.md](FRAMEWORK_BOUNDARY.md) | [FRAMEWORK_BOUNDARY.en.md](FRAMEWORK_BOUNDARY.en.md) | [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md)
+
+
 **AI Self-Evolution Engine** â€” Persistent memory + continuous learning for LLM agents
 
 [![Tests](https://github.com/baodexiang/gcc-evo/workflows/Tests/badge.svg)](https://github.com/baodexiang/gcc-evo/actions/workflows/test.yml)
@@ -535,26 +538,47 @@ If you use gcc-evo in research or production, please cite:
 
 | Tier | Price | Included | Best For |
 |------|-------|----------|----------|
-| **Community** | ðŸ†“ Forever Free | L1-L5 foundation + Direction Anchor | Personal/Academic/<$1M revenue |
-| **Evolve** | $29/month | + KNN Evolution + Walk-Forward Testing | Small teams/traders |
-| **Pro** | $79/month | + Signal Evolution + Advanced SkillBank | Institutions/trading desks |
-| **Enterprise** | $500+/month | + Private deployment + Vertical optimization | Large funds/custom solutions |
+| **Community** | Free Forever | UI + L0 Phase 1 + base L1/L2/L3/L5 | Personal/Academic/<$1M revenue |
+| **Evolve** | $29/month | + L0 Phase 2-4 | Teams validating data/math pipeline |
+| **Pro** | $79/month | + full L1/L2/L3 | Teams needing full memory/retrieval/distillation |
+| **Enterprise** | $500+/month | + L4 + advanced L5 + DA + private deployment | Large funds |
 
-ðŸ“– **Full Details**: [PRICING.md](PRICING.md) | [PRICING.en.md](PRICING.en.md)
+See [PRICING.md](PRICING.md) | [PRICING.en.md](PRICING.en.md) | [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md)
 
 ### License
 - **Base**: [BUSL 1.1](LICENSE) with Additional Use Grant
-- **Change Date**: 2028-05-01 â†’ auto-converts to Apache 2.0
+- **Change Date**: 2028-05-01 -> auto-converts to Apache 2.0
 - **Community Forever Free**: Individuals, academics, <$1M annual revenue
-- **See also**: [LICENSE](LICENSE) file for full terms
+- **Canonical commercial boundary**: `LAYER_STRUCTURE.md`
 
 ---
 
-**Made with â¤ï¸ by [baodexiang](https://github.com/baodexiang)**
+## Roadmap
 
-[English](README.en.md) | [ä¸­æ–‡](README.md)
+```
+v5.325 (Current) â€” Loop + Skeptic + Multi-Model
+    â†“
+v5.5 (Q2 2026) â€” Distributed Memory + Real-time Collaboration
+    â†“
+v6.0 (Q4 2026) â€” Apache 2.0 + Full Open Source
+    â†“
+v7.0 (2027) â€” Plugin Ecosystem + Enterprise Features
+```
 
+---
 
+## Citation
 
+If you use gcc-evo in research or production, please cite:
 
+```bibtex
+@software{gcc_evo_2026,
+  author = {baodexiang},
+  title = {gcc-evo: AI Self-Evolution Engine},
+  year = {2026},
+  url = {https://github.com/baodexiang/gcc-evo},
+  version = {5.325}
+}
+```
 
+---

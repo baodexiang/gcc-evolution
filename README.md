@@ -1,5 +1,8 @@
 ﻿# gcc-evo v5.325
 
+See also: [FRAMEWORK_BOUNDARY.md](FRAMEWORK_BOUNDARY.md) | [FRAMEWORK_BOUNDARY.en.md](FRAMEWORK_BOUNDARY.en.md) | [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md)
+
+
 **AI Self-Evolution Engine** â€” Persistent memory + continuous learning for LLM agents
 
 [![Tests](https://github.com/baodexiang/gcc-evo/workflows/Tests/badge.svg)](https://github.com/baodexiang/gcc-evo/actions/workflows/test.yml)
@@ -144,6 +147,10 @@ gcc-evo loop GCC-0002 --provider gemini --once
 
 ---
 
+## Canonical Layer Split
+
+See [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md) for the authoritative v5.325 free/paid 8-layer directory boundary.
+
 ## Five-Layer Architecture Design
 
 ### System Architecture Diagram
@@ -245,8 +252,8 @@ gcc-evo loop GCC-0002 --provider gemini --once
 | **L1** | Memory | Persistent storage + 3-tier hierarchy | `memory_tiers.py` | RAG, Memory Networks |
 | **L2** | Retrieval | Hybrid search + semantic + temporal + keywords | `retriever.py` | Dense Passage Retrieval, BM25 |
 | **L3** | Distillation | Knowledge extraction + skill library + versioning | `distiller.py` | Knowledge Distillation, Experience Replay |
-| **L4** | Decision | LLM reasoning + hallucination prevention + Human-in-loop | `skeptic.py` | Uncertainty Quantification, Constitutional AI |
-| **L5** | Orchestration | Loop closure + task scheduling + automation | `pipeline.py` | DAG Scheduling, Reinforcement Learning |
+| **L4** | Decision | Canonical paid-only evolution engine | `paid/l4/` | Skeptic Agent, multi-model consensus, walk-forward |
+| **L5** | Orchestration | Base free, advanced orchestration paid | `free/l5/`, `paid/l5/` | DAG Scheduling, Reinforcement Learning |
 
 ### Data Flow Example
 
@@ -536,10 +543,10 @@ If you use gcc-evo in research or production, please cite:
 
 | Tier | Price | Included | Best For |
 |------|-------|----------|----------|
-| **Community** | ðŸ†“ Forever Free | L1-L5 foundation + Direction Anchor | Personal/Academic/<$1M revenue |
-| **Evolve** | $29/month | + KNN Evolution + Walk-Forward Testing | Small teams/traders |
-| **Pro** | $79/month | + Signal Evolution + Advanced SkillBank | Institutions/trading desks |
-| **Enterprise** | $500+/month | + Private deployment + Vertical optimization | Large funds/custom solutions |
+| **Community** | Free Forever | UI + L0 Phase 1 + base L1/L2/L3/L5 | Personal/Academic/<$1M |
+| **Evolve** | $29/month | + L0 Phase 2-4 | Teams validating data/math pipeline |
+| **Pro** | $79/month | + full L1/L2/L3 | Teams needing full memory/retrieval/distillation |
+| **Enterprise** | $500+/month | + L4 + advanced L5 + DA + private deployment | Large funds |
 
 ðŸ“– **Full Details**: [PRICING.md](PRICING.md) | [PRICING.en.md](PRICING.en.md)
 

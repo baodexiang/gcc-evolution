@@ -1,4 +1,7 @@
 ﻿# gcc-evo â€” AI Self-Evolution Engine v5.325
+
+See also: [FRAMEWORK_BOUNDARY.md](FRAMEWORK_BOUNDARY.md) | [FRAMEWORK_BOUNDARY.en.md](FRAMEWORK_BOUNDARY.en.md) | [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md)
+
 # gcc-evo â€” AI è‡ªè¿›åŒ–å¼•æ“Ž v5.325
 
 > **Break the 200K token context window limit â€” let AI truly remember and continuously evolve**
@@ -84,8 +87,8 @@
 | **L1** | Memory / è®°å¿†å±‚ | Persistent storage + 3-tier hierarchy | `memory_tiers.py` | RAG, Memory Networks |
 | **L2** | Retrieval / æ£€ç´¢å±‚ | Hybrid search: semantic + temporal + keywords | `retriever.py` | Dense Passage Retrieval, BM25 |
 | **L3** | Distillation / è’¸é¦å±‚ | Knowledge extraction + skill library + versioning | `distiller.py` | Knowledge Distillation, Experience Replay |
-| **L4** | Decision / å†³ç­–å±‚ | LLM reasoning + hallucination prevention | `skeptic.py` | Uncertainty Quantification, Constitutional AI |
-| **L5** | Orchestration / ç¼–æŽ’å±‚ | Loop closure + task scheduling + automation | `pipeline.py` | DAG Scheduling, Reinforcement Learning |
+| **L4** | Decision / 决策进化层 | 付费专属决策与进化引擎 | `paid/l4/` | Skeptic Agent、多模型共识、walk-forward |
+| **L5** | Orchestration / 编排层 | 基础免费，高级编排付费 | `free/l5/`, `paid/l5/` | DAG Scheduling, Reinforcement Learning |
 
 ---
 
@@ -168,16 +171,16 @@ gcc-evo memory export                      # Backup state
 
 ---
 
-## Pricing / å®šä»·
+## Pricing / 定价
 
-| Tier / ç‰ˆæœ¬ | Price / ä»·æ ¼ | Included / åŒ…å« | Best For / é€‚ç”¨ |
+| Tier / 层级 | Price / 价格 | Included / 包含内容 | Best For / 适用对象 |
 |------|------|--------|--------|
-| **Community** | ðŸ†“ Forever Free | L1-L5 foundation + Direction Anchor | Personal/Academic/<$1M |
-| **Evolve** | $29/month | + KNN Evolution + Walk-Forward Testing | Small teams |
-| **Pro** | $79/month | + Signal Evolution + Advanced SkillBank | Institutions |
-| **Enterprise** | $500+/month | + Private deployment + Custom | Large funds |
+| **Community** | Free Forever | UI + L0 Phase 1 + 基础 L1/L2/L3/L5 | Personal/Academic/<$1M |
+| **Evolve** | $29/month | + L0 Phase 2-4 | 个人开发者/进阶实验 |
+| **Pro** | $79/month | + 高级 L1/L2/L3 | 专业团队/顾问/知识产品 |
+| **Enterprise** | $500+/month | + L4 + 高级 L5 + DA + 企业扩展 | 企业部署 |
 
-See [PRICING.md](PRICING.md) | [PRICING.en.md](PRICING.en.md)
+See [PRICING.md](PRICING.md) | [PRICING.en.md](PRICING.en.md) | [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md)
 
 ---
 
@@ -226,6 +229,7 @@ v7.0 (2027) â€” Plugin Ecosystem + Enterprise Features
 ---
 
 **Made with â¤ï¸ by [baodexiang](https://github.com/baodexiang)**
+
 
 
 

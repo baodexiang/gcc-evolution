@@ -5,6 +5,10 @@ Usage:
     gcc-evo version
     gcc-evo setup KEY [--show] [--edit] [--reset]
     gcc-evo init [--project NAME]
+    gcc-evo l0 show
+    gcc-evo l0 check
+    gcc-evo l0 scaffold [--overwrite]
+    gcc-evo l0 set-prereq NAME --status pass|fail [--evidence TEXT]
     gcc-evo loop TASK_ID [--once] [--provider PROVIDER] [--dry-run]
     gcc-evo commit "MESSAGE" [--task-id GCC-0001] [--step-id S1]
     gcc-evo ho create [--task-id GCC-0001] [--step-id S1] [--message TEXT]
@@ -56,6 +60,7 @@ def _print_banner():
 def cmd_version(args):
     """Show version and environment info."""
     from . import __version__
+    from .layer_manifest import canonical_layers
     print(f"gcc-evo v{__version__}")
     print(f"Python {sys.version.split()[0]}")
     print(f"Platform: {sys.platform}")
@@ -63,42 +68,46 @@ def cmd_version(args):
     # Check available layers
     layers = []
     try:
-        from . import L1_memory
+        from .free import l1 as _free_l1
         layers.append("L1:Memory")
     except ImportError:
         pass
     try:
-        from . import L2_retrieval
+        from .free import l2 as _free_l2
         layers.append("L2:Retrieval")
     except ImportError:
         pass
     try:
-        from . import L3_distillation
+        from .free import l3 as _free_l3
         layers.append("L3:Distillation")
     except ImportError:
         pass
     try:
-        from . import L4_decision
+        from .paid import l4 as _paid_l4
         layers.append("L4:Decision")
     except ImportError:
         pass
     try:
-        from . import L5_orchestration
+        from .free import l5 as _free_l5
         layers.append("L5:Orchestration")
     except ImportError:
         pass
     try:
-        from . import direction_anchor
+        from .paid import da as _paid_da
         layers.append("Anchor")
     except ImportError:
         pass
     try:
-        from . import observer
-        layers.append("L6:Observation")
+        from .free import ui as _free_ui
+        layers.append("UI")
     except ImportError:
         pass
 
-    print(f"Layers: {', '.join(layers)}")
+    print(f"Canonical availability: {', '.join(layers)}")
+    print(f"Canonical layers: {', '.join(canonical_layers())}")
+    print("Canonical boundary:")
+    print("  free  -> UI, L0 Phase 1, base L1/L2/L3/L5")
+    print("  paid  -> L0 Phase 2-4, full L1/L2/L3, L4, advanced L5, DA")
 
     # Check enterprise
     try:
@@ -110,8 +119,9 @@ def cmd_version(args):
 
 def cmd_setup(args):
     """L0 session setup wizard."""
-    from .session_config import SessionConfig
-    from .setup_wizard import run_setup_wizard, run_edit_menu
+    from .free.l0.session_config import SessionConfig
+    from .free.l0.setup_wizard import run_setup_wizard
+    from .setup_wizard import run_edit_menu
 
     key = args.key or ""
 
@@ -146,6 +156,7 @@ def cmd_init(args):
         base / ".GCC",
         base / ".GCC" / "handoffs",
         base / ".GCC" / "pipeline",
+        base / ".GCC" / "state",
         base / "state",
         base / "state" / "audit",
         base / "logs",
@@ -192,7 +203,8 @@ def cmd_init(args):
     print()
     print("Next steps:")
     print("  1. gcc-evo setup KEY-001       # L0 session config (required before loop)")
-    print("  2. gcc-evo pipe task 'My first task' -k KEY-001 -m core -p P1")
+    print("  2. gcc-evo l0 scaffold         # create mandatory Phase1-4 artifacts")
+    print("  3. gcc-evo pipe task 'My first task' -k KEY-001 -m core -p P1")
 
 
 def cmd_loop(args):
@@ -204,7 +216,8 @@ def cmd_loop(args):
 
     # â”€â”€ L0 Gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if not dry_run:
-        from .session_config import SessionConfig
+        from .free.l0.session_config import SessionConfig
+        from .free.l0.governance import evaluate_l0_governance, format_governance_summary
         cfg = SessionConfig.load()
         ok, err = cfg.is_valid()
         if not ok:
@@ -213,14 +226,23 @@ def cmd_loop(args):
             return
         print(f"[L0] Goal: {cfg.goal}")
         print(f"[L0] KEY: {cfg.key}")
+        governance = evaluate_l0_governance()
+        if not governance["ok"]:
+            print("[L0] Governance gate blocked loop execution.")
+            print(format_governance_summary(governance))
+            print("Run: gcc-evo l0 show")
+            print("Run: gcc-evo l0 scaffold")
+            print("Run: gcc-evo l0 set-prereq <name> --status pass --evidence '...'\n")
+            return
 
     print(f"Loop: {task_id} | provider={provider or 'default'} | once={once}")
 
-    from .L1_memory import SensoryMemory, ShortTermMemory, LongTermMemory, JSONStorage
-    from .L2_retrieval import HybridRetriever
-    from .L3_distillation import ExperienceDistiller
-    from .L4_decision import SkepticValidator
-    from .L5_orchestration import SelfImprovementLoop
+    from .free.l1.memory_tiers import SensoryMemory, ShortTermMemory, LongTermMemory
+    from .free.l1.storage import JSONStorage
+    from .free.l2.retriever import HybridRetriever
+    from .free.l3.distiller import ExperienceDistiller
+    from .paid.l4.skeptic import SkepticValidator
+    from .free.l5.loop_engine import SelfImprovementLoop
 
     # Ensure state directory exists
     state_dir = Path("state")
@@ -388,6 +410,53 @@ def cmd_pipe_status(args):
             return
 
     print(f"Task {args.task_id} not found.")
+
+
+def cmd_l0_show(args):
+    """Show current L0 governance state and checks."""
+    from .free.l0.governance import evaluate_l0_governance, format_governance_summary
+
+    report = evaluate_l0_governance()
+    print(format_governance_summary(report))
+
+
+def cmd_l0_check(args):
+    """Run L0 governance checks with status summary."""
+    from .free.l0.governance import evaluate_l0_governance, format_governance_summary
+
+    report = evaluate_l0_governance()
+    print(format_governance_summary(report))
+    print()
+    print("L0_STATUS=" + ("PASS" if report["ok"] else "BLOCKED"))
+
+
+def cmd_l0_scaffold(args):
+    """Create the required L0 artifact structure."""
+    from .free.l0.governance import scaffold_required_artifacts
+
+    created = scaffold_required_artifacts(overwrite=args.overwrite)
+    if not created:
+        print("No new artifact files created.")
+        return
+    print("Created artifact templates:")
+    for path in created:
+        print(f"  - {path}")
+
+
+def cmd_l0_set_prereq(args):
+    """Mark one prerequisite as pass/fail with evidence."""
+    from .free.l0.governance import set_prerequisite_status
+
+    ok = set_prerequisite_status(
+        key=args.name,
+        satisfied=args.status == "pass",
+        evidence=args.evidence or "",
+    )
+    if not ok:
+        print(f"Unknown prerequisite: {args.name}")
+        print("Valid names: data_quality, deterministic_rules, mathematical_filters")
+        return
+    print(f"Updated prerequisite: {args.name} -> {args.status}")
 
 
 def _utc_now_iso() -> str:
@@ -711,6 +780,14 @@ def cmd_health(args):
     ok = pipeline.exists()
     checks.append(("Pipeline tasks", ok))
 
+    # Check L0 governance
+    try:
+        from .free.l0.governance import evaluate_l0_governance
+        governance = evaluate_l0_governance()
+        checks.append(("L0 governance gate", governance["ok"]))
+    except Exception:
+        checks.append(("L0 governance gate", False))
+
     # Check imports
     try:
         from . import __version__
@@ -752,6 +829,18 @@ def main():
         action="store_true",
         help="Backward-compatible no-op flag (legacy scripts).",
     )
+
+    # l0 governance
+    l0_parser = subparsers.add_parser("l0", help="L0 governance checks and artifacts")
+    l0_sub = l0_parser.add_subparsers(dest="l0_command")
+    l0_sub.add_parser("show", help="Show prerequisite and artifact status")
+    l0_sub.add_parser("check", help="Run prerequisite and artifact gate checks")
+    l0_scaffold = l0_sub.add_parser("scaffold", help="Create required L0 artifact templates")
+    l0_scaffold.add_argument("--overwrite", action="store_true", default=False)
+    l0_set = l0_sub.add_parser("set-prereq", help="Mark a prerequisite gate pass/fail")
+    l0_set.add_argument("name", type=str, help="data_quality | deterministic_rules | mathematical_filters")
+    l0_set.add_argument("--status", choices=["pass", "fail"], required=True)
+    l0_set.add_argument("--evidence", type=str, default="")
 
     # loop
     loop_parser = subparsers.add_parser("loop", help="Run improvement loop")
@@ -817,6 +906,17 @@ def main():
         cmd_setup(args)
     elif args.command == "init":
         cmd_init(args)
+    elif args.command == "l0":
+        if args.l0_command == "show":
+            cmd_l0_show(args)
+        elif args.l0_command == "check":
+            cmd_l0_check(args)
+        elif args.l0_command == "scaffold":
+            cmd_l0_scaffold(args)
+        elif args.l0_command == "set-prereq":
+            cmd_l0_set_prereq(args)
+        else:
+            l0_parser.print_help()
     elif args.command == "loop":
         cmd_loop(args)
     elif args.command == "commit":
@@ -851,6 +951,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

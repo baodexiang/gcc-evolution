@@ -3,7 +3,8 @@ Enterprise Features — Requires License
 License: BUSL 1.1 (Enterprise license required)
 Commercial: gcc-evo.dev/licensing
 
-Community features (L1-L5, Direction Anchor) are always free.
+Canonical free tier: UI + L0 Phase 1 + base L1/L2/L3/L5.
+Canonical paid tier: L0 Phase 2-4 + full L1/L2/L3 + L4 + advanced L5 + DA.
 Enterprise features degrade gracefully: warning + fallback behavior.
 """
 
@@ -18,7 +19,8 @@ def upgrade_prompt(feature: str, tier: str = "Evolve", fallback: str = "") -> st
     """
     msg = (
         f"[gcc-evo] '{feature}' requires {tier} tier or higher.\n"
-        f"  Community features (L1-L5, Direction Anchor) are always free.\n"
+        f"  Canonical free tier: UI + L0 Phase 1 + base L1/L2/L3/L5.\n"
+        f"  Canonical paid tier: L0 Phase 2-4 + full L1/L2/L3 + L4 + advanced L5 + DA.\n"
         f"  Upgrade: https://gcc-evo.dev/pricing"
     )
     if fallback:
@@ -35,7 +37,8 @@ class EnterpriseRequired(Exception):
         self.tier = tier
         message = (
             f"Feature '{feature}' requires {tier} tier or higher.\n"
-            f"Community features (L1-L5, Direction Anchor) are always free.\n"
+            f"Canonical free tier: UI + L0 Phase 1 + base L1/L2/L3/L5.\n"
+            f"Canonical paid tier: L0 Phase 2-4 + full L1/L2/L3 + L4 + advanced L5 + DA.\n"
             f"Learn more: https://gcc-evo.dev/pricing"
         )
         super().__init__(message)

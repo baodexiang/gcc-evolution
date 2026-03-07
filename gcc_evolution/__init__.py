@@ -1,82 +1,80 @@
 ﻿"""
-gcc-evo â€” AI Self-Evolution Engine v5.325
+gcc-evo - AI Self-Evolution Engine v5.325
 
 Open-source framework for LLM agent persistent memory + continuous learning.
 
 License: BUSL 1.1 | Free for personal/academic/<$1M revenue
 Commercial: gcc-evo.dev/licensing
 
-Layers:
-  L0: Setup (session config + L0 gate before loop)
-  L1: Memory (persistent 3-tier storage)
-  L2: Retrieval (hybrid semantic + temporal + keyword)
-  L3: Distillation (experience cards + SkillBank)
-  L4: Decision (skeptic gate + multi-model ensemble)
-  L5: Orchestration (6-step loop + DAG pipeline)
-  L6: Observation (EventBus + SSE Dashboard + RunTracer)
-  Direction Anchor (constitutional principles)
+Canonical v5.325 split:
+  UI: free
+  L0: Phase 1 free, Phase 2-4 paid
+  L1: base free, full paid
+  L2: base free, full paid
+  L3: base free, full paid
+  L4: paid
+  L5: base free, full paid
+  DA: paid
+
+Legacy packages remain temporarily for backward compatibility:
+  L0_setup, L1_memory, L2_retrieval, L3_distillation, L4_decision,
+  L5_orchestration, observer, direction_anchor
 """
 
 __version__ = "5.325"
 __author__ = "baodexiang"
 __license__ = "BUSL-1.1"
 
-# L0: Setup
-from .session_config import SessionConfig
-from .setup_wizard import run_setup_wizard
+from .free.l0.session_config import SessionConfig
+from .free.l0.setup_wizard import run_setup_wizard
+from .free.l0.governance import (
+    evaluate_l0_governance,
+    format_governance_summary,
+    load_governance_state,
+    save_governance_state,
+    scaffold_required_artifacts,
+    set_prerequisite_status,
+)
+from . import free, paid
+from .layer_manifest import LAYER_TIER_MATRIX, canonical_layers
 
-# L1: Memory
-from .L1_memory import SensoryMemory, ShortTermMemory, LongTermMemory
-from .L1_memory import JSONStorage, SQLiteStorage
+from .free.l1 import SensoryMemory, ShortTermMemory, LongTermMemory
+from .free.l1 import JSONStorage, SQLiteStorage
 
-# L2: Retrieval
-from .L2_retrieval import HybridRetriever, SemanticRetriever, KeywordRetriever
-from .L2_retrieval import RAGPipeline
+from .free.l2 import HybridRetriever, SemanticRetriever, KeywordRetriever
+from .free.l2 import RAGPipeline
 
-# L3: Distillation
-from .L3_distillation import ExperienceDistiller, CardGenerator
-from .L3_distillation import ExperienceCard, CardType
+from .free.l3 import ExperienceDistiller, CardGenerator
+from .free.l3 import ExperienceCard, CardType
 
-# L4: Decision
-from .L4_decision import SkepticValidator, ValidationResult
-from .L4_decision import MultiModelEnsemble, ModelPrediction
+from .paid.l4 import SkepticValidator, ValidationResult
+from .paid.l4 import MultiModelEnsemble, ModelPrediction
 
-# L5: Orchestration
-from .L5_orchestration import DAGPipeline, PipelineStage
-from .L5_orchestration import SelfImprovementLoop, LoopPhase
+from .free.l5 import DAGPipeline, PipelineStage
+from .free.l5 import SelfImprovementLoop, LoopPhase
 
-# L6: Observation
-from .observer import EventBus, GCCEvent, LayerEmitter, RunTracer, Tracer
-from .dashboard_server import DashboardServer
+from .free.ui import EventBus, GCCEvent, LayerEmitter, RunTracer, Tracer
+from .free.ui import DashboardServer
 
-# Direction Anchor
-from .direction_anchor import DirectionAnchor, PrincipleSet
+from .paid.da import DirectionAnchor, PrincipleSet
 
 __all__ = [
-    # L0
     "SessionConfig", "run_setup_wizard",
-    # L1
+    "evaluate_l0_governance", "format_governance_summary",
+    "load_governance_state", "save_governance_state",
+    "scaffold_required_artifacts", "set_prerequisite_status",
+    "free", "paid", "LAYER_TIER_MATRIX", "canonical_layers",
     "SensoryMemory", "ShortTermMemory", "LongTermMemory",
     "JSONStorage", "SQLiteStorage",
-    # L2
     "HybridRetriever", "SemanticRetriever", "KeywordRetriever",
     "RAGPipeline",
-    # L3
     "ExperienceDistiller", "CardGenerator",
     "ExperienceCard", "CardType",
-    # L4
     "SkepticValidator", "ValidationResult",
     "MultiModelEnsemble", "ModelPrediction",
-    # L5
     "DAGPipeline", "PipelineStage",
     "SelfImprovementLoop", "LoopPhase",
-    # L6
     "EventBus", "GCCEvent", "LayerEmitter", "RunTracer", "Tracer",
     "DashboardServer",
-    # Anchor
     "DirectionAnchor", "PrincipleSet",
 ]
-
-
-
-
