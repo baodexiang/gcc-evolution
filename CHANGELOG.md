@@ -4,6 +4,16 @@
 
 ---
 
+## [5.325] — 2026-03-07
+
+### 🔧 变更 (Changed)
+
+- 发布版本升级到 **5.325**（setup.py、gcc_evolution/__init__.py、Dashboard 版本展示、初始化模板版本字段）。
+- 对齐 opensource 与主目录共享的 gcc-evo 版本口径，并补齐主目录打包 CLI 入口 gcc_evolution/cli.py。
+- 重新生成源码压缩包 gcc_evolution_v5325.zip。
+
+---
+
 ## [5.320] — 2026-03-06
 
 ### 🔧 变更 (Changed)
@@ -292,5 +302,6 @@ gcc-evo loop GCC-0001 &
 **æœ€åŽæ›´æ–°**: 2026-03-03
 **ç‰ˆæœ¬**: 5.295
 **ç»´æŠ¤è€…**: baodexiang <baodexiang@hotmail.com>
+
 
 

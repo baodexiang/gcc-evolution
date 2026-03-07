@@ -1,4 +1,4 @@
-﻿# gcc-evo v5.320
+﻿# gcc-evo v5.325
 
 **AI Self-Evolution Engine** â€” Persistent memory + continuous learning for LLM agents
 
@@ -82,7 +82,7 @@ open .GCC/dashboard.html
 ```bash
 pip install gcc-evo
 gcc-evo version
-# Output: gcc-evo v5.320
+# Output: gcc-evo v5.325
 ```
 
 ### From Source
@@ -503,7 +503,7 @@ See [LICENSE](LICENSE) for details.
 ## Roadmap
 
 ```
-v5.320 (Current) â€” Loop + Skeptic + Multi-Model
+v5.325 (Current) â€” Loop + Skeptic + Multi-Model
     â†“
 v5.5 (Q2 2026) â€” Distributed Memory + Real-time Collaboration
     â†“
@@ -524,7 +524,7 @@ If you use gcc-evo in research or production, please cite:
   title = {gcc-evo: AI Self-Evolution Engine},
   year = {2026},
   url = {https://github.com/baodexiang/gcc-evo},
-  version = {5.320}
+  version = {5.325}
 }
 ```
 
@@ -554,5 +554,7 @@ If you use gcc-evo in research or production, please cite:
 **Made with â¤ï¸ by [baodexiang](https://github.com/baodexiang)**
 
 [English](README.md) | [ä¸­æ–‡](README.zh.md)
+
+
 
 

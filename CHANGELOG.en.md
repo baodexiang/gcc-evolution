@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file. This project fo
 
 ---
 
+## [5.325] — 2026-03-07
+
+### 🔧 Changed
+
+- Release version bumped to **5.325** (setup.py, gcc_evolution/__init__.py, dashboard label, init template version field).
+- Aligned the shared gcc-evo version between opensource and the root workspace, and added the missing root packaging CLI entrypoint gcc_evolution/cli.py.
+- Regenerated source release archive as gcc_evolution_v5325.zip.
+
+---
+
 ## [5.320] — 2026-03-06
 
 ### 🔧 Changed
@@ -294,4 +304,5 @@ See [LICENSE](LICENSE) file for details.
 **Last Updated**: 2026-03-03
 **Version**: 5.295
 **Maintainer**: baodexiang <baodexiang@hotmail.com>
+
 
