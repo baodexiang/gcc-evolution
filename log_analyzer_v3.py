@@ -104,6 +104,7 @@ import time
 import logging
 import io
 import base64
+import subprocess
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional, Any
 from collections import defaultdict
@@ -2193,6 +2194,13 @@ class DataQualityChecker:
         "stock_price_fallback": re.compile(
             r'\[v21\.\d+\]\s+\S+\s+获取价格失败\(1m\+current\)'
         ),
+        # GCC-0205: Schwab数据源fallback
+        "schwab_fallback_success": re.compile(
+            r'\[SCHWAB_FALLBACK\]\s+\S+\s+tf=\d+\s+success'
+        ),
+        "schwab_fallback_fail": re.compile(
+            r'\[SCHWAB_FALLBACK\]\s+\S+\s+tf=\d+\s+(?:failed|no_data|no_valid_bars)'
+        ),
         "kline_insufficient_trailing": re.compile(
             r'\[v21\.\d+\]\s+\S+\s+移动止损K线不足'
         ),
@@ -2561,6 +2569,10 @@ class DataQualityChecker:
             # 6. v3.5 P0/P1修复检测
             "current_price_guard": 0,
             "stock_price_fallback": 0,
+            # GCC-0205: Schwab数据源fallback
+            "schwab_fallback_success": 0,
+            "schwab_fallback_fail": 0,
+            "schwab_fallback_by_symbol": defaultdict(lambda: {"success": 0, "fail": 0}),
             "kline_insufficient_trailing": 0,
             "hard_floor_block": 0,
             # 7. v21.8 跨周期共识度
@@ -2925,6 +2937,14 @@ class DataQualityChecker:
             if self.PATTERNS["stock_price_fallback"].search(line):
                 results["stock_price_fallback"] += 1
                 results["by_symbol"][symbol]["stock_price_fallback"] += 1
+
+            # GCC-0205: Schwab数据源fallback
+            if self.PATTERNS["schwab_fallback_success"].search(line):
+                results["schwab_fallback_success"] += 1
+                results["schwab_fallback_by_symbol"][symbol]["success"] += 1
+            if self.PATTERNS["schwab_fallback_fail"].search(line):
+                results["schwab_fallback_fail"] += 1
+                results["schwab_fallback_by_symbol"][symbol]["fail"] += 1
 
             if self.PATTERNS["kline_insufficient_trailing"].search(line):
                 results["kline_insufficient_trailing"] += 1
@@ -3493,6 +3513,7 @@ class DataQualityChecker:
             results["calibrator_save_fail"] + results["validator_fail"] +
             results["calibrator_low_accuracy"] +
             results["current_price_guard"] + results["stock_price_fallback"] +
+            results["schwab_fallback_fail"] +
             results["key003_validation_fail"]
         )
 
@@ -3501,6 +3522,7 @@ class DataQualityChecker:
         results["card_match_by_symbol"] = dict(results.get("card_match_by_symbol", {}))
         results["card_phase_gate_by_symbol"] = dict(results.get("card_phase_gate_by_symbol", {}))
         results["by_symbol"] = {k: dict(v) for k, v in results["by_symbol"].items()}
+        results["schwab_fallback_by_symbol"] = {k: dict(v) for k, v in results["schwab_fallback_by_symbol"].items()}
         results["indicator_by_type"] = dict(results["indicator_by_type"])
         results["bv_eval_by_pattern"] = {k: dict(v) for k, v in results["bv_eval_by_pattern"].items()}
         results["bv_gate_by_pattern"] = dict(results["bv_gate_by_pattern"])
@@ -7560,16 +7582,33 @@ class EnhancedLogAnalyzer:
         """保存质量评分历史"""
         safe_json_write(CONFIG["quality_scores_file"], self.quality_scores)
 
-    def _read_log_lines(self, filepath: str, date_str: str = None) -> List[str]:
+    def _read_log_lines(self, filepath: str, date_str: str = None, hours_window: int = None) -> List[str]:
         """读取日志文件 (含rotate .1回退)"""
         all_lines = []
+        cutoff_naive = None
+        if hours_window and hours_window > 0:
+            cutoff_naive = (get_ny_now() - timedelta(hours=hours_window)).replace(tzinfo=None)
+        ts_re = re.compile(r"(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}:\d{2})")
         # 读主文件 + .1 rotate文件(RotatingFileHandler rotate后当天数据可能在.1中)
         for fpath in [filepath, filepath + ".1"]:
             if not os.path.exists(fpath):
                 continue
             try:
+                last_ts = None
                 with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-                    all_lines.extend(f.readlines())
+                    for line in f:
+                        if cutoff_naive is not None:
+                            m = ts_re.search(line)
+                            if m:
+                                try:
+                                    last_ts = datetime.strptime(
+                                        f"{m.group(1)} {m.group(2)}", "%Y-%m-%d %H:%M:%S"
+                                    )
+                                except ValueError:
+                                    pass
+                            if last_ts and last_ts < cutoff_naive:
+                                continue
+                        all_lines.append(line)
             except Exception as e:
                 logger.error(f"读取日志失败 {fpath}: {e}")
 
@@ -7577,29 +7616,33 @@ class EnhancedLogAnalyzer:
             logger.warning(f"日志文件不存在: {filepath}")
             return []
 
-        if date_str:
+        if date_str and cutoff_naive is None:
             all_lines = [l for l in all_lines if date_str in l]
 
         return all_lines
 
-    def analyze_daily(self, date_str: str = None) -> Dict:
+    def analyze_daily(self, date_str: str = None, hours_window: int = None) -> Dict:
         """执行每日分析"""
         if not date_str:
             date_str = get_today_date_ny()
+            if hours_window is None:
+                # 默认使用滚动24h，避免跨日时间窗漏算
+                hours_window = 24
 
         logger.info(f"开始每日分析: {date_str}")
 
         detector = IssueDetector()
 
         # 读取日志
-        server_lines = self._read_log_lines(CONFIG["log_files"]["server"], date_str)
-        scan_lines = self._read_log_lines(CONFIG["log_files"]["scan_engine"], date_str)
+        _daily_date = None if (hours_window and hours_window > 0) else date_str
+        server_lines = self._read_log_lines(CONFIG["log_files"]["server"], _daily_date, hours_window)
+        scan_lines = self._read_log_lines(CONFIG["log_files"]["scan_engine"], _daily_date, hours_window)
         all_lines = server_lines + scan_lines
         # 补充5个遗漏日志 (deepseek仲裁/MACD背离/RobHoffman/L1诊断/估值)
         for _extra_key in ("deepseek_arbiter", "macd_divergence", "rob_hoffman", "l1_diagnosis", "value_analysis"):
             _extra_path = CONFIG["log_files"].get(_extra_key)
             if _extra_path:
-                _extra_lines = self._read_log_lines(_extra_path, date_str)
+                _extra_lines = self._read_log_lines(_extra_path, _daily_date, hours_window)
                 all_lines.extend(_extra_lines)
         logger.info(f"读取到 {len(all_lines)} 行日志")
 
@@ -8034,11 +8077,21 @@ def main():
     parser.add_argument("--watch", action="store_true", help="持续监控模式")
     parser.add_argument("--interval", type=int, default=300, help="监控间隔(秒), 默认300")
     parser.add_argument("--date", type=str, help="指定日期 (YYYY-MM-DD)")
+    parser.add_argument("--hours-window", type=int, default=None, help="滚动窗口小时数(仅daily)")
     parser.add_argument("--month", type=str, help="指定月份 (YYYY-MM)")
+    parser.add_argument("--key009-export", action="store_true", help="直接导出KEY-009 dashboard JSON(state/key009_audit.json)")
 
     args = parser.parse_args()
 
     analyzer = EnhancedLogAnalyzer()
+
+    if args.key009_export:
+        try:
+            subprocess.run([sys.executable, "key009_audit.py", "--export"], check=True)
+            print("KEY-009已导出: state/key009_audit.json")
+        except Exception as e:
+            print(f"KEY-009导出失败: {e}")
+        return
 
     # 持续监控模式
     if args.watch:
@@ -8064,7 +8117,7 @@ def main():
         return
 
     elif args.daily:
-        result = analyzer.analyze_daily(args.date)
+        result = analyzer.analyze_daily(args.date, args.hours_window)
         print(f"\n每日报告: {result['report_file']}")
 
     elif args.weekly:
