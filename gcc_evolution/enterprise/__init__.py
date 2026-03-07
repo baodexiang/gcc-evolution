@@ -1,10 +1,11 @@
-"""
-Enterprise Features — Requires License
+﻿"""
+Enterprise Features - Requires License
 License: BUSL 1.1 (Enterprise license required)
 Commercial: gcc-evo.dev/licensing
 
-Canonical free tier: UI + L0 Phase 1 + base L1/L2/L3/L5.
-Canonical paid tier: L0 Phase 2-4 + full L1/L2/L3 + L4 + advanced L5 + DA.
+Canonical free tier: UI + L0 + L1 + L2 + L3.
+Canonical paid core: L4 + L5 + DA.
+Commercial add-ons: paid/l0, paid/l1, paid/l2, paid/l3 enhancement packs.
 Enterprise features degrade gracefully: warning + fallback behavior.
 """
 
@@ -12,15 +13,12 @@ import warnings
 
 
 def upgrade_prompt(feature: str, tier: str = "Evolve", fallback: str = "") -> str:
-    """
-    Generate friendly upgrade prompt.
-
-    Instead of crashing, prints a warning and returns a fallback description.
-    """
+    """Generate a friendly upgrade prompt."""
     msg = (
         f"[gcc-evo] '{feature}' requires {tier} tier or higher.\n"
-        f"  Canonical free tier: UI + L0 Phase 1 + base L1/L2/L3/L5.\n"
-        f"  Canonical paid tier: L0 Phase 2-4 + full L1/L2/L3 + L4 + advanced L5 + DA.\n"
+        f"  Canonical free tier: UI + L0 + L1 + L2 + L3.\n"
+        f"  Canonical paid core: L4 + L5 + DA.\n"
+        f"  Commercial add-ons: paid/l0, paid/l1, paid/l2, paid/l3.\n"
         f"  Upgrade: https://gcc-evo.dev/pricing"
     )
     if fallback:
@@ -37,14 +35,14 @@ class EnterpriseRequired(Exception):
         self.tier = tier
         message = (
             f"Feature '{feature}' requires {tier} tier or higher.\n"
-            f"Canonical free tier: UI + L0 Phase 1 + base L1/L2/L3/L5.\n"
-            f"Canonical paid tier: L0 Phase 2-4 + full L1/L2/L3 + L4 + advanced L5 + DA.\n"
+            f"Canonical free tier: UI + L0 + L1 + L2 + L3.\n"
+            f"Canonical paid core: L4 + L5 + DA.\n"
+            f"Commercial add-ons: paid/l0, paid/l1, paid/l2, paid/l3.\n"
             f"Learn more: https://gcc-evo.dev/pricing"
         )
         super().__init__(message)
 
 
-# Import stubs (prevent ImportError, but degrade at usage time)
 try:
     from . import knn_evolution
     from . import walk_forward

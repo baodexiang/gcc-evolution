@@ -1,4 +1,4 @@
-﻿# gcc-evo v5.325 Framework Boundary
+﻿# gcc-evo v5.330 Framework Boundary
 
 This is the authoritative release-facing boundary for gcc-evo before open-source publication.
 
@@ -13,18 +13,18 @@ This is the authoritative release-facing boundary for gcc-evo before open-source
 7. `L5`
 8. `DA`
 
-## 2. Free vs Paid
+## 2. Free 5 Layers vs Paid 3 Layers
 
 | Unit | Canonical status | Scope |
 |------|------------------|-------|
 | `UI` | Free | Setup dashboard, connector setup, status visibility |
-| `L0` | Mixed | `Phase 1` free, `Phase 2-4` paid |
-| `L1` | Mixed | Base free, full memory paid |
-| `L2` | Mixed | Base retrieval free, full retrieval paid |
-| `L3` | Mixed | Base distillation free, full distillation paid |
-| `L4` | Paid only | Decision evolution engine |
-| `L5` | Mixed | Base orchestration free, advanced orchestration paid |
-| `DA` | Paid only | Direction Anchor constitutional gate |
+| `L0` | Free | Foundation setup, governance, source intake |
+| `L1` | Free | Foundation memory layer |
+| `L2` | Free | Foundation retrieval layer |
+| `L3` | Free | Foundation distillation layer |
+| `L4` | Paid core | Decision evolution engine |
+| `L5` | Paid core | Closed-loop orchestration and execution |
+| `DA` | Paid core | Direction Anchor constitutional gate |
 
 ## 3. Canonical Directory Structure
 
@@ -36,15 +36,14 @@ opensource/gcc_evolution/
     l1/
     l2/
     l3/
-    l5/
   paid/
+    l4/
+    l5/
+    da/
     l0/
     l1/
     l2/
     l3/
-    l4/
-    l5/
-    da/
   legacy/
   layer_manifest.py
 ```
@@ -52,8 +51,9 @@ opensource/gcc_evolution/
 ## 4. Hard Rules Before Open Source Release
 
 - `L4` must not be described as free.
+- `L5` must not be described as free in the canonical release model.
 - `DA` must not be described as free.
-- `L0` must explicitly distinguish free `Phase 1` from paid `Phase 2-4`.
+- Release-facing layer count must read as `5 Free + 3 Paid`.
 - Any release-facing doc must follow this exact split.
 - Packaging and release notes must treat `free/` and `paid/` as the canonical commercial boundary.
 
@@ -83,6 +83,8 @@ The canonical boundary is defined only by:
 ## 6. Release Interpretation
 
 If someone asks "what is free?" answer with the `free/` tree.
-If someone asks "what is paid?" answer with the `paid/` tree.
+If someone asks "what is paid?" answer with the paid core `l4/l5/da` tree first.
 If someone asks "is L4 free?" answer `No`.
+If someone asks "is L5 free?" answer `No`.
 If someone asks "is DA free?" answer `No`.
+

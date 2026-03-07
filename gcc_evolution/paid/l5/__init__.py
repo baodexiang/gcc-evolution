@@ -1,19 +1,22 @@
-"""Paid L5 layer: advanced orchestration boundary."""
+﻿"""Paid L5 layer: canonical closed-loop orchestration core."""
 
-from ...L5_orchestration import DAGPipeline, PipelineStage, SelfImprovementLoop, LoopPhase
+from importlib import import_module
+
+from .pipeline import DAGPipeline, PipelineStage
+from .loop_engine import SelfImprovementLoop, LoopPhase
 from ...enterprise import adaptive_dag
 from ..common import PaidBoundary
-from .drift_gate import DriftGateResult, drift_thresholds, evaluate_drift_gate
 
 L5_BOUNDARY = PaidBoundary(
     layer='L5',
     tier='Paid',
     features=(
-        'Multi-system task coordination',
+        'Closed-loop orchestration',
         'Advanced DAG orchestration',
         'Full output integration',
+        'Drift-aware adaptive scheduling',
     ),
-    note='Base orchestration remains in free/l5; advanced orchestration belongs here.',
+    note='L5 is part of the canonical paid core in the 5 Free + 3 Paid model.',
 )
 
 __all__ = [
@@ -27,3 +30,10 @@ __all__ = [
     'evaluate_drift_gate',
     'drift_thresholds',
 ]
+
+
+def __getattr__(name):
+    if name in {'DriftGateResult', 'evaluate_drift_gate', 'drift_thresholds'}:
+        module = import_module('gcc_evolution.paid.l5.drift_gate')
+        return getattr(module, name)
+    raise AttributeError(name)

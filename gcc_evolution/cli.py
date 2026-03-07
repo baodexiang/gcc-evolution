@@ -88,7 +88,7 @@ def cmd_version(args):
     except ImportError:
         pass
     try:
-        from .free import l5 as _free_l5
+        from .paid import l5 as _paid_l5
         layers.append("L5:Orchestration")
     except ImportError:
         pass
@@ -106,8 +106,9 @@ def cmd_version(args):
     print(f"Canonical availability: {', '.join(layers)}")
     print(f"Canonical layers: {', '.join(canonical_layers())}")
     print("Canonical boundary:")
-    print("  free  -> UI, L0 Phase 1, base L1/L2/L3/L5")
-    print("  paid  -> L0 Phase 2-4, full L1/L2/L3, L4, advanced L5, DA")
+    print("  free  -> UI, L0, L1, L2, L3")
+    print("  paid  -> L4, L5, DA")
+    print("  add-ons -> paid/l0-l3 commercial enhancement packs")
 
     # Check enterprise
     try:
@@ -170,7 +171,7 @@ def cmd_init(args):
     if not config_path.exists():
         config_path.write_text(
             "# gcc-evo configuration\n"
-            "version: '5.325'\n"
+            "version: '5.330'\n"
             "project: '{}'\n"
             "loop_interval: 300  # seconds\n"
             "skeptic_threshold: 0.75\n"
@@ -242,7 +243,7 @@ def cmd_loop(args):
     from .free.l2.retriever import HybridRetriever
     from .free.l3.distiller import ExperienceDistiller
     from .paid.l4.skeptic import SkepticValidator
-    from .free.l5.loop_engine import SelfImprovementLoop
+    from .paid.l5.loop_engine import SelfImprovementLoop
 
     # Ensure state directory exists
     state_dir = Path("state")
@@ -951,6 +952,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

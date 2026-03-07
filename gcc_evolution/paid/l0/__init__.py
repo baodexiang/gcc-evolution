@@ -8,6 +8,13 @@ from .phase3_math import (
     build_phase3_nowcast_model,
     build_phase3_state_vector,
 )
+from .phase4_truth_table import (
+    PHASE4_TRUTH_TABLE,
+    TRUTH_ACCEPTANCE_SPEC,
+    TruthTableRecord,
+    build_truth_table_record,
+    build_truth_table_row,
+)
 
 L0_BOUNDARY = PaidBoundary(
     layer='L0',
@@ -27,4 +34,9 @@ __all__ = [
     'Phase3NowcastResult',
     'build_phase3_nowcast_model',
     'build_phase3_state_vector',
+    'PHASE4_TRUTH_TABLE',
+    'TRUTH_ACCEPTANCE_SPEC',
+    'TruthTableRecord',
+    'build_truth_table_record',
+    'build_truth_table_row',
 ]

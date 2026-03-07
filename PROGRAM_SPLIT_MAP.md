@@ -1,7 +1,7 @@
-﻿# gcc-evo v5.325 Program Split Map
+﻿# gcc-evo v5.330 Program Split Map
 
 This file is the release-facing inventory that places every public program surface
-into the canonical model: `UI/L0/L1/L2/L3/L4/L5/DA` plus `free/paid/legacy`.
+into the canonical model: `5 Free foundation layers + 3 Paid core layers`, plus enhancement packs and legacy compatibility.
 
 ## Canonical Programs
 
@@ -16,7 +16,7 @@ into the canonical model: `UI/L0/L1/L2/L3/L4/L5/DA` plus `free/paid/legacy`.
 | `L0` | free | `gcc_evolution/free/l0/governance.py` | `gcc_evolution/l0_governance.py` |
 | `L0` | paid | `gcc_evolution/paid/l0/phase2_quality.py` | paid boundary stub |
 | `L0` | paid | `gcc_evolution/paid/l0/phase3_math.py` | `gcc/papers/formulas/P002_nowcasting.py` modeling entrypoint |
-| `L0` | paid | `gcc_evolution/paid/l0/phase4_truth_table.py` | paid boundary stub |
+| `L0` | paid | `gcc_evolution/paid/l0/phase4_truth_table.py` | `gcc/papers/formulas/P003_alphaforgebench.py` acceptance/truth-table entrypoint |
 | `L1` | free | `gcc_evolution/free/l1/memory_tiers.py` | `gcc_evolution/L1_memory/memory_tiers.py` |
 | `L1` | free | `gcc_evolution/free/l1/storage.py` | `gcc_evolution/L1_memory/storage.py` |
 | `L1` | paid | `gcc_evolution/paid/l1/advanced_memory.py` | `gcc_evolution/L1_memory/memory_tiers.py` |
@@ -32,8 +32,6 @@ into the canonical model: `UI/L0/L1/L2/L3/L4/L5/DA` plus `free/paid/legacy`.
 | `L4` | paid | `gcc_evolution/paid/l4/walk_forward.py` | `gcc_evolution/enterprise/walk_forward.py` |
 | `L4` | paid | `gcc_evolution/paid/l4/bandit_scheduler.py` | `gcc_evolution/enterprise/bandit_scheduler.py` |
 | `L4` | paid | `gcc_evolution/paid/l4/adaptive_dag.py` | `gcc_evolution/enterprise/adaptive_dag.py` |
-| `L5` | free | `gcc_evolution/free/l5/pipeline.py` | `gcc_evolution/L5_orchestration/pipeline.py` |
-| `L5` | free | `gcc_evolution/free/l5/loop_engine.py` | `gcc_evolution/L5_orchestration/loop_engine_base.py` |
 | `L5` | paid | `gcc_evolution/paid/l5/drift_gate.py` | `gcc/papers/formulas/P006_drift_aware_streaming.py` orchestration drift gate |
 | `L5` | paid | `gcc_evolution/paid/l5/pipeline.py` | `gcc_evolution/L5_orchestration/pipeline.py` + `gcc_evolution/enterprise/adaptive_dag.py` |
 | `L5` | paid | `gcc_evolution/paid/l5/loop_engine.py` | `gcc_evolution/L5_orchestration/loop_engine_base.py` |
@@ -62,6 +60,7 @@ These remain in the repository for backward compatibility only:
 | `gcc_evolution/L3_distillation` | `L3` | legacy |
 | `gcc_evolution/L4_decision` | `L4` | legacy |
 | `gcc_evolution/L5_orchestration` | `L5` | legacy |
+| `gcc_evolution/free/l5` | `L5` | legacy compatibility shim |
 | `gcc_evolution/observer` | `UI` | legacy |
 | `gcc_evolution/direction_anchor` | `DA` | legacy |
 | `gcc_evolution/enterprise` | `paid support` | legacy support source |
@@ -71,3 +70,4 @@ These remain in the repository for backward compatibility only:
 - Release-facing documentation must reference canonical paths first.
 - Commercial boundary is defined by `gcc_evolution/free/` and `gcc_evolution/paid/`.
 - Legacy paths are compatibility shims, not tier definitions.
+
