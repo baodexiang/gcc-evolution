@@ -39,8 +39,9 @@ try:
 except Exception:
     def _normalize_key(context: str) -> str:  # inline fallback
         return re.sub(r"[^a-z0-9_]", "_", context.lower().strip())
-    def _prefetch_score(recency: float, relevance: float, freq: float) -> float:
-        return 0.5 * relevance + 0.3 * recency + 0.2 * freq
+    import math as _math
+    def _prefetch_score(recency_hours: float, access_count: int, confidence: float) -> float:
+        return max(0.0, _math.exp(-recency_hours / 24.0) * _math.log1p(max(0, int(access_count))) * max(0.0, min(1.0, confidence)))
 
 
 # v4.98: layer_weights从config.yaml读取, fallback到默认值
@@ -595,10 +596,15 @@ class Retriever:
             score = self._score(card, q_emb, step_kw | task_kw)
             step_boost = self._goal_relevance(card, step_kw)
             # E5: session prefetch priority boost (eq.11)
-            _age = max(0.0, (_now_ts - (card.created_at.timestamp() if hasattr(card.created_at, 'timestamp') else _now_ts)) / 86400)
-            _recency = max(0.0, 1.0 - _age / 30.0)
-            _freq = min(1.0, getattr(card, 'use_count', 0) / 20.0)
-            prefetch_boost = _prefetch_score(_recency, score, _freq) * 0.10
+            # parse created_at str → hours ago; use card.use_count (int); card.confidence
+            try:
+                _created = datetime.fromisoformat(card.created_at).timestamp() if isinstance(card.created_at, str) else card.created_at.timestamp()
+                _recency_hours = max(0.0, (_now_ts - _created) / 3600.0)
+            except Exception:
+                _recency_hours = 24.0  # fallback: treat as 1 day old
+            _access_count = int(getattr(card, 'use_count', 0))
+            _confidence = float(getattr(card, 'confidence', 0.5))
+            prefetch_boost = _prefetch_score(_recency_hours, _access_count, _confidence) * 0.02
             final = score + step_boost * 0.15 + prefetch_boost
             scored.append((final, card))
 
