@@ -1,5 +1,5 @@
-﻿#!/usr/bin/env python3
-"""gcc-evo v5.325 — GCC Evolution Engine with Visual Dashboard"""
+#!/usr/bin/env python3
+"""gcc-evo v5.330 — GCC Evolution Engine with Visual Dashboard"""
 from __future__ import annotations
 
 import json
@@ -31,7 +31,7 @@ if _GCC_SELF_DIR not in sys.path:
 
 KEYS_FILE = Path(".gcc/keys.yaml")
 
-HELP_TEXT = """  GCC v5.280 — Active Evolution Engine
+HELP_TEXT = """  GCC v5.330 — Active Evolution Engine
   ═══════════════════════════════════════════════════
 
   Daily Use:
@@ -126,6 +126,10 @@ HELP_TEXT = """  GCC v5.280 — Active Evolution Engine
 # ════════════════════════════════════════════════════════════
 # GCC-0147: 统一路径
 def _gcc_dir() -> Path:
+    script_dir = Path(__file__).resolve().parent
+    # Prefer the real repo root when running .GCC/gcc_evo.py from inside .GCC/.
+    if (script_dir / "pipeline").exists() and (script_dir / "skill").exists():
+        return script_dir
     return Path(".GCC") if Path(".GCC").exists() else Path(".gcc")
 
 
@@ -395,7 +399,7 @@ def _get_key_cards(key, task, all_cards):
 @click.group(invoke_without_command=True)
 @click.pass_context
 def cli(ctx):
-    """GCC v5.280 — Self-Evolution Engine + Smart Handoff"""
+    """GCC v5.290 — Self-Evolution Engine + Smart Handoff"""
     if ctx.invoked_subcommand is None:
         _show_dashboard(False)
 
@@ -1538,17 +1542,21 @@ def cmd_pipe_add(title, priority, desc, key):
 
 
 def _auto_export_dashboard():
-    """Pipeline变更后自动重新导出 .GCC/dashboard.html (唯一出口)"""
+    """Pipeline变更后自动重新导出dashboard.html"""
     try:
-        import subprocess as _sp
-        _r = _sp.run(
-            [sys.executable, "gen_dashboard.py", "--quiet"],
-            capture_output=True, text=True, timeout=30,
-        )
-        if _r.returncode == 0:
+        import shutil
+        _gcc = _gcc_dir()
+        src_tpl = _gcc / "gcc_dashboard.html"
+        dst_tpl = _gcc / "gcc_evolution" / "gcc_dashboard.html"
+        if src_tpl.exists() and dst_tpl.parent.exists():
+            shutil.copy2(src_tpl, dst_tpl)
+        from click.testing import CliRunner
+        runner = CliRunner()
+        result = runner.invoke(cmd_dashboard, ["--export"])
+        if result.exit_code == 0:
             click.echo("  ✓ Dashboard 已自动更新")
         else:
-            click.echo(f"  ⚠ Dashboard 自动更新失败: {_r.stderr[:200]}")
+            click.echo(f"  ⚠ Dashboard 自动更新失败: {result.output}")
     except Exception as e:
         click.echo(f"  ⚠ Dashboard 自动更新跳过: {e}")
 
@@ -1864,15 +1872,13 @@ def cmd_ho_create(description, key):
 
     # ── Step 4: Save ──
     path = hp.save()
-    md_path = hp.save_slim_markdown()
 
     key_tag = f" [{key}]" if key else ""
     pipe_tag = f" → {pipe_task_id}" if pipe_task_id else ""
     click.echo(f"  ✓ Handoff {hp.manifest.handoff_id}{key_tag}{pipe_tag}")
     click.echo(f"    {desc[:60]}")
     click.echo(f"    Tasks: {len(hp.manifest.tasks)}")
-    if md_path:
-        click.echo(f"    File: {md_path}")
+    click.echo(f"    File: .gcc/branches/{hp.manifest.branch}/handoff.md")
 
     # ── Step 5: Suggest commit format ──
     if key:
@@ -1924,11 +1930,11 @@ def _db_auto_sync():
         if cards_dir.exists():
             db.import_cards_dir(cards_dir)
 
-    # handoff.md
-    for hf in [gcc_root / 'handoff.md', project_root / '.GCC' / 'handoff.md']:
-        if hf.exists():
+    # handoff.md — read from branches/
+    branches_dir = gcc_root / 'branches'
+    if branches_dir.exists():
+        for hf in sorted(branches_dir.glob("*/handoff.md")):
             db.import_handoff_md(hf)
-            break
 
 
 def _anchor_to_key(description: str, auto_key: str) -> str:
@@ -2486,6 +2492,12 @@ def cmd_commit(message, key, amend):
         )
         short_hash = hash_result.stdout.strip() if hash_result.returncode == 0 else ""
         click.echo(f"  ✓ {short_hash} {prefix}")
+        try:
+            _db_auto_sync()
+            click.echo("  OK Database synced")
+        except Exception as e:
+            click.echo(f"  - db sync skipped ({e})")
+        _auto_export_dashboard()
     else:
         err = result.stderr.strip().split("\n")[0] if result.stderr else "commit failed"
         click.echo(f"  ✗ {err}")
@@ -2494,6 +2506,15 @@ def cmd_commit(message, key, amend):
 # ════════════════════════════════════════════════════════════
 
 def main():
+    # Windows default cp1252 can crash on unicode CLI output (emoji/CJK).
+    # Reconfigure streams to UTF-8 so commands like `gcc-evo ho create` are stable.
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     cli(standalone_mode=True)
 
 
@@ -3163,27 +3184,423 @@ def cmd_dashboard(export, out, serve, port):
          improvements.json / tasks.jsonl / skillbank.jsonl
          suggestions.jsonl / handoff.md
     """
-    import subprocess
+    import shutil
     import webbrowser
 
-    _gcc = _gcc_dir()
-    dest = Path(out) if out else _gcc / "dashboard.html"
-
-    # 统一委托 gen_dashboard.py 生成 (唯一数据嵌入逻辑)
-    gen_script = Path("gen_dashboard.py")
-    if not gen_script.exists():
-        click.echo(f"  ✗ 找不到 {gen_script}", err=True)
+    # 找内置 HTML — 按优先级搜索 (优先用项目根目录的最新模板)
+    candidates = [
+        Path("gcc_dashboard_v497.html"),                                   # 项目根目录最新版
+        Path(__file__).parent / "gcc_evolution" / "gcc_dashboard.html",  # site-packages
+        Path(__file__).parent / "gcc_dashboard.html",                     # 同级目录
+        Path(".GCC") / "gcc_evolution" / "gcc_dashboard.html",            # 项目大写
+        Path(".gcc") / "gcc_evolution" / "gcc_dashboard.html",            # 项目小写
+    ]
+    builtin_html = next((p for p in candidates if p.exists()), None)
+    if not builtin_html:
+        click.echo("  ✗ 找不到内置 dashboard.html", err=True)
         return
 
-    result = subprocess.run(
-        [sys.executable, str(gen_script), "--quiet"],
-        capture_output=True, text=True, timeout=30,
-    )
-    if result.returncode == 0:
-        click.echo(result.stdout.strip())
+    # 输出路径 — 直接写入模板文件(gcc_evolution/gcc_dashboard.html)，打开即有数据
+    if out:
+        dest = Path(out)
+    elif _gcc_dir().exists():
+        dest = _gcc_dir() / "dashboard.html"
     else:
-        click.echo(f"  ✗ 生成失败: {result.stderr[:300]}", err=True)
-        return
+        dest = _gcc / "dashboard.html"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    # ── 尝试将 .gcc/ 数据内嵌到 HTML ──────────────────────
+    html = builtin_html.read_text(encoding="utf-8")
+
+    loaded = []
+    import json as _json
+
+    # 支持 .GCC 和 .gcc 两种大小写
+    _gcc = _gcc_dir()
+
+    all_tasks = []
+    ho_sessions = []
+    seen_tasks = set()
+
+    def _norm_prio(p):
+        return {'normal':'average','high':'high','low':'low'}.get((p or 'average').lower(), 'average')
+
+    def _add_task(t):
+        if not isinstance(t, dict): return
+        k = t.get("task_id") or t.get("id") or t.get("title") or t.get("description") or str(id(t))
+        if k in seen_tasks:
+            # Pipeline数据更丰富时覆盖handoff版本(如有steps/stage/description)
+            if t.get("steps") or t.get("stage") or (t.get("description") and t.get("source") == "pipeline"):
+                all_tasks[:] = [x for x in all_tasks if x.get("task_id") != k]
+            else:
+                return
+        seen_tasks.add(k)
+        _out = {
+            "task_id": t.get("task_id") or t.get("id", ""),
+            "title": t.get("title") or t.get("description") or "未命名",
+            "status": t.get("status", "pending"),
+            "priority": _norm_prio(t.get("priority")),
+            "key_id": t.get("key_id") or t.get("key") or t.get("anchor_key", ""),
+            "updated_at": (t.get("updated_at") or t.get("created_at") or "")[:10],
+            "current_step": (t.get("current_step") or t.get("instructions") or t.get("context") or "")[:200],
+            "source": t.get("source", ""),
+            "handoff_id": t.get("handoff_id", ""),
+            "progress": t.get("progress", ""),
+            "dependencies": t.get("dependencies", []),
+        }
+        # Pipeline-specific fields for detail rendering
+        if t.get("stage"):
+            _out["stage"] = t["stage"]
+        if t.get("module"):
+            _out["module"] = t["module"]
+        if t.get("description") and t.get("title"):
+            _out["description"] = t["description"][:300]
+        if t.get("gate_results"):
+            _out["gate_results"] = t["gate_results"]
+        if t.get("steps"):
+            _out["steps"] = t["steps"]
+        all_tasks.append(_out)
+
+    inject_lines = []
+
+    # ① improvements — from file OR DB fallback
+    # 优先 .GCC/improvements.json, 其次 state/improvements.json, 最后 gcc.db
+    imp_path = _gcc / "improvements.json"
+    if not imp_path.exists():
+        _state_imp = Path("state") / "improvements.json"
+        if _state_imp.exists():
+            imp_path = _state_imp
+    _imp_loaded = False
+    if imp_path.exists():
+        try:
+            d = _json.loads(imp_path.read_text(encoding="utf-8", errors="ignore"))
+            js = _json.dumps(d, ensure_ascii=False)
+            inject_lines.append(
+                f"try {{ const _d={js};"
+                f"DATA.improvements=Array.isArray(_d)?_d:flattenImprovements(_d);"
+                f"}} catch(e) {{}}"
+            )
+            loaded.append(imp_path.name)
+            _imp_loaded = True
+        except Exception as _e:
+            click.echo(f"  ⚠ improvements.json load error: {_e}", err=True)
+
+    # ①-b DB fallback for improvements (only if file not loaded)
+    if not _imp_loaded:
+        _db_path = _gcc / "gcc.db"
+        if _db_path.exists():
+            try:
+                import sqlite3 as _sql
+                _db = _sql.connect(str(_db_path))
+                _db.row_factory = _sql.Row
+                _imp_rows = [dict(r) for r in _db.execute(
+                    "SELECT id, parent_key, title, status, phase_text, note, item_type FROM improvements"
+                ).fetchall()]
+                _db.close()
+                if _imp_rows:
+                    for r in _imp_rows:
+                        r["status"] = (r.get("status") or "UNKNOWN").upper()
+                        r.pop("observations_json", None)
+                    js = _json.dumps(_imp_rows, ensure_ascii=False)
+                    inject_lines.append(f"DATA.improvements = {js};")
+                    loaded.append(f"gcc.db (improvements: {len(_imp_rows)})")
+            except Exception:
+                pass
+
+    # ①-c Cards + Skills — ALWAYS load from gcc.db + skill/cards/ (independent of improvements)
+    _cards_out = []
+    _skills_out = []
+    _db_path = _gcc / "gcc.db"
+    if _db_path.exists():
+        try:
+            import sqlite3 as _sql
+            _db = _sql.connect(str(_db_path))
+            _db.row_factory = _sql.Row
+            _card_rows = [dict(r) for r in _db.execute(
+                "SELECT id, key_id, title, card_type, layer_priority FROM cards"
+            ).fetchall()]
+            _db.close()
+            for c in _card_rows:
+                _cards_out.append({
+                    "key_id": c.get("key_id") or "",
+                    "title": c.get("title") or "",
+                    "card_type": c.get("card_type") or "knowledge",
+                    "layer_priority": c.get("layer_priority") or 2,
+                })
+        except Exception:
+            pass
+
+    # Scan skill/cards/ directories for knowledge cards (supplemental)
+    _skill_cards_dir = _gcc / "skill" / "cards"
+    _card_dirs_seen = set()
+    if _skill_cards_dir.exists():
+        for _md_file in _skill_cards_dir.rglob("*.md"):
+            _cat = _md_file.parent.name
+            _card_id = f"sk_{_md_file.stem[:40]}"
+            if _card_id not in _card_dirs_seen:
+                _card_dirs_seen.add(_card_id)
+                _cards_out.append({
+                    "key_id": _cat,
+                    "title": _md_file.stem.replace("_", " "),
+                    "card_type": "knowledge",
+                    "layer_priority": 2,
+                })
+        # Generate skill entries from card categories
+        _cat_counts = {}
+        for c in _cards_out:
+            k = c.get("key_id") or "general"
+            _cat_counts[k] = _cat_counts.get(k, 0) + 1
+        _sk_idx = 1
+        for _cat_name, _cnt in sorted(_cat_counts.items(), key=lambda x: -x[1])[:20]:
+            _skills_out.append({
+                "skill_id": f"SK-{_sk_idx:03d}",
+                "name": _cat_name,
+                "skill_type": "general",
+                "success_rate": 0.75,
+                "use_count": _cnt,
+                "confidence": 0.8,
+                "version": 1,
+                "source": "knowledge_cards",
+            })
+            _sk_idx += 1
+
+    if _cards_out:
+        inject_lines.append(f"DATA.cards = {_json.dumps(_cards_out, ensure_ascii=False)};")
+        loaded.append(f"cards: {len(_cards_out)}")
+    if _skills_out:
+        inject_lines.append(f"DATA.skills = {_json.dumps(_skills_out, ensure_ascii=False)};")
+        loaded.append(f"skills: {len(_skills_out)}")
+
+    # ①-d Skillbank from file (override generated skills if exists)
+    _sb_path = _gcc / "skillbank.jsonl"
+    if _sb_path.exists():
+        _sb_rows = []
+        for line in _sb_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.strip():
+                try: _sb_rows.append(_json.loads(line))
+                except Exception: pass
+        if _sb_rows:
+            inject_lines.append(f"DATA.skills = {_json.dumps(_sb_rows, ensure_ascii=False)};")
+            loaded.append(f"skillbank.jsonl: {len(_sb_rows)}")
+
+    # ② tasks.jsonl
+    tasks_path = _gcc / "tasks.jsonl"
+    if tasks_path.exists():
+        for line in tasks_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.strip():
+                try: _add_task(_json.loads(line))
+                except Exception: pass
+        loaded.append(tasks_path.name)
+
+    # ③ handoffs/*.json
+    # 过滤自动生成的机械化任务(config verify / docstring update / changelog / README)
+    _HO_NOISE_PREFIXES = (
+        "Verify config file",
+        "Update module docstrings",
+        "Add changelog entry",
+        "Update README",
+    )
+    handoff_dir = _gcc / "handoffs"
+    if handoff_dir.exists():
+        ho_count = 0
+        for ho_file in sorted(handoff_dir.glob("HO_*.json"), reverse=True)[:30]:
+            try:
+                d = _json.loads(ho_file.read_text(encoding="utf-8", errors="ignore"))
+                for t in d.get("tasks", []):
+                    if not isinstance(t, dict): continue
+                    _t_title = t.get("title") or t.get("description") or ""
+                    if any(_t_title.startswith(pfx) for pfx in _HO_NOISE_PREFIXES):
+                        continue
+                    t["key_id"] = d.get("key", "")
+                    t["updated_at"] = (d.get("created_at") or "")[:10]
+                    t["source"] = "handoff"
+                    t["handoff_id"] = d.get("handoff_id", ho_file.stem)
+                    _add_task(t)
+                    ho_count += 1
+                ho_sessions.append({
+                    "handoff_id": d.get("handoff_id", ho_file.stem),
+                    "created_at": d.get("created_at", ""),
+                    "key": d.get("key", ""),
+                    "project": d.get("project", ""),
+                    "changes_summary": d.get("upstream", {}).get("changes_summary", ""),
+                    "task_count": len(d.get("tasks", [])),
+                    "done_count": sum(1 for t in d.get("tasks", []) if isinstance(t, dict) and t.get("status") in ("completed", "done")),
+                })
+            except Exception:
+                pass
+        if ho_count:
+            loaded.append(f"handoffs/ ({ho_count} tasks)")
+
+    # ④ pipeline/tasks.json
+    pipe_path = _gcc / "pipeline/tasks.json"
+    if pipe_path.exists():
+        try:
+            _pd = _json.loads(pipe_path.read_text(encoding="utf-8", errors="ignore"))
+            if isinstance(_pd, list):
+                _pt = _pd
+            elif isinstance(_pd, dict) and "tasks" in _pd:
+                _pt = _pd["tasks"]
+            elif isinstance(_pd, dict):
+                _pt = list(_pd.values())
+            else:
+                _pt = []
+            _stage_map = {'done':'completed','closed':'completed',
+                          'implement':'running','test':'running','testing':'running',
+                          'integrate':'running','analyze':'running','design':'running',
+                          'pending':'pending','suspended':'paused'}
+            _pipe_count = 0
+            for t in _pt:
+                if isinstance(t, dict):
+                    t.setdefault("source", "pipeline")
+                    if "stage" in t and "status" not in t:
+                        t["status"] = _stage_map.get(t["stage"], "pending")
+                    _add_task(t)
+                    _pipe_count += 1
+            if _pipe_count: loaded.append(f"pipeline/tasks.json ({_pipe_count})")
+        except Exception:
+            pass
+
+    # ⑤ inject tasks + sessions as plain JS objects
+    if all_tasks:
+        js = _json.dumps(all_tasks, ensure_ascii=False)
+        inject_lines.append(f"DATA.tasks = {js};")
+
+    if ho_sessions:
+        js = _json.dumps(ho_sessions, ensure_ascii=False)
+        inject_lines.append(f"DATA.sessions = {js};")
+
+    # ⑥ suggestions (skillbank already handled in ①-c/①-d)
+    _sug_path = _gcc / "suggestions.jsonl"
+    if _sug_path.exists():
+        _sug_rows = []
+        for line in _sug_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.strip():
+                try: _sug_rows.append(_json.loads(line))
+                except Exception: pass
+        if _sug_rows:
+            inject_lines.append(f"DATA.suggestions = {_json.dumps(_sug_rows, ensure_ascii=False)};")
+            loaded.append(f"suggestions.jsonl: {len(_sug_rows)}")
+
+    # ⑦ GCC-0171: Vision Filter 准确率数据
+    _vf_acc_path = Path("state") / "vision_filter_accuracy.json"
+    if _vf_acc_path.exists():
+        try:
+            _vf_raw = _json.loads(_vf_acc_path.read_text(encoding="utf-8"))
+            _vf_dash = {
+                "last_review": _vf_raw.get("last_3day_review", 0),
+                "pending_count": sum(1 for e in _vf_raw.get("events", []) if e.get("result") == "pending"),
+                "total_events": len(_vf_raw.get("events", [])),
+                "symbols": _vf_raw.get("accuracy", {}),
+            }
+            inject_lines.append(f"DATA.vf_accuracy = {_json.dumps(_vf_dash, ensure_ascii=False)};")
+            loaded.append(f"vf_accuracy: {len(_vf_dash['symbols'])} symbols")
+        except Exception:
+            pass
+
+    # ⑧ GCC-0172: BrooksVision 形态回测准确率
+    _bv_acc_path = Path("state") / "bv_signal_accuracy.json"
+    if _bv_acc_path.exists():
+        try:
+            _bv_raw = _json.loads(_bv_acc_path.read_text(encoding="utf-8"))
+            inject_lines.append(f"DATA.bv_accuracy = {_json.dumps(_bv_raw, ensure_ascii=False)};")
+            loaded.append(f"bv_accuracy: {_bv_raw.get('overall', {}).get('total', 0)} signals")
+        except Exception:
+            pass
+
+    # ⑨ GCC-0173: MACD背离回测准确率
+    _macd_acc_path = Path("state") / "macd_signal_accuracy.json"
+    if _macd_acc_path.exists():
+        try:
+            _macd_raw = _json.loads(_macd_acc_path.read_text(encoding="utf-8"))
+            inject_lines.append(f"DATA.macd_accuracy = {_json.dumps(_macd_raw, ensure_ascii=False)};")
+            loaded.append(f"macd_accuracy: {_macd_raw.get('overall', {}).get('decisive', 0)} signals")
+        except Exception as _e:
+            loaded.append(f"macd_accuracy: load failed ({_e})")
+
+    # ⑩ GCC-0174 S5f: 知识卡准确率
+    _card_acc_path = Path("state") / "card_signal_accuracy.json"
+    if _card_acc_path.exists():
+        try:
+            _card_raw = _json.loads(_card_acc_path.read_text(encoding="utf-8"))
+            inject_lines.append(f"DATA.card_accuracy = {_json.dumps(_card_raw, ensure_ascii=False)};")
+            loaded.append(f"card_accuracy: {_card_raw.get('overall', {}).get('decisive', 0)} signals")
+        except Exception as _e:
+            loaded.append(f"card_accuracy: load failed ({_e})")
+
+    # ⑪ GCC-0197: 外挂信号准确率 (4H回填)
+    _plugin_acc_path = Path("state") / "plugin_signal_accuracy.json"
+    if _plugin_acc_path.exists():
+        try:
+            _plugin_raw = _json.loads(_plugin_acc_path.read_text(encoding="utf-8"))
+            _plugin_acc = _plugin_raw.get("accuracy", {})
+            inject_lines.append(f"DATA.plugin_accuracy = {_json.dumps(_plugin_acc, ensure_ascii=False)};")
+            _pa_total = sum(v.get("_overall", {}).get("total", 0) for v in _plugin_acc.values())
+            loaded.append(f"plugin_accuracy: {len(_plugin_acc)} sources, {_pa_total} decisive")
+        except Exception as _e:
+            loaded.append(f"plugin_accuracy: load failed ({_e})")
+
+    # ⑫ GCC-0197 S3: 外挂Phase状态
+    _plugin_phase_path = Path("state") / "plugin_phase_state.json"
+    if _plugin_phase_path.exists():
+        try:
+            _phase_raw = _json.loads(_plugin_phase_path.read_text(encoding="utf-8"))
+            inject_lines.append(f"DATA.plugin_phases = {_json.dumps(_phase_raw, ensure_ascii=False)};")
+            _downgraded = sum(1 for v in _phase_raw.values() if v.get("phase") == "DOWNGRADED")
+            loaded.append(f"plugin_phases: {len(_phase_raw)} plugins, {_downgraded} downgraded")
+        except Exception as _e:
+            loaded.append(f"plugin_phases: load failed ({_e})")
+
+    # ⑬ GCC-0202: system_evo 进化评分 (来自 key009_audit.json)
+    _audit_path = Path("state") / "key009_audit.json"
+    if _audit_path.exists():
+        try:
+            _audit_raw = _json.loads(_audit_path.read_text(encoding="utf-8"))
+            _sevo = _audit_raw.get("24h", {}).get("system_evo", {})
+            if _sevo:
+                # 精简字段：只注入 dashboard 展示所需
+                _sevo_dash = {
+                    "score": _sevo.get("score", 0),
+                    "win_rate": _sevo.get("win_rate", 0),
+                    "errors": _sevo.get("errors", 0),
+                    "exec_eff": _sevo.get("exec_eff", 0),
+                    "stability": _sevo.get("stability", 0),
+                    "trend": _sevo.get("trend", "UNKNOWN"),
+                    "collab_count": _sevo.get("collab_count", 0),
+                }
+                inject_lines.append(f"DATA.system_evo = {_json.dumps(_sevo_dash, ensure_ascii=False)};")
+                loaded.append(f"system_evo: score={_sevo_dash['score']}, trend={_sevo_dash['trend']}")
+        except Exception as _e:
+            loaded.append(f"system_evo: load failed ({_e})")
+
+    # inject BEFORE // INIT so render() sees the data
+    if inject_lines:
+        inject_js = "\n".join(inject_lines) + "\n"
+        if "// INIT\n" in html:
+            html = html.replace("// INIT\n", inject_js + "render();\n// INIT\n")
+        else:
+            html = html.replace(
+                "document.getElementById('lastUpdated').textContent = new Date().toLocaleString('zh-CN');",
+                inject_js + "render();\ndocument.getElementById('lastUpdated').textContent = new Date().toLocaleString('zh-CN');"
+            )
+
+    # GCC-0149: 增量导出 — 数据未变时跳过写入
+    import hashlib
+    _new_hash = hashlib.md5(html.encode("utf-8")).hexdigest()
+    _skip_write = False
+    if dest.exists():
+        _old_hash = hashlib.md5(dest.read_bytes()).hexdigest()
+        if _old_hash == _new_hash:
+            _skip_write = True
+
+    if _skip_write:
+        click.echo(f"  ✓ 看板数据未变，跳过写入: {dest}")
+    else:
+        dest.write_text(html, encoding="utf-8")
+        if loaded:
+            click.echo(f"  ✓ 已内嵌数据: {', '.join(loaded)}")
+        else:
+            click.echo(f"  ℹ  未找到 .gcc/ 数据文件，看板将使用手动上传模式")
+        click.echo(f"  ✓ 看板已生成: {dest}")
 
     if serve:
         # --serve: 启动本地HTTP服务器，支持刷新按钮fetch动态加载数据
@@ -3204,10 +3621,8 @@ def cmd_dashboard(export, out, serve, port):
                 req_path = self.path.lstrip("/").split("?")[0]
                 if req_path == _dash_rel:
                     try:
-                        subprocess.run(
-                            [sys.executable, str(gen_script), "--quiet"],
-                            capture_output=True, timeout=30,
-                        )
+                        from click.testing import CliRunner
+                        CliRunner().invoke(cmd_dashboard, ["--export"])
                     except Exception:
                         pass
                 super().do_GET()
@@ -3884,7 +4299,7 @@ def knowledge_ocr_pdf(pdf_path, output_dir, skip_db, db, min_text_chars):
     import sys
     from pathlib import Path
 
-    script = Path(__file__).resolve().parents[1] / ".GCC" / "ocr_pdf.py"
+    script = Path(__file__).resolve().parent / "ocr_pdf.py"
     pdf = Path(pdf_path)
     out = Path(output_dir) if output_dir else Path("output_md")
     if not pdf.exists():
@@ -3915,7 +4330,7 @@ def knowledge_cards(work_dir, book, chapter, module, overwrite, refine, llm_refi
     import sys
     from pathlib import Path
 
-    script = Path(__file__).resolve().parents[1] / ".GCC" / "pdf_to_cards_v3.py"
+    script = Path(__file__).resolve().parent / "pdf_to_cards_v3.py"
     wd = Path(work_dir)
     if not wd.exists():
         click.echo(f"  ✗ 目录不存在: {work_dir}")
@@ -5725,8 +6140,12 @@ def card_index():
 @click.option("-m", "--module", default="", help="Filter by system_mapping.module")
 @click.option("-t", "--card-type", default="", help="Filter by card type")
 @click.option("-k", "--keyword", default="", help="Keyword filter (comma-separated)")
+@click.option("--route", type=click.Choice(["keyword", "bm25", "rrf"]), default="keyword",
+              help="Retrieval route")
+@click.option("--graph-hop", type=int, default=0, help="Expand related_cards graph by N hops")
+@click.option("--session-id", default="default", help="Session id for access logging/hotspots")
 @click.option("--min-conf", default=0.3, help="Minimum confidence threshold")
-def card_query(module, card_type, keyword, min_conf):
+def card_query(module, card_type, keyword, route, graph_hop, session_id, min_conf):
     """按module/type/keyword查询知识卡规则。"""
     from gcc_evolution.card_bridge import CardBridge
     bridge = CardBridge()
@@ -5736,6 +6155,9 @@ def card_query(module, card_type, keyword, min_conf):
         module=module or None,
         card_type=card_type or None,
         keywords=keywords,
+        route=route,
+        graph_hops=max(0, graph_hop),
+        session_id=session_id,
         min_confidence=min_conf,
     )
     if not results:
@@ -5744,11 +6166,101 @@ def card_query(module, card_type, keyword, min_conf):
     click.echo(f"  {'─' * 55}")
     for r in results:
         click.echo(f"  {r['card_id']}: {r['title'][:40]}")
-        click.echo(f"    module={r['module']} conf={r['confidence']:.1f} quality={r['quality']} rules={len(r['rules'])}")
+        line = f"    module={r['module']} conf={r['confidence']:.1f} quality={r['quality']} rules={len(r['rules'])}"
+        if route == "bm25":
+            line += f" bm25={r.get('bm25_score', 0.0):.3f}"
+        if route == "rrf":
+            line += f" rrf={r.get('rrf_score', 0.0):.4f} bm25={r.get('bm25_score', 0.0):.3f}"
+        if r.get("rank_source") == "graph_1hop":
+            line += f" graph_hops={r.get('graph_hops', 0)} from={r.get('graph_from', '')}"
+        click.echo(line)
         for i, rule in enumerate(r["rules"][:3]):  # 最多显示3条规则
             click.echo(f"    [{i}] IF: {rule.get('if', '')[:60]}")
             click.echo(f"        THEN: {rule.get('then', '')[:60]}")
     click.echo()
+
+
+@cmd_card.command("session-end")
+@click.option("--session-id", default="default", help="Session id to aggregate hotspots")
+@click.option("--top-k", default=10, type=int, help="Top-k cards/keywords in hotspot summary")
+def card_session_end(session_id, top_k):
+    """Run KNN session-end hook: access log aggregation + top-k hotspots."""
+    from gcc_evolution.card_bridge import card_knn_session_end
+    summary = card_knn_session_end(session_id=session_id, top_k=max(1, top_k))
+    click.echo(f"\n  ✦ Session {summary.get('session_id')} events={summary.get('events', 0)}")
+    click.echo("  Top cards:")
+    for row in summary.get("top_cards", [])[:max(1, top_k)]:
+        click.echo(f"    {row.get('card_id')}: {row.get('hits')}")
+    click.echo("  Top keywords:")
+    for row in summary.get("top_keywords", [])[:max(1, top_k)]:
+        click.echo(f"    {row.get('keyword')}: {row.get('hits')}")
+    click.echo()
+
+
+@cmd_card.command("knn-precompute")
+@click.option("--top-k", default=10, type=int, help="K used by NearestNeighbors index")
+def card_knn_precompute(top_k):
+    """Build and persist prefetch index (state/prefetch_index.pkl)."""
+    from gcc_evolution.card_bridge import card_knn_precompute_index
+    meta = card_knn_precompute_index(top_k=max(1, top_k))
+    click.echo(
+        f"\n  ✦ precompute done backend={meta.get('backend')} cards={meta.get('cards')} "
+        f"top_k={meta.get('top_k')} path={meta.get('path')}\n"
+    )
+
+
+@cmd_card.command("knn-status")
+def card_knn_status():
+    """Show prefetch index preload status."""
+    from gcc_evolution.card_bridge import CardBridge
+    b = CardBridge()
+    meta = (b._prefetch_index or {}).get("meta", {})
+    click.echo(
+        f"\n  ✦ prefetch backend={meta.get('backend')} loaded={meta.get('loaded', False)} "
+        f"path=state/prefetch_index.pkl\n"
+    )
+
+
+@cmd_card.command("knn-drift-check")
+@click.option("--window", default=120, type=int, help="Recent event window size for PSI")
+@click.option("--psi-threshold", default=0.25, type=float, help="PSI threshold to trigger rebuild")
+def card_knn_drift_check(window, psi_threshold):
+    """Run incremental drift check and trigger full precompute rebuild on drift."""
+    from gcc_evolution.card_bridge import card_knn_incremental_update_and_drift_check
+    r = card_knn_incremental_update_and_drift_check(
+        window=max(20, int(window)),
+        psi_threshold=float(psi_threshold),
+    )
+    click.echo(
+        f"\n  ✦ drift psi={r.get('psi')} threshold={r.get('psi_threshold')} "
+        f"triggered={r.get('triggered_rebuild')} events={r.get('events')}\n"
+    )
+
+
+@cmd_card.command("blast-radius")
+@click.option("--seeds", default="", help="Comma-separated seed card ids")
+@click.option("--hops", default=2, type=int, help="BFS hops")
+@click.option("--depth-decay", default=0.7, type=float, help="Risk decay per hop (0~1)")
+@click.option("--threshold-n", default=5, type=int, help="Manual approval threshold on impacted count")
+@click.option("--out", default="state/blast_radius_report.json", help="Output report path")
+def card_blast_radius(seeds, hops, depth_decay, threshold_n, out):
+    """Compute 2-hop blast radius report for EvolutionGate."""
+    from gcc_evolution.card_bridge import card_evolution_blast_radius
+    seed_ids = [s.strip() for s in seeds.split(",") if s.strip()]
+    rep = card_evolution_blast_radius(
+        seed_ids,
+        hops=max(1, int(hops)),
+        out_path=out,
+        depth_decay=float(depth_decay),
+        threshold_n=max(1, int(threshold_n)),
+    )
+    summary = rep.get("summary", {})
+    click.echo(
+        f"\n  ✦ blast-radius impacted={summary.get('impacted_total')} "
+        f"severity={summary.get('severity')} hops={rep.get('hops')} "
+        f"risk={summary.get('total_risk')} manual_required={summary.get('manual_approval_required')} "
+        f"out={rep.get('output_path')}\n"
+    )
 
 
 @cmd_card.command("report")
@@ -5818,6 +6330,105 @@ def card_sync(direction):
     click.echo("  ✓ Sync complete\n")
 
 
+# ── setup: L0 预先设置层 ──────────────────────────────────
+
+@cli.command("setup")
+@click.argument("key", required=False, default="")
+@click.option("--edit", "-e", is_flag=True, default=False, help="编辑已有配置")
+@click.option("--show", "-s", is_flag=True, default=False, help="只读查看配置")
+@click.option("--reset", is_flag=True, default=False, help="重置配置")
+@click.option("--goal", default="", help="目标 (非交互模式)")
+@click.option("--criteria", default="", help="成功标准, 逗号分隔 (非交互模式)")
+@click.option("--anchor/--no-anchor", default=True, help="是否需要人工确认 (默认=是)")
+def cmd_setup(key, edit, show, reset, goal, criteria, anchor):
+    """L0 预先设置层: 配置本次 gcc-evo loop 的目标和成功标准。
+
+    \b
+    每次 gcc-evo loop 前需要通过 L0 gate 校验。
+    配置存储在 .GCC/state/session_config.json。
+
+    \b
+    示例:
+      gcc-evo setup KEY-010              交互式向导
+      gcc-evo setup KEY-010 --show       只读查看
+      gcc-evo setup KEY-010 --edit       编辑字段
+      gcc-evo setup KEY-010 --reset      重置配置
+      gcc-evo setup KEY-010 --goal "改善模块评分" --criteria "评分>0.8,无P0告警"
+    """
+    import sys
+
+    # 动态导入 gcc_evolution 子模块
+    try:
+        import sys as _sys
+        _root = Path(__file__).parent.parent
+        if str(_root) not in _sys.path:
+            _sys.path.insert(0, str(_root))
+        from gcc_evolution.session_config import SessionConfig
+        from gcc_evolution.setup_wizard import run_setup_wizard, run_edit_menu
+    except Exception as _ie:
+        click.echo(f"  [ERROR] 无法加载 session_config: {_ie}")
+        click.echo("  确保 gcc_evolution/ 目录存在且包含 session_config.py")
+        return
+
+    cfg = SessionConfig.load()
+
+    # ── --show ──
+    if show:
+        if not SessionConfig.exists():
+            click.echo("  [L0] 尚未配置，运行: gcc-evo setup <KEY>")
+            return
+        click.echo(cfg.summary())
+        return
+
+    # ── --reset ──
+    if reset:
+        confirm_key = click.prompt(f"  输入 KEY 确认重置", default="")
+        if confirm_key == cfg.key or confirm_key == key:
+            cfg.reset()
+            click.echo("  [L0] 配置已重置")
+        else:
+            click.echo("  [L0] KEY 不匹配，取消")
+        return
+
+    # ── 非交互模式 (--goal + --criteria) ──
+    if goal and criteria:
+        if key:
+            cfg.key = key
+        cfg.goal = goal
+        cfg.success_criteria = [c.strip() for c in criteria.split(",") if c.strip()]
+        cfg.human_anchor_required = anchor
+        ok, err = cfg.is_valid()
+        if not ok:
+            click.echo(f"  [L0] 配置无效: {err}")
+            return
+        path = cfg.save()
+        click.echo(f"  [L0] 配置已保存: {path}")
+        click.echo(cfg.summary())
+        return
+
+    # ── --edit ──
+    if edit:
+        if not SessionConfig.exists():
+            click.echo("  [L0] 无已有配置，请先运行: gcc-evo setup <KEY>")
+            return
+        result = run_edit_menu(cfg)
+        if result:
+            click.echo("  [L0] 配置已更新")
+        return
+
+    # ── 交互式向导 ──
+    if key:
+        cfg.key = key
+    result = run_setup_wizard(key=cfg.key, existing=cfg if SessionConfig.exists() else None)
+    if result:
+        ok, err = result.is_valid()
+        if ok:
+            click.echo(f"\n  [L0] 配置完成，现在可以运行:")
+            click.echo(f"    gcc-evo loop --key {result.key}")
+        else:
+            click.echo(f"  [L0] 警告: {err}")
+
+
 # ── loop: 完整闭环命令 ──
 
 @cli.command("loop")
@@ -5852,6 +6463,29 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
     NY = ZoneInfo("America/New_York")
     project_root = Path(__file__).parent.parent
     tasks_json_path = _gcc_dir() / "pipeline" / "tasks.json"
+
+    # ── L0 Gate: 校验 SessionConfig ──────────────────────
+    try:
+        _root_path = Path(__file__).parent.parent
+        if str(_root_path) not in sys.path:
+            sys.path.insert(0, str(_root_path))
+        from gcc_evolution.session_config import SessionConfig as _SC
+        _cfg = _SC.load()
+        _ok, _err = _cfg.is_valid()
+        if not _ok:
+            click.echo(f"\n  ⛔ [L0 Gate] SessionConfig 未配置: {_err}")
+            click.echo(f"  请先运行: gcc-evo setup {key}")
+            click.echo(f"  (--skip-gate 可跳过此检查)\n")
+            if not dry_run:
+                return
+            click.echo("  [dry-run] 跳过 L0 gate\n")
+        else:
+            click.echo(f"  ✅ [L0] {_cfg.key} — {_cfg.goal[:40]}")
+            if _cfg.human_anchor_required:
+                click.echo(f"  ⚓ 人工确认模式: 每轮结束后暂停")
+    except ImportError:
+        pass  # gcc_evolution 包未安装时跳过
+    # ─────────────────────────────────────────────────────
 
     # ── 加载pipeline任务 ──
     def _load_tasks():
@@ -6037,6 +6671,22 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
         click.echo()
         return ok_count == total
 
+    # ── L6 Dashboard 启动 ───────────────────────────────────
+    _dashboard_server = None
+    try:
+        from gcc_evolution.observer.event_bus import EventBus as _EB
+        from gcc_evolution.dashboard_server import DashboardServer as _DS
+        _bus = _EB.get()
+        _dashboard_server = _DS(bus=_bus)
+        if _dashboard_server.start():
+            click.echo(f"  🖥  [L6] Dashboard: {_dashboard_server.url}")
+        else:
+            click.echo(f"  ⚠  [L6] Dashboard 端口占用，跳过")
+            _dashboard_server = None
+    except ImportError:
+        pass  # 可选模块，不强制依赖
+    # ─────────────────────────────────────────────────────
+
     if once:
         _run_once()
     else:
@@ -6049,8 +6699,9 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
                 time.sleep(interval)
         except KeyboardInterrupt:
             click.echo("\n  ✋ 闭环已停止")
+    if _dashboard_server:
+        _dashboard_server.stop()
 
 
 if __name__ == "__main__":
     main()
-
