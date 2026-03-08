@@ -4299,7 +4299,7 @@ def knowledge_ocr_pdf(pdf_path, output_dir, skip_db, db, min_text_chars):
     import sys
     from pathlib import Path
 
-    script = Path(__file__).resolve().parent / "ocr_pdf.py"
+    script = Path(__file__).resolve().parent.parent / "opensource" / "ocr_pdf.py"
     pdf = Path(pdf_path)
     out = Path(output_dir) if output_dir else Path("output_md")
     if not pdf.exists():
@@ -4330,7 +4330,7 @@ def knowledge_cards(work_dir, book, chapter, module, overwrite, refine, llm_refi
     import sys
     from pathlib import Path
 
-    script = Path(__file__).resolve().parent / "pdf_to_cards_v3.py"
+    script = Path(__file__).resolve().parent.parent / "opensource" / "pdf_to_cards_v3.py"
     wd = Path(work_dir)
     if not wd.exists():
         click.echo(f"  ✗ 目录不存在: {work_dir}")
