@@ -32,6 +32,12 @@ _STATE_DIR = _PROJECT_ROOT / "state"
 _INDEX_PATH = _STATE_DIR / "card_index.json"
 _ACTIVATIONS_PATH = _STATE_DIR / "card_activations.jsonl"
 
+import sys
+
+def _log(msg: str):
+    """CardBridge 内部日志 (输出到 stdout，主程序 log_to_server 可捕获)
+    标签格式: [CARD-BRIDGE] …"""
+    print(f"[CARD-BRIDGE] {msg}", flush=True)
 
 class CardBridge:
     """知识卡活化桥接层"""
@@ -78,6 +84,8 @@ class CardBridge:
 
         # 持久化索引
         self._save_index()
+        modules = list(self._by_module.keys())
+        _log(f"[INDEX] 加载完成: {len(self._cards)}张卡, 模块={modules}")
         return len(self._cards)
 
     def _save_index(self):
@@ -273,6 +281,7 @@ class CardBridge:
             entry["ctx"] = context
         self._activation_buf.append(entry)
         self._flush_activations()
+        _log(f"[ACTIVATION] {symbol} {action} card={card_id} rule#{rule_index} price={price}")
 
     def record_outcome(self, card_id, rule_index, symbol, correct: bool):
         """回填结果 (16h后验证)"""
@@ -349,7 +358,7 @@ class CardBridge:
             status = "active"
             new_confidence = card.get("confidence", 0.5)
 
-            if out_count >= 10:
+            if out_count >= 5:  # GCC-0198: 降低阈値 10→　(2025-03-08)
                 if correct_rate >= 0.70:
                     status = "validated"
                     new_confidence = 0.9
@@ -384,6 +393,11 @@ class CardBridge:
                 "status": status,
             }
 
+        validated = sum(1 for v in report.values() if v["status"] == "validated")
+        flagged   = sum(1 for v in report.values() if v["status"] == "flagged")
+        inactive  = sum(1 for v in report.values() if v["status"] == "inactive")
+        _log(f"[DISTILL] 总卡={len(report)}, 有效激活={", ".join(str(v['activations']) for v in report.values() if v['activations']>0)[:60] or '0条'}, "
+             f"validated={validated} flagged={flagged} inactive={inactive}")
         return report
 
     def _write_card(self, card):

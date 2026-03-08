@@ -1214,7 +1214,20 @@ def bv_acc_get_pattern_phase(pattern: str, symbol: str) -> int:
 
     pat_data = _BV_ACC_CACHE.get("patterns", {}).get(pattern, {})
     sym_data = pat_data.get("symbols", {}).get(symbol, {})
-    return sym_data.get("suggested_phase", 0)
+    phase = sym_data.get("suggested_phase", 0)
+
+    # GCC-0198: 聚合兜底 — per-symbol decisive<5时用聚合准确率兜底
+    # 避免新品种因样本少而绕过低准确率形态的门控
+    if phase == 0 and sym_data.get("decisive", 0) < 5:
+        agg_decisive = pat_data.get("decisive", 0)
+        agg_acc = pat_data.get("accuracy", 0)
+        if agg_decisive >= 8 and agg_acc < 0.35:
+            _gcc_log(f"[GCC-0172][AGG-GATE] {symbol} [{pattern}] 聚合兜底Phase1 "
+                     f"(sym_decisive={sym_data.get('decisive', 0)}, "
+                     f"agg_decisive={agg_decisive}, agg_acc={agg_acc:.1%})")
+            return 1
+
+    return phase
 
 
 def bv_acc_log_eval(symbol: str, pattern: str, signal: str,
