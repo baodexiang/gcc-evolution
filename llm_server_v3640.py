@@ -53796,6 +53796,8 @@ try:
     _card_bridge = CardBridge()
     _card_count = _card_bridge.load_index()
     log_to_server(f"[CARD-BRIDGE] 启动加载: {_card_count}张知识卡已索引")
+    from gcc_evolution.card_bridge import set_card_bridge_logger
+    set_card_bridge_logger(log_to_server)  # GCC-0174: 注入logger, 内部_log()写server.log
 except Exception as _e_cb:
     log_to_server(f"[CARD-BRIDGE] 启动加载异常(非致命): {_e_cb}")
 

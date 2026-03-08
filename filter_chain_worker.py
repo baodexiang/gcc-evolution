@@ -92,6 +92,9 @@ PATTERN_SIGNAL_MAP = {
     "TRADING_RANGE": "NEUTRAL",
 }
 
+# GCC-0199: BV形态黑名单 — 准确率<35%的形态在FilterChain也需拦截(同步brooks_vision.py)
+BV_PATTERN_BLACKLIST = {"BEAR_FLAG"}
+
 
 def _read_vision_result(symbol: str):
     """读取 pattern_latest.json 中指定品种的形态数据, 返回 (VisionResult, overall_structure, position)
@@ -117,6 +120,9 @@ def _read_vision_result(symbol: str):
             elif direction == "DOWN":
                 bias = "SELL"
             # SIDE保持NEUTRAL
+        # GCC-0199: BV形态黑名单 → 强制NEUTRAL, 放在direction推导之后确保不被覆盖
+        if pattern in BV_PATTERN_BLACKLIST:
+            bias = "NEUTRAL"
         overall_structure = entry.get("overall_structure", "UNKNOWN")
         position = entry.get("position", "MID")
         vr = VisionResult(
