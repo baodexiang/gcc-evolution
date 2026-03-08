@@ -1,13 +1,13 @@
 """
 GCC v5.300 — L6 Event Bus
 
-线程安全的事件总线，<5ms emit，持久化到 .GCC/logs/events.jsonl。
+Thread-safe event bus, <5ms emit, persists to .GCC/logs/events.jsonl.
 
-使用:
-    bus = EventBus.get()            # 单例
-    bus.emit("L1", "记忆加载完成", {"cards": 12})
-    events = bus.recent(50)         # 最近50条
-    bus.subscribe(callback)         # 注册回调
+Usage:
+    bus = EventBus.get()            # singleton
+    bus.emit("L1", "memory loaded", {"cards": 12})
+    events = bus.recent(50)         # last 50 events
+    bus.subscribe(callback)         # register callback
 """
 from __future__ import annotations
 
@@ -24,18 +24,18 @@ from typing import Callable, Optional
 logger = logging.getLogger(__name__)
 
 _EVENTS_FILE = Path(".GCC") / "logs" / "events.jsonl"
-_MAX_MEMORY  = 500    # 内存最多保留条数
-_FLUSH_EVERY = 10     # 每N条写一次磁盘
+_MAX_MEMORY  = 500    # max events in memory
+_FLUSH_EVERY = 10     # flush to disk every N events
 
 
 def _now_ms() -> str:
-    """毫秒精度 ISO 时间戳。"""
+    """Millisecond-precision ISO timestamp."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 @dataclass
 class GCCEvent:
-    """单条事件。"""
+    """Single event."""
     layer: str       # L0 / L1 / L2 / L3 / L4 / L5 / L6
     message: str
     loop_id: str = ""
@@ -47,18 +47,18 @@ class GCCEvent:
         return asdict(self)
 
     def to_sse(self) -> str:
-        """Server-Sent Events 格式。"""
+        """Server-Sent Events format."""
         payload = json.dumps(self.to_dict(), ensure_ascii=False)
         return f"data: {payload}\n\n"
 
 
 class EventBus:
     """
-    全局单例事件总线。
+    Global singleton event bus.
 
-    - emit() 保证 <5ms (非阻塞写入队列)
-    - 后台线程负责持久化到 .GCC/logs/events.jsonl
-    - subscribe() 注册实时回调 (用于 SSE 推送)
+    - emit() guaranteed <5ms (non-blocking queue write)
+    - Background thread handles persistence to .GCC/logs/events.jsonl
+    - subscribe() registers real-time callbacks (for SSE push)
     """
 
     _instance: Optional["EventBus"] = None
@@ -76,7 +76,7 @@ class EventBus:
 
     @classmethod
     def get(cls) -> "EventBus":
-        """获取单例实例。"""
+        """Get singleton instance."""
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -90,8 +90,8 @@ class EventBus:
              loop_id: str = "",
              level: str = "INFO") -> GCCEvent:
         """
-        发布事件。非阻塞，<5ms。
-        Returns: 创建的 GCCEvent
+        Publish event. Non-blocking, <5ms.
+        Returns: created GCCEvent
         """
         t0 = time.monotonic()
         event = GCCEvent(
@@ -101,13 +101,12 @@ class EventBus:
             data=data or {},
             level=level,
         )
-        # 非阻塞入队
         try:
             self._queue.put_nowait(event)
         except queue.Full:
             logger.warning("[EventBus] queue full, dropping event: %s", message)
 
-        # 实时回调 (SSE 推送)
+        # Real-time callbacks (SSE push)
         with self._cb_lock:
             cbs = list(self._callbacks)
         for cb in cbs:
@@ -125,7 +124,7 @@ class EventBus:
     # ── Subscribe ────────────────────────────────────────
 
     def subscribe(self, callback: Callable[[GCCEvent], None]) -> None:
-        """注册实时回调 (每次 emit 后调用)。"""
+        """Register real-time callback (called after each emit)."""
         with self._cb_lock:
             self._callbacks.append(callback)
 
@@ -137,11 +136,10 @@ class EventBus:
 
     def recent(self, n: int = 50, layer: str = "",
                loop_id: str = "") -> list[GCCEvent]:
-        """返回最近 n 条事件 (已按时间倒序)。"""
+        """Return last n events (reverse chronological)."""
         with self._buffer_lock:
             events = list(self._buffer)
 
-        # 过滤
         if layer:
             events = [e for e in events if e.layer == layer]
         if loop_id:
@@ -150,7 +148,7 @@ class EventBus:
         return list(reversed(events[-n:]))
 
     def layer_status(self) -> dict[str, dict]:
-        """每层最新状态快照。"""
+        """Latest status snapshot per layer."""
         with self._buffer_lock:
             events = list(self._buffer)
 
@@ -180,15 +178,13 @@ class EventBus:
         self._writer_thread.start()
 
     def _writer_loop(self) -> None:
-        """后台写入线程：消费队列 → 更新缓冲 → 批量写磁盘。"""
-        unflushed: list[GCCEvent] = []   # 跨batch累积，等到 _FLUSH_EVERY 条再写盘
+        """Background writer: consume queue → update buffer → batch write disk."""
+        unflushed: list[GCCEvent] = []   # accumulate across batches until FLUSH_EVERY
 
         while self._running:
-            # 批量取，最多等 0.1s
             try:
                 event = self._queue.get(timeout=0.1)
                 batch = [event]
-                # 尽量取完队列里已有的
                 while True:
                     try:
                         batch.append(self._queue.get_nowait())
@@ -200,24 +196,22 @@ class EventBus:
             if not batch:
                 continue
 
-            # 更新内存缓冲
             with self._buffer_lock:
                 self._buffer.extend(batch)
                 if len(self._buffer) > _MAX_MEMORY:
                     self._buffer = self._buffer[-_MAX_MEMORY:]
 
-            # 跨batch累积，达到阈值才写磁盘
             unflushed.extend(batch)
             if len(unflushed) >= _FLUSH_EVERY:
                 self._persist(unflushed)
                 unflushed = []
 
-        # 线程退出前 flush 剩余未写条目
+        # Final flush on thread exit
         if unflushed:
             self._persist(unflushed)
 
     def _persist(self, events: list[GCCEvent]) -> None:
-        """追加写入 events.jsonl。"""
+        """Append-write to events.jsonl."""
         try:
             _EVENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
             with _EVENTS_FILE.open("a", encoding="utf-8") as f:
@@ -227,11 +221,11 @@ class EventBus:
             logger.warning("[EventBus] persist failed: %s", ex)
 
     def stop(self, timeout: float = 2.0) -> None:
-        """停止 EventBus，等待写线程完成最终 flush。"""
+        """Stop EventBus, wait for writer thread to finish final flush."""
         self._running = False
         if self._writer_thread and self._writer_thread.is_alive():
             self._writer_thread.join(timeout=timeout)
-        # 写线程退出后，排空队列中尚未被消费的事件（极少见）
+        # Drain any remaining queue events
         remaining: list[GCCEvent] = []
         while True:
             try:
@@ -244,6 +238,6 @@ class EventBus:
             self._persist(remaining)
 
     def clear(self) -> None:
-        """清空内存缓冲 (测试用)。"""
+        """Clear memory buffer (for testing)."""
         with self._buffer_lock:
             self._buffer.clear()

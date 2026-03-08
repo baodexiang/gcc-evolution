@@ -1,17 +1,17 @@
 """
-GCC v5.300 — L6 实时 Dashboard 服务器
+GCC v5.300 — L6 Real-time Dashboard Server
 
-本地 HTTP 服务，端口 7842。
-提供:
-  GET /          → dashboard HTML
-  GET /events    → SSE 实时事件流
-  GET /status    → JSON 快照 (各层最新状态)
-  GET /runs      → JSON 最近 run 列表
+Local HTTP server on port 7842.
+Provides:
+  GET /          -> dashboard HTML
+  GET /events    -> SSE real-time event stream
+  GET /status    -> JSON snapshot (latest status per layer)
+  GET /runs      -> JSON recent run list
 
-使用:
+Usage:
     server = DashboardServer(bus=EventBus.get(), tracer=tracer)
-    server.start()          # 后台线程启动
-    server.stop()           # 停止
+    server.start()          # starts in background thread
+    server.stop()           # stop
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ _DASHBOARD_HTML = Path(__file__).parent / "dashboard" / "index.html"
 # ── HTML fallback if file missing ──────────────────────────
 
 _FALLBACK_HTML = """<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -56,13 +56,13 @@ _FALLBACK_HTML = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>GCC-EVO L6 实时观测 Dashboard</h1>
+<h1>GCC-EVO L6 Real-time Dashboard</h1>
 <div id="layers"></div>
-<h3 style="color:#8b949e;margin-top:20px">事件日志</h3>
+<h3 style="color:#8b949e;margin-top:20px">Event Log</h3>
 <div id="log"></div>
 <script>
 const LAYERS=['L0','L1','L2','L3','L4','L5','L6'];
-const NAMES={L0:'预先设置',L1:'记忆',L2:'检索',L3:'蒸馏',L4:'决策',L5:'编排',L6:'观测'};
+const NAMES={L0:'Setup',L1:'Memory',L2:'Retrieval',L3:'Distillation',L4:'Decision',L5:'Orchestration',L6:'Observation'};
 const state={};
 LAYERS.forEach(l=>{
   state[l]={status:'pending',message:'--',ts:''};
@@ -70,8 +70,8 @@ LAYERS.forEach(l=>{
   d.className='layer';d.id='layer-'+l;
   d.innerHTML=`<span class="dot pending" id="dot-${l}"></span>
     <strong style="width:30px">${l}</strong>
-    <span style="color:#8b949e;width:80px">${NAMES[l]}</span>
-    <span id="msg-${l}" style="flex:1">等待中...</span>
+    <span style="color:#8b949e;width:90px">${NAMES[l]}</span>
+    <span id="msg-${l}" style="flex:1">waiting...</span>
     <span id="ts-${l}" class="ts" style="font-size:.75rem"></span>`;
   document.getElementById('layers').appendChild(d);
 });
@@ -110,7 +110,7 @@ es.onerror=()=>{setTimeout(()=>{window.location.reload()},3000)};
 # ── SSE Client Manager ───────────────────────────────────
 
 class _SSEClients:
-    """管理 SSE 客户端连接。"""
+    """Manages SSE client connections."""
 
     def __init__(self):
         self._clients: list[queue.Queue] = []
@@ -147,7 +147,7 @@ def _make_handler(clients: _SSEClients, bus: EventBus, tracer: Tracer):
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
-            pass  # 静默 HTTP 日志
+            pass  # silence HTTP logs
 
         def do_GET(self):
             if self.path == "/" or self.path == "/index.html":
@@ -189,7 +189,7 @@ def _make_handler(clients: _SSEClients, bus: EventBus, tracer: Tracer):
             self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
 
-            # 推送最近历史
+            # Push recent history
             for e in reversed(bus.recent(20)):
                 try:
                     self.wfile.write(e.to_sse().encode("utf-8"))
@@ -205,7 +205,7 @@ def _make_handler(clients: _SSEClients, bus: EventBus, tracer: Tracer):
                         self.wfile.write(data.encode("utf-8"))
                         self.wfile.flush()
                     except queue.Empty:
-                        # 心跳
+                        # heartbeat
                         self.wfile.write(b": ping\n\n")
                         self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, OSError):
@@ -220,9 +220,9 @@ def _make_handler(clients: _SSEClients, bus: EventBus, tracer: Tracer):
 
 class DashboardServer:
     """
-    L6 实时 Dashboard 服务器。
+    L6 Real-time Dashboard Server.
 
-    使用:
+    Usage:
         server = DashboardServer()
         server.start()
         print(f"Dashboard: http://localhost:{server.port}")
@@ -235,18 +235,17 @@ class DashboardServer:
         self._bus = bus or EventBus.get()
         self._tracer = tracer or Tracer(self._bus)
         self._clients = _SSEClients()
-        self._server: Optional[HTTPServer] = None
+        self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
-        # 订阅事件广播到所有 SSE 客户端
         self._bus.subscribe(self._clients.broadcast)
 
     def start(self) -> bool:
-        """启动服务（后台线程）。返回是否成功。"""
+        """Start server (background thread). Returns whether successful."""
         try:
             handler = _make_handler(self._clients, self._bus, self._tracer)
             self._server = ThreadingHTTPServer(("127.0.0.1", self.port), handler)
-            # SSE 长连接线程设为 daemon，stop() 时不阻塞等待其退出
+            # SSE long-connection threads are daemon so stop() doesn't block
             self._server.daemon_threads = True
             self._thread = threading.Thread(
                 target=self._server.serve_forever,
@@ -262,8 +261,8 @@ class DashboardServer:
 
     def stop(self) -> None:
         if self._server:
-            self._server.shutdown()    # 停止 serve_forever 循环
-            self._server.server_close()  # 释放监听 socket，端口可复用
+            self._server.shutdown()      # stop serve_forever loop
+            self._server.server_close()  # release listen socket for port reuse
             self._server = None
 
     @property

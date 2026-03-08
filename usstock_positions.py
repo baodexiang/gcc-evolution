@@ -26,14 +26,14 @@ POSITION_CONFIG = {
     "TSLA": 1,
     "COIN": 4,
     "RDDT": 3,
-    "AMD": 1,
+    "AMD": 0,
     "NBIS": 1,
-    "CRWV": 0,
+    "CRWV": 1,
     "RKLB": 4,
     "HIMS": 4,
     "OPEN": 1,
-    "ONDS": 2,
-    "PLTR": 2
+    "ONDS": 3,
+    "PLTR": 3
 }
 
 # ============================================================

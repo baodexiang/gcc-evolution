@@ -1,9 +1,9 @@
 """
 GCC v5.300 — L0 Setup Wizard
 
-交互式向导，引导用户完成 SessionConfig 的3个必填 + 3个选填字段。
+Interactive wizard for completing SessionConfig (3 required + 3 optional fields).
 
-使用:
+Usage:
     from gcc_evolution.setup_wizard import run_setup_wizard
     cfg = run_setup_wizard(key="KEY-010")
 """
@@ -14,14 +14,13 @@ from typing import Optional
 from .session_config import SessionConfig
 
 
-# ── 终端颜色 (fallback-safe) ──────────────────────────────
+# ── Terminal colors (fallback-safe) ──────────────────────
 
 def _color(text: str, code: str) -> str:
-    """ANSI 颜色包装，Windows 安全。"""
+    """ANSI color wrapper, Windows safe."""
     try:
         import os
         if os.name == "nt":
-            # Windows: 只有 ANSICON / WT / VS Code terminal 支持 ANSI
             if not (os.environ.get("WT_SESSION") or
                     os.environ.get("TERM_PROGRAM") or
                     os.environ.get("ANSICON")):
@@ -43,7 +42,7 @@ def dim(t): return _color(t, "2")
 
 def _prompt(label: str, default: str = "", required: bool = True,
             hint: str = "") -> str:
-    """安全 input()，支持 default 和 required 验证。"""
+    """Safe input() with default and required validation."""
     hint_str = f" [{dim(default)}]" if default else ""
     if hint:
         hint_str += f"  {dim('(' + hint + ')')}"
@@ -52,20 +51,19 @@ def _prompt(label: str, default: str = "", required: bool = True,
         if not raw and default:
             return default
         if not raw and required:
-            print(f"  {red('必填，请输入')}")
+            print(f"  {red('Required, please enter a value')}")
             continue
         return raw
 
 
 def _prompt_list(label: str, default: list[str] | None = None,
                   min_count: int = 1, max_count: int = 5) -> list[str]:
-    """逐条收集列表 (enter 空行结束，至少 min_count 条)。"""
+    """Collect items one by one (empty line to finish, min_count required)."""
     default = default or []
-    print(f"\n  {cyan(label)}  {dim(f'(至少{min_count}条，最多{max_count}条，空行结束)')}")
+    print(f"\n  {cyan(label)}  {dim(f'(at least {min_count}, max {max_count}, empty line to finish)')}")
     items = list(default)
-    # 显示已有项
     for i, d in enumerate(default):
-        print(f"  {dim(str(i+1) + '. ' + d)}  {dim('[已填]')}")
+        print(f"  {dim(str(i+1) + '. ' + d)}  {dim('[existing]')}")
 
     idx = len(items) + 1
     while idx <= max_count:
@@ -73,7 +71,7 @@ def _prompt_list(label: str, default: list[str] | None = None,
         if not raw:
             if len(items) >= min_count:
                 break
-            print(f"  {red(f'至少需要 {min_count} 条')}")
+            print(f"  {red(f'At least {min_count} item(s) required')}")
             continue
         items.append(raw)
         idx += 1
@@ -86,7 +84,7 @@ def _confirm(label: str, default: bool = True) -> bool:
     raw = input(f"  {cyan(label)} [{dim(default_str)}]: ").strip().lower()
     if not raw:
         return default
-    return raw in ("y", "yes", "是", "1")
+    return raw in ("y", "yes", "1")
 
 
 # ── Wizard ────────────────────────────────────────────────
@@ -97,13 +95,13 @@ def run_setup_wizard(
     edit_field: Optional[int] = None,
 ) -> Optional[SessionConfig]:
     """
-    交互式向导，返回填写完成的 SessionConfig。
-    Ctrl+C 取消返回 None。
+    Interactive wizard, returns completed SessionConfig.
+    Ctrl+C cancels and returns None.
 
     Args:
-        key: 预填入的 KEY 编号
-        existing: 已有配置（用于 --edit 模式）
-        edit_field: 仅编辑第 N 个字段 (1-6)
+        key: Pre-filled KEY number
+        existing: Existing config (for --edit mode)
+        edit_field: Only edit field N (1-6)
     """
     cfg = existing or SessionConfig()
     if key:
@@ -111,86 +109,84 @@ def run_setup_wizard(
 
     print()
     print(bold("  ╔══════════════════════════════════════╗"))
-    print(bold("  ║   gcc-evo setup — L0 预先设置向导   ║"))
+    print(bold("  ║   gcc-evo setup — L0 Session Setup   ║"))
     print(bold("  ╚══════════════════════════════════════╝"))
     print()
 
     try:
         if edit_field is None:
-            # 全部字段模式
             _fill_all(cfg)
         else:
             _fill_one(cfg, edit_field)
 
-        # 预览 & 确认
         print()
         print(cfg.summary())
         print()
         ok, err = cfg.is_valid()
         if not ok:
-            print(f"  {red('配置不完整:')} {err}")
+            print(f"  {red('Incomplete config:')} {err}")
             return None
 
-        confirmed = _confirm("确认保存？", default=True)
+        confirmed = _confirm("Save configuration?", default=True)
         if not confirmed:
-            print(f"  {yellow('已取消，配置未保存')}")
+            print(f"  {yellow('Cancelled, config not saved')}")
             return None
 
         path = cfg.save()
-        print(f"  {green('✓ 配置已保存:')} {path}")
+        print(f"  {green('Config saved:')} {path}")
         return cfg
 
     except KeyboardInterrupt:
-        print(f"\n  {yellow('已取消')}")
+        print(f"\n  {yellow('Cancelled')}")
         return None
 
 
 def _fill_all(cfg: SessionConfig) -> None:
-    """填写全部 6 个字段 (3必填 + 3选填)。"""
-    print(f"  {bold('── 必填字段 (3/3) ──')}")
+    """Fill all 6 fields (3 required + 3 optional)."""
+    print(f"  {bold('── Required Fields (3/3) ──')}")
     print()
 
     # 1. KEY
     cfg.key = _prompt(
-        "KEY编号",
+        "KEY number",
         default=cfg.key,
-        hint="如 KEY-010"
+        hint="e.g. KEY-010"
     )
 
-    # 2. 目标
+    # 2. Goal
     cfg.goal = _prompt(
-        "本次进化目标",
+        "Evolution goal",
         default=cfg.goal,
-        hint="至少10字，描述本次要改善什么"
+        hint="at least 10 chars, describe what to improve"
     )
     while len(cfg.goal) < 10:
-        print(f"  {red(f'至少10字 (当前{len(cfg.goal)}字)')}")
-        cfg.goal = _prompt("本次进化目标", hint="至少10字")
+        print(f"  {red(f'At least 10 chars (current: {len(cfg.goal)})')}")
+        cfg.goal = _prompt("Evolution goal", hint="at least 10 chars")
 
-    # 3. 成功标准
+    # 3. Success criteria
     cfg.success_criteria = _prompt_list(
-        "成功标准",
+        "Success criteria",
         default=cfg.success_criteria,
         min_count=1,
         max_count=5
     )
 
     print()
-    print(f"  {bold('── 选填字段 (可回车跳过) ──')}")
+    print(f"  {bold('── Optional Fields (press Enter to skip) ──')}")
     print()
 
-    # 4. Human anchor required
+    # 4. Human anchor
     cfg.human_anchor_required = _confirm(
-        "每轮结束后暂停等待人工确认？",
+        "Pause for human confirmation after each iteration?",
         default=cfg.human_anchor_required
     )
 
     # 5. Max iterations
     raw = _prompt(
-        "最大循环次数",
+        "Max iterations",
         default=str(cfg.max_iterations) if cfg.max_iterations else "0",
         required=False,
-        hint="0=不限"
+        hint="0=unlimited"
     )
     try:
         cfg.max_iterations = int(raw)
@@ -199,29 +195,29 @@ def _fill_all(cfg: SessionConfig) -> None:
 
     # 6. Notes
     cfg.notes = _prompt(
-        "备注",
+        "Notes",
         default=cfg.notes,
         required=False,
-        hint="可选"
+        hint="optional"
     )
 
 
 def _fill_one(cfg: SessionConfig, field_num: int) -> None:
-    """编辑单个字段 (--edit 模式)。"""
+    """Edit a single field (--edit mode)."""
     FIELD_MAP = {
-        1: ("key",                   "KEY编号"),
-        2: ("goal",                  "本次进化目标"),
-        3: ("success_criteria",      "成功标准"),
-        4: ("human_anchor_required", "人工确认"),
-        5: ("max_iterations",        "最大循环次数"),
-        6: ("notes",                 "备注"),
+        1: ("key",                   "KEY number"),
+        2: ("goal",                  "Evolution goal"),
+        3: ("success_criteria",      "Success criteria"),
+        4: ("human_anchor_required", "Human confirmation"),
+        5: ("max_iterations",        "Max iterations"),
+        6: ("notes",                 "Notes"),
     }
     if field_num not in FIELD_MAP:
-        print(f"  {red('无效字段编号')} (1-6)")
+        print(f"  {red('Invalid field number')} (1-6)")
         return
 
     fname, label = FIELD_MAP[field_num]
-    print(f"  编辑字段: {bold(label)}")
+    print(f"  Editing: {bold(label)}")
     print()
 
     if fname == "success_criteria":
@@ -229,7 +225,7 @@ def _fill_one(cfg: SessionConfig, field_num: int) -> None:
     elif fname == "human_anchor_required":
         cfg.human_anchor_required = _confirm(label, default=cfg.human_anchor_required)
     elif fname == "max_iterations":
-        raw = _prompt(label, default=str(cfg.max_iterations), required=False, hint="0=不限")
+        raw = _prompt(label, default=str(cfg.max_iterations), required=False, hint="0=unlimited")
         try:
             cfg.max_iterations = int(raw)
         except ValueError:
@@ -244,33 +240,33 @@ def _fill_one(cfg: SessionConfig, field_num: int) -> None:
 
 def run_edit_menu(cfg: SessionConfig) -> Optional[SessionConfig]:
     """
-    显示编号菜单，让用户选择要编辑的字段。
-    用于 gcc-evo setup <KEY> --edit。
+    Show numbered menu for editing fields.
+    Used by gcc-evo setup <KEY> --edit.
     """
     FIELDS = [
-        ("KEY编号",          cfg.key),
-        ("本次进化目标",      cfg.goal),
-        ("成功标准",          "; ".join(cfg.success_criteria)),
-        ("人工确认",          "是" if cfg.human_anchor_required else "否"),
-        ("最大循环次数",      str(cfg.max_iterations) if cfg.max_iterations else "不限"),
-        ("备注",              cfg.notes or "(空)"),
+        ("KEY number",          cfg.key),
+        ("Evolution goal",      cfg.goal),
+        ("Success criteria",    "; ".join(cfg.success_criteria)),
+        ("Human confirmation",  "yes" if cfg.human_anchor_required else "no"),
+        ("Max iterations",      str(cfg.max_iterations) if cfg.max_iterations else "unlimited"),
+        ("Notes",               cfg.notes or "(empty)"),
     ]
 
     print()
-    print(bold("  选择要编辑的字段:"))
+    print(bold("  Select field to edit:"))
     for i, (name, val) in enumerate(FIELDS, 1):
-        print(f"  {cyan(str(i))}. {name:<16} {dim(val[:40])}")
-    print(f"  {cyan('0')}. 返回（不保存）")
+        print(f"  {cyan(str(i))}. {name:<22} {dim(val[:40])}")
+    print(f"  {cyan('0')}. Cancel")
     print()
 
     try:
-        raw = input(f"  {cyan('输入编号')}: ").strip()
+        raw = input(f"  {cyan('Enter number')}: ").strip()
         num = int(raw)
         if num == 0:
             return None
         if 1 <= num <= 6:
             return run_setup_wizard(existing=cfg, edit_field=num)
-        print(f"  {red('无效编号')}")
+        print(f"  {red('Invalid number')}")
         return None
     except (ValueError, KeyboardInterrupt):
         return None

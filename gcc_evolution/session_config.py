@@ -66,25 +66,25 @@ class SessionConfig:
 
     def summary(self) -> str:
         ok, err = self.is_valid()
-        status = "✅ 有效" if ok else f"❌ {err}"
-        anchor = "需人工确认" if self.human_anchor_required else "自动运行"
-        max_it = f"最多 {self.max_iterations} 轮" if self.max_iterations else "不限"
+        status = "Valid" if ok else f"Invalid: {err}"
+        anchor = "human confirm required" if self.human_anchor_required else "auto"
+        max_it = f"max {self.max_iterations}" if self.max_iterations else "unlimited"
         lines = [
             f"  L0 Session Config  [{status}]",
             f"  ─────────────────────────────────────",
             f"  KEY:    {self.key}",
-            f"  目标:   {self.goal}",
-            f"  成功标准:",
+            f"  Goal:   {self.goal}",
+            f"  Success Criteria:",
         ]
         for i, c in enumerate(self.success_criteria, 1):
             lines.append(f"    {i}. {c}")
         lines += [
-            f"  方向锚点: {anchor}",
-            f"  迭代限制: {max_it}",
+            f"  Human Anchor: {anchor}",
+            f"  Iterations:   {max_it}",
         ]
         if self.notes:
-            lines.append(f"  备注: {self.notes}")
-        lines.append(f"  更新时间: {self.updated_at[:19]}")
+            lines.append(f"  Notes: {self.notes}")
+        lines.append(f"  Updated: {self.updated_at[:19]}")
         return "\n".join(lines)
 
     # ── 持久化 ────────────────────────────────────────────

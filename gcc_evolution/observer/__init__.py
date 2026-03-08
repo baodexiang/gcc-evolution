@@ -1,15 +1,15 @@
 """
 GCC v5.300 — L6 Observer Package
 
-事件总线 + 层级发射器 + 运行追踪器。
+Event bus + layer emitter + run tracer.
 
-使用:
+Usage:
     from gcc_evolution.observer import EventBus, LayerEmitter, RunTracer
 
     bus = EventBus.get()
     emitter = LayerEmitter(bus, loop_id="loop_001")
     tracer = RunTracer(bus)
-    emitter.emit_l1("记忆加载完成", {"cards": 12})
+    emitter.emit_l1("memory loaded", {"cards": 12})
 """
 
 from .event_bus import EventBus, GCCEvent

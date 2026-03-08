@@ -1,9 +1,9 @@
 """
 GCC v5.300 — L6 Run Tracer
 
-按 loop_id 追踪每次 loop 运行的全流程快照。
+Tracks full flow snapshots for each loop run by loop_id.
 
-使用:
+Usage:
     tracer = RunTracer(bus)
     tracer.start_run("loop_001", key="KEY-010")
     tracer.mark_layer("loop_001", "L1", "done", {"cards": 12})
@@ -26,7 +26,7 @@ def _now() -> str:
 
 @dataclass
 class LayerTrace:
-    """单层运行状态。"""
+    """Single layer run state."""
     layer: str
     status: str = "pending"   # pending / running / done / error / skipped
     started_at: str = ""
@@ -47,7 +47,7 @@ class LayerTrace:
 
 @dataclass
 class RunTrace:
-    """单次 loop 运行的完整轨迹。"""
+    """Complete trace for a single loop run."""
     loop_id: str
     key: str = ""
     started_at: str = field(default_factory=_now)
@@ -88,32 +88,30 @@ class RunTrace:
 
 class Tracer:
     """
-    全局运行追踪器。
+    Global run tracer.
 
-    - 监听 EventBus，自动更新 RunTrace
-    - 支持查询当前/历史 run
+    - Listens to EventBus, auto-updates RunTrace
+    - Supports querying current/historical runs
     """
 
-    _MAX_RUNS = 50    # 内存保留最近 N 次 run
+    _MAX_RUNS = 50    # keep last N runs in memory
 
     def __init__(self, bus: Optional[EventBus] = None):
         self._bus = bus or EventBus.get()
         self._runs: dict[str, RunTrace] = {}
-        self._order: list[str] = []    # 按创建顺序
+        self._order: list[str] = []    # creation order
         self._lock = threading.Lock()
-        # 订阅事件总线
         self._bus.subscribe(self._on_event)
 
     # ── Public API ───────────────────────────────────────
 
     def start_run(self, loop_id: str, key: str = "",
                   iteration: int = 1) -> RunTrace:
-        """注册一次新的 loop 运行。"""
+        """Register a new loop run."""
         run = RunTrace(loop_id=loop_id, key=key, iteration=iteration)
         with self._lock:
             self._runs[loop_id] = run
             self._order.append(loop_id)
-            # 修剪旧 run
             if len(self._order) > self._MAX_RUNS:
                 old_id = self._order.pop(0)
                 self._runs.pop(old_id, None)
@@ -131,7 +129,7 @@ class Tracer:
 
     def mark_layer(self, loop_id: str, layer: str, status: str,
                    data: Optional[dict] = None, message: str = "") -> None:
-        """更新某层状态。"""
+        """Update a layer's status."""
         with self._lock:
             run = self._runs.get(loop_id)
         if not run:
@@ -152,7 +150,7 @@ class Tracer:
             return self._runs.get(loop_id)
 
     def current_run(self) -> Optional[RunTrace]:
-        """获取最新的 run。"""
+        """Get the most recent run."""
         with self._lock:
             if not self._order:
                 return None
@@ -167,7 +165,7 @@ class Tracer:
     # ── Auto-update from EventBus ────────────────────────
 
     def _on_event(self, event: GCCEvent) -> None:
-        """监听事件总线，自动更新 RunTrace。"""
+        """Listen to event bus, auto-update RunTrace."""
         if not event.loop_id:
             return
 
@@ -181,7 +179,6 @@ class Tracer:
         status_hint = data.get("status", "")
         level = event.level
 
-        # 自动推断状态
         if status_hint in ("started", "running"):
             self.mark_layer(event.loop_id, layer, "running",
                             data=data, message=event.message)
@@ -195,7 +192,6 @@ class Tracer:
             self.mark_layer(event.loop_id, layer, "skipped",
                             data=data, message=event.message)
         else:
-            # 收到事件但无明确状态 → 标记为 running (run 已在上方确认非 None)
             lt = run.layer(layer)
             if lt.status == "pending":
                 lt.status = "running"

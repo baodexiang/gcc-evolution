@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
-<html lang="zh-CN">
+<!DOCTYPE html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>GCC-EVO L6 实时观测</title>
+<title>GCC-EVO L6 Dashboard</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0d1117;color:#c9d1d9;font-family:'SF Mono',Consolas,monospace;min-height:100vh}
@@ -33,7 +33,7 @@ header h1{font-size:1rem;color:#58a6ff;font-weight:600}
 .dot.paused{background:#e3b341;animation:pulse 1.5s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 .layer-id{width:28px;font-size:.8rem;color:#58a6ff;font-weight:600}
-.layer-name{width:56px;font-size:.75rem;color:#8b949e}
+.layer-name{width:80px;font-size:.75rem;color:#8b949e}
 .layer-msg{flex:1;font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .layer-ts{font-size:.7rem;color:#484f58;flex-shrink:0}
 .layer-dur{font-size:.7rem;color:#8b949e;flex-shrink:0;min-width:40px;text-align:right}
@@ -42,8 +42,6 @@ header h1{font-size:1rem;color:#58a6ff;font-weight:600}
 .cfg-item{display:flex;gap:8px;font-size:.8rem;padding:3px 0;border-bottom:1px solid #21262d}
 .cfg-key{color:#8b949e;min-width:80px}
 .cfg-val{color:#e6edf3}
-.cfg-ok{color:#3fb950}
-.cfg-err{color:#f85149}
 
 /* Event log */
 .log-box{height:280px;overflow-y:auto;background:#010409;border:1px solid #21262d;
@@ -82,57 +80,57 @@ header h1{font-size:1rem;color:#58a6ff;font-weight:600}
 <body>
 
 <header>
-  <h1>GCC-EVO L6 实时观测</h1>
-  <span class="badge live" id="live-badge">● LIVE</span>
+  <h1>GCC-EVO L6 Real-time Dashboard</h1>
+  <span class="badge live" id="live-badge">â— LIVE</span>
   <span class="badge" id="loop-badge">loop: --</span>
   <span class="badge" id="key-badge">KEY: --</span>
   <span style="flex:1"></span>
   <span id="conn-dot"></span>
-  <span id="conn-label" style="font-size:.75rem;color:#8b949e;margin-left:4px">连接中...</span>
+  <span id="conn-label" style="font-size:.75rem;color:#8b949e;margin-left:4px">Connecting...</span>
 </header>
 
 <div class="main">
-  <!-- 左列: 六层状态 + Session Config -->
+  <!-- Left: 7-layer status + Session Config -->
   <div style="display:flex;flex-direction:column;gap:16px">
 
     <div class="card">
-      <div class="card-title">六层运行状态</div>
+      <div class="card-title">7-Layer Status</div>
       <div class="layer-list" id="layer-list"></div>
     </div>
 
     <div class="card">
       <div class="card-title">L0 Session Config</div>
       <div id="cfg-panel">
-        <div class="cfg-item"><span class="cfg-key">状态</span>
+        <div class="cfg-item"><span class="cfg-key">Status</span>
           <span class="cfg-val" id="cfg-status">--</span></div>
         <div class="cfg-item"><span class="cfg-key">KEY</span>
           <span class="cfg-val" id="cfg-key">--</span></div>
-        <div class="cfg-item"><span class="cfg-key">目标</span>
+        <div class="cfg-item"><span class="cfg-key">Goal</span>
           <span class="cfg-val" id="cfg-goal" style="font-size:.75rem">--</span></div>
-        <div class="cfg-item"><span class="cfg-key">人工确认</span>
+        <div class="cfg-item"><span class="cfg-key">Human confirm</span>
           <span class="cfg-val" id="cfg-anchor">--</span></div>
-        <div class="cfg-item"><span class="cfg-key">迭代限制</span>
+        <div class="cfg-item"><span class="cfg-key">Max iterations</span>
           <span class="cfg-val" id="cfg-maxiter">--</span></div>
       </div>
     </div>
 
   </div>
 
-  <!-- 右列: 事件日志 + 运行历史 -->
+  <!-- Right: Event log + Run history -->
   <div style="display:flex;flex-direction:column;gap:16px">
 
     <div class="card" style="flex:1">
       <div class="card-title" style="display:flex;justify-content:space-between">
-        <span>实时事件日志</span>
-        <span id="ev-count" style="color:#484f58;font-size:.7rem">0 条</span>
+        <span>Real-time Event Log</span>
+        <span id="ev-count" style="color:#484f58;font-size:.7rem">0 events</span>
       </div>
       <div class="log-box" id="log-box"></div>
     </div>
 
     <div class="card">
-      <div class="card-title">运行历史 (最近10次)</div>
+      <div class="card-title">Run History (last 10)</div>
       <div class="run-list" id="run-list">
-        <div style="color:#484f58;font-size:.8rem;padding:8px">暂无运行记录</div>
+        <div style="color:#484f58;font-size:.8rem;padding:8px">No runs yet</div>
       </div>
     </div>
 
@@ -140,30 +138,30 @@ header h1{font-size:1rem;color:#58a6ff;font-weight:600}
 </div>
 
 <div class="footer">
-  <span>GCC-EVO v5.325</span>
+  <span>GCC-EVO v5.340</span>
   <span id="footer-ts">--</span>
   <span>SSE port 7842</span>
   <span id="sse-clients">clients: 0</span>
 </div>
 
 <script>
-// ── Layer definitions ──
+// â”€â”€ Layer definitions â”€â”€
 const LAYERS = [
-  {id:'L0', name:'预设'},
-  {id:'L1', name:'记忆'},
-  {id:'L2', name:'检索'},
-  {id:'L3', name:'蒸馏'},
-  {id:'L4', name:'决策'},
-  {id:'L5', name:'编排'},
-  {id:'L6', name:'观测'},
+  {id:'L0', name:'Setup'},
+  {id:'L1', name:'Memory'},
+  {id:'L2', name:'Retrieval'},
+  {id:'L3', name:'Distillation'},
+  {id:'L4', name:'Decision'},
+  {id:'L5', name:'Orchestration'},
+  {id:'L6', name:'Observation'},
 ];
 
 const layerState = {};
 LAYERS.forEach(l => {
-  layerState[l.id] = {status:'pending', message:'等待中...', ts:'', dur:null};
+  layerState[l.id] = {status:'pending', message:'waiting...', ts:'', dur:null};
 });
 
-// ── Build layer DOM ──
+// â”€â”€ Build layer DOM â”€â”€
 const list = document.getElementById('layer-list');
 LAYERS.forEach(l => {
   const row = document.createElement('div');
@@ -173,17 +171,17 @@ LAYERS.forEach(l => {
     <span class="dot" id="dot-${l.id}"></span>
     <span class="layer-id">${l.id}</span>
     <span class="layer-name">${l.name}</span>
-    <span class="layer-msg" id="msg-${l.id}">等待中...</span>
+    <span class="layer-msg" id="msg-${l.id}">waiting...</span>
     <span class="layer-ts" id="ts-${l.id}"></span>
     <span class="layer-dur" id="dur-${l.id}"></span>
   `;
   list.appendChild(row);
 });
 
-// ── Event counter ──
+// â”€â”€ Event counter â”€â”€
 let evCount = 0;
 
-// ── Update layer ──
+// â”€â”€ Update layer â”€â”€
 function updateLayer(layer, status, message, ts, dur) {
   const dot = document.getElementById('dot-' + layer);
   const msg = document.getElementById('msg-' + layer);
@@ -198,7 +196,7 @@ function updateLayer(layer, status, message, ts, dur) {
   row.className = 'layer-row ' + (status || 'pending');
 }
 
-// ── Add log entry ──
+// â”€â”€ Add log entry â”€â”€
 function addLog(e) {
   const box = document.getElementById('log-box');
   const div = document.createElement('div');
@@ -210,10 +208,10 @@ function addLog(e) {
   box.prepend(div);
   while (box.children.length > 300) box.removeChild(box.lastChild);
   evCount++;
-  document.getElementById('ev-count').textContent = evCount + ' 条';
+  document.getElementById('ev-count').textContent = evCount + ' events';
 }
 
-// ── Process event ──
+// â”€â”€ Process event â”€â”€
 function processEvent(e) {
   const layer = e.layer;
   const data = e.data || {};
@@ -224,21 +222,19 @@ function processEvent(e) {
     updateLayer(layer, st, e.message, e.ts, data.duration_ms);
   }
 
-  // Update loop badge
   if (e.loop_id) {
     document.getElementById('loop-badge').textContent = 'loop: ' + e.loop_id.substr(-8);
   }
 
-  // Update human pause indicator
   if (data.type === 'human_pause') {
-    updateLayer('L0', 'paused', '[等待人工确认] ' + (data.reason || ''), e.ts, null);
+    updateLayer('L0', 'paused', '[waiting for human] ' + (data.reason || ''), e.ts, null);
   }
 
   addLog(e);
   document.getElementById('footer-ts').textContent = (e.ts || '').substr(0, 19);
 }
 
-// ── Load status snapshot ──
+// â”€â”€ Load status snapshot â”€â”€
 function loadStatus() {
   fetch('/status').then(r => r.json()).then(status => {
     Object.entries(status).forEach(([layer, info]) => {
@@ -250,7 +246,7 @@ function loadStatus() {
   }).catch(() => {});
 }
 
-// ── Load run history ──
+// â”€â”€ Load run history â”€â”€
 function loadRuns() {
   fetch('/runs').then(r => r.json()).then(runs => {
     const container = document.getElementById('run-list');
@@ -270,14 +266,13 @@ function loadRuns() {
       `;
       container.appendChild(row);
     });
-    // Update key badge from latest run
     if (runs[0] && runs[0].key) {
       document.getElementById('key-badge').textContent = 'KEY: ' + runs[0].key;
     }
   }).catch(() => {});
 }
 
-// ── SSE connection ──
+// â”€â”€ SSE connection â”€â”€
 let es = null;
 let reconnectTimer = null;
 
@@ -289,7 +284,7 @@ function connect() {
   es = new EventSource('/events');
   es.onopen = () => {
     dot.className = 'connected';
-    label.textContent = '已连接';
+    label.textContent = 'Connected';
     document.getElementById('live-badge').style.opacity = '1';
     loadStatus();
     loadRuns();
@@ -299,7 +294,7 @@ function connect() {
   };
   es.onerror = () => {
     dot.className = 'error';
-    label.textContent = '重连中...';
+    label.textContent = 'Reconnecting...';
     document.getElementById('live-badge').style.opacity = '.4';
     es.close(); es = null;
     if (!reconnectTimer) {
@@ -310,9 +305,11 @@ function connect() {
 
 connect();
 
-// ── Periodic refresh of run history ──
+// â”€â”€ Periodic refresh of run history â”€â”€
 setInterval(loadRuns, 10000);
 </script>
 </body>
 </html>
+
+
 
