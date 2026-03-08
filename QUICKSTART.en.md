@@ -45,6 +45,19 @@ gcc-evo pipe list
 gcc-evo pipe status GCC-0001
 ```
 
+### Step 5: OCR documents and generate knowledge cards
+
+```bash
+gcc-evo knowledge ocr-pdf paper.pdf output_cards
+gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine
+```
+
+If an LLM is configured, you can continue with:
+
+```bash
+gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine --llm-refine --llm-repeat 3
+```
+
 ## 3. Paid Core Workflow
 
 The strongest gcc-evo workflow starts when the paid core is enabled.

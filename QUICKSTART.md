@@ -45,6 +45,19 @@ gcc-evo pipe list
 gcc-evo pipe status GCC-0001
 ```
 
+### 第五步：OCR 文档并生成知识卡
+
+```bash
+gcc-evo knowledge ocr-pdf paper.pdf output_cards
+gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine
+```
+
+如已配置 LLM，可继续执行：
+
+```bash
+gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine --llm-refine --llm-repeat 3
+```
+
 ## 3. 付费模式工作流
 
 gcc-evo 最强的工作流从付费核心开始：

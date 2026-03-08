@@ -66,6 +66,25 @@ gcc-evo memory export
 gcc-evo health
 ```
 
+## OCR 与知识卡流程
+
+```bash
+gcc-evo knowledge ocr-pdf paper.pdf output_cards
+gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine
+```
+
+如果已经配置 LLM，可以继续精修：
+
+```bash
+gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine --llm-refine --llm-repeat 3
+```
+
+这条流程会产出：
+
+- `page_*.md` 页文本
+- `page_*.json` 结构化知识卡
+- 可选 DuckDB 卡片入库
+
 ## 付费模式工作流
 
 ```bash

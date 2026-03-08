@@ -80,6 +80,25 @@ gcc-evo memory export
 gcc-evo health
 ```
 
+### OCR and Knowledge Cards
+
+```bash
+gcc-evo knowledge ocr-pdf paper.pdf output_cards
+gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine
+```
+
+If an LLM is configured, you can further refine the extracted cards:
+
+```bash
+gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine --llm-refine --llm-repeat 3
+```
+
+This pipeline produces:
+
+- `page_*.md` page text
+- `page_*.json` structured knowledge cards
+- optional DuckDB card storage
+
 ### Paid Core Flow
 
 ```bash
