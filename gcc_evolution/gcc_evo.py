@@ -3872,6 +3872,65 @@ def knowledge_review(draft_id):
         click.echo("  已跳过")
 
 
+@cmd_knowledge.command("ocr-pdf")
+@click.argument("pdf_path")
+@click.argument("output_dir", required=False)
+@click.option("--skip-db", is_flag=True, help="跳过 DuckDB 入库")
+@click.option("--db", default="knowledge.duckdb", show_default=True, help="DuckDB 文件路径")
+@click.option("--min-text-chars", default=100, show_default=True, help="直接文本抽取最小字符数")
+def knowledge_ocr_pdf(pdf_path, output_dir, skip_db, db, min_text_chars):
+    """Windows 友好的 PDF OCR：PDF -> page_*.md / page_*.json / DuckDB。"""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[1] / ".GCC" / "ocr_pdf.py"
+    pdf = Path(pdf_path)
+    out = Path(output_dir) if output_dir else Path("output_md")
+    if not pdf.exists():
+        click.echo(f"  ✗ 文件不存在: {pdf_path}")
+        return
+    cmd = [
+        sys.executable, str(script), str(pdf), str(out),
+        "--db", str(db), "--min-text-chars", str(min_text_chars),
+    ]
+    if skip_db:
+        cmd.append("--skip-db")
+    proc = subprocess.run(cmd, text=True, check=False)
+    raise SystemExit(proc.returncode)
+
+
+@cmd_knowledge.command("cards")
+@click.argument("work_dir")
+@click.option("--book", default="", help="来源书籍/课程名")
+@click.option("--chapter", default="", help="章节名")
+@click.option("--module", default="KnowledgeExtractor", show_default=True, help="system_mapping.module")
+@click.option("--overwrite", is_flag=True, help="覆盖已有 page_*.json")
+@click.option("--refine", is_flag=True, help="对现有 json 执行 refine")
+@click.option("--llm-refine", is_flag=True, help="用已配置 LLM 精修卡片字段")
+@click.option("--llm-repeat", default=1, show_default=True, help="LLM 调用次数")
+def knowledge_cards(work_dir, book, chapter, module, overwrite, refine, llm_refine, llm_repeat):
+    """page_*.md -> 专业知识卡 JSON。"""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[1] / ".GCC" / "pdf_to_cards_v3.py"
+    wd = Path(work_dir)
+    if not wd.exists():
+        click.echo(f"  ✗ 目录不存在: {work_dir}")
+        return
+    cmd = [sys.executable, str(script), str(wd), "--book", book, "--chapter", chapter, "--module", module]
+    if overwrite:
+        cmd.append("--overwrite")
+    if refine:
+        cmd.append("--refine")
+    if llm_refine:
+        cmd.extend(["--llm-refine", "--llm-repeat", str(llm_repeat)])
+    proc = subprocess.run(cmd, text=True, check=False)
+    raise SystemExit(proc.returncode)
+
+
 # ══════════════════════════════════════════════════════
 # gcc-evo suggest
 # ══════════════════════════════════════════════════════

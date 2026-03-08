@@ -57,7 +57,7 @@
         "new_high_tolerance": 0.003
       },
       "metrics": {
-        "total_triggers": 186,
+        "total_triggers": 188,
         "correct_predictions": 0,
         "false_positives": 0,
         "false_negatives": 0,
@@ -91,7 +91,7 @@
         "consecutive_count": 2
       },
       "metrics": {
-        "total_triggers": 47,
+        "total_triggers": 48,
         "correct_predictions": 0,
         "false_positives": 0,
         "false_negatives": 0,
