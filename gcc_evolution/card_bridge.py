@@ -34,10 +34,26 @@ _ACTIVATIONS_PATH = _STATE_DIR / "card_activations.jsonl"
 
 import sys
 
+# GCC-0199: 回调注入日志 — 默认print, 主程序可通过set_card_bridge_logger注入log_to_server
+_logger_fn = None  # 由主程序注入
+
+
+def set_card_bridge_logger(fn):
+    """GCC-0199: 主程序调用此函数注入log_to_server, 解耦循环依赖"""
+    global _logger_fn
+    _logger_fn = fn
+
+
 def _log(msg: str):
-    """CardBridge 内部日志 (输出到 stdout，主程序 log_to_server 可捕获)
-    标签格式: [CARD-BRIDGE] …"""
-    print(f"[CARD-BRIDGE] {msg}", flush=True)
+    """CardBridge 内部日志。优先用注入的logger(写server.log), 回退print"""
+    tagged = f"[CARD-BRIDGE] {msg}"
+    if _logger_fn:
+        try:
+            _logger_fn(tagged)
+            return
+        except Exception:
+            pass
+    print(tagged, flush=True)
 
 class CardBridge:
     """知识卡活化桥接层"""

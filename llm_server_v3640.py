@@ -4425,6 +4425,8 @@ def fetch_ohlcv_from_api(symbol: str, timeframe: int, limit: int = 120):
 
 # === v3.610: MACD 30m数据预加载 ===
 _macd_preloaded = {}  # {symbol: True} 记录已预加载的品种
+# GCC-0199: MACD震荡过滤 — RANGING时要求连续2周期确认
+_macd_ranging_confirm = {}  # {symbol_action: {"ts": float, "count": int}}
 
 def _preload_macd_30m_data(symbol: str) -> list:
     """
@@ -15418,7 +15420,8 @@ def compute_wyckoff_analysis(ohlcv_bars: list, symbol: str = None) -> dict:
 # ============================================================
 
 # 配置开关
-USE_DEEPSEEK_ARBITER = True  # 是否启用 DeepSeek 仲裁
+USE_DEEPSEEK_ARBITER = False  # v3.680 GCC-0198: 禁用DeepSeek仲裁（100% HOLD死锁）
+USE_RULE_ARBITER = True       # v3.680 GCC-0198: 启用规则仲裁引擎（替代DeepSeek）
 DEEPSEEK_API_TIMEOUT = 10    # API 超时时间（秒）
 
 # DeepSeek API 配置
@@ -15927,6 +15930,170 @@ L2形态分析:
         print(f"[v2.988] ⚠️ DeepSeek 仲裁跳过: {result['error']}")
         return result
 
+# =============================================================================
+# v3.680 GCC-0198: 规则仲裁引擎（替代DeepSeek仲裁者）
+# 问题: DeepSeek仲裁100% HOLD死锁（15/15次全部HOLD）
+# 方案: 多数投票 + x4趋势方向打破平局 + 仅x4=x8=SIDE时HOLD
+# =============================================================================
+
+def rule_based_arbiter(
+    ai_signal: str,
+    ai_confidence: float,
+    human_signal: str,
+    human_confidence: float,
+    tech_signal: str,
+    tech_confidence: float,
+    market_data: dict = None,
+    symbol: str = None,
+    l2_info: dict = None,
+) -> dict:
+    """
+    v3.680 GCC-0198: 规则仲裁引擎
+    
+    替代DeepSeek LLM仲裁。确定性规则，无HOLD偏见。
+    
+    决策逻辑（按优先级）：
+        1. 多数投票: 2/3方向一致 → 跟随多数
+        2. x4趋势打破平局: 三方分裂时跟随大周期趋势
+        3. 置信度加权: 同方向时用最高置信度方的置信度
+        4. 仅当x4=SIDE且x8=SIDE时才HOLD（真正无方向）
+    
+    Returns: 同call_deepseek_arbiter格式
+        {"success": bool, "signal": str, "confidence": float, "reason": str, "error": str}
+    """
+    result = {
+        "success": True,
+        "signal": "HOLD",
+        "confidence": 0.5,
+        "reason": "",
+        "error": "",
+    }
+
+    signals = [
+        ("AI", ai_signal, ai_confidence),
+        ("Human", human_signal, human_confidence),
+        ("Tech", tech_signal, tech_confidence),
+    ]
+
+    # 统计方向投票
+    buy_votes = [(name, sig, conf) for name, sig, conf in signals if is_buy_side_v2900(sig)]
+    sell_votes = [(name, sig, conf) for name, sig, conf in signals if is_sell_side_v2900(sig)]
+    hold_votes = [(name, sig, conf) for name, sig, conf in signals if sig == "HOLD"]
+
+    # 提取趋势方向
+    x4_trend = (market_data.get("trend_x4", "SIDE") if market_data else "SIDE").upper()
+    x8_trend = (market_data.get("trend_x8", "SIDE") if market_data else "SIDE").upper()
+
+    # ─── 规则1: 多数投票 (2/3一致) ───
+    if len(buy_votes) >= 2:
+        # 2+方看多 → BUY
+        best = max(buy_votes, key=lambda x: x[2])
+        avg_conf = sum(v[2] for v in buy_votes) / len(buy_votes)
+        # STRONG_BUY: 全部BUY系且最高置信度>=0.7
+        if len(buy_votes) == 3 and best[2] >= 0.7:
+            result["signal"] = "STRONG_BUY"
+            result["confidence"] = min(0.9, avg_conf * 1.1)
+        else:
+            result["signal"] = "BUY"
+            result["confidence"] = min(0.85, avg_conf)
+        voters = ", ".join(f"{v[0]}={v[1]}({v[2]:.0%})" for v in buy_votes)
+        result["reason"] = f"规则仲裁-多数看多: {voters}"
+        print(f"[v3.680] ✅ 规则仲裁: {result['signal']} (多数投票 {len(buy_votes)}/3 BUY) conf={result['confidence']:.0%}")
+        return result
+
+    if len(sell_votes) >= 2:
+        # 2+方看空 → SELL
+        best = max(sell_votes, key=lambda x: x[2])
+        avg_conf = sum(v[2] for v in sell_votes) / len(sell_votes)
+        if len(sell_votes) == 3 and best[2] >= 0.7:
+            result["signal"] = "STRONG_SELL"
+            result["confidence"] = min(0.9, avg_conf * 1.1)
+        else:
+            result["signal"] = "SELL"
+            result["confidence"] = min(0.85, avg_conf)
+        voters = ", ".join(f"{v[0]}={v[1]}({v[2]:.0%})" for v in sell_votes)
+        result["reason"] = f"规则仲裁-多数看空: {voters}"
+        print(f"[v3.680] ✅ 规则仲裁: {result['signal']} (多数投票 {len(sell_votes)}/3 SELL) conf={result['confidence']:.0%}")
+        return result
+
+    # ─── 规则2: 1BUY + 1SELL + 1HOLD 或 三方分裂 → x4趋势打破平局 ───
+    if len(buy_votes) == 1 and len(sell_votes) == 1:
+        # BUY vs SELL 对立，第三方HOLD → 看x4趋势
+        buy_v = buy_votes[0]
+        sell_v = sell_votes[0]
+
+        if x4_trend == "UP":
+            result["signal"] = "BUY"
+            result["confidence"] = min(0.65, buy_v[2] * 0.9)  # 降低置信度（有分歧）
+            result["reason"] = f"规则仲裁-x4趋势裁决: x4={x4_trend}, 跟随{buy_v[0]}={buy_v[1]}"
+            print(f"[v3.680] ✅ 规则仲裁: BUY (x4=UP打破BUY/SELL平局) conf={result['confidence']:.0%}")
+            return result
+
+        elif x4_trend == "DOWN":
+            result["signal"] = "SELL"
+            result["confidence"] = min(0.65, sell_v[2] * 0.9)
+            result["reason"] = f"规则仲裁-x4趋势裁决: x4={x4_trend}, 跟随{sell_v[0]}={sell_v[1]}"
+            print(f"[v3.680] ✅ 规则仲裁: SELL (x4=DOWN打破BUY/SELL平局) conf={result['confidence']:.0%}")
+            return result
+
+        else:
+            # x4=SIDE, 再看x8
+            if x8_trend == "UP":
+                result["signal"] = "BUY"
+                result["confidence"] = min(0.55, buy_v[2] * 0.8)
+                result["reason"] = f"规则仲裁-x8趋势裁决: x4=SIDE,x8={x8_trend}, 弱跟随{buy_v[0]}"
+                print(f"[v3.680] ✅ 规则仲裁: BUY (x8=UP弱裁决) conf={result['confidence']:.0%}")
+                return result
+            elif x8_trend == "DOWN":
+                result["signal"] = "SELL"
+                result["confidence"] = min(0.55, sell_v[2] * 0.8)
+                result["reason"] = f"规则仲裁-x8趋势裁决: x4=SIDE,x8={x8_trend}, 弱跟随{sell_v[0]}"
+                print(f"[v3.680] ✅ 规则仲裁: SELL (x8=DOWN弱裁决) conf={result['confidence']:.0%}")
+                return result
+
+    # ─── 规则3: 1方向 + 2 HOLD → 看大趋势是否支持该方向 ───
+    if len(hold_votes) == 2 and (len(buy_votes) == 1 or len(sell_votes) == 1):
+        lone_vote = buy_votes[0] if buy_votes else sell_votes[0]
+        lone_dir = "BUY" if buy_votes else "SELL"
+
+        # 方向与x4一致 → 弱跟随
+        if (lone_dir == "BUY" and x4_trend == "UP") or (lone_dir == "SELL" and x4_trend == "DOWN"):
+            result["signal"] = lone_dir
+            result["confidence"] = min(0.55, lone_vote[2] * 0.8)
+            result["reason"] = f"规则仲裁-单方+趋势确认: {lone_vote[0]}={lone_vote[1]}, x4={x4_trend}支持"
+            print(f"[v3.680] ✅ 规则仲裁: {lone_dir} (单方向+x4确认) conf={result['confidence']:.0%}")
+            return result
+
+        # 方向与x4相反 → HOLD（逆势单方不跟）
+        if (lone_dir == "BUY" and x4_trend == "DOWN") or (lone_dir == "SELL" and x4_trend == "UP"):
+            result["signal"] = "HOLD"
+            result["confidence"] = 0.5
+            result["reason"] = f"规则仲裁-单方逆势: {lone_vote[0]}={lone_vote[1]}逆x4={x4_trend}, HOLD"
+            print(f"[v3.680] ✅ 规则仲裁: HOLD (单方向逆势) conf=50%")
+            return result
+
+        # x4=SIDE → HOLD（无趋势支撑，单方不足）
+        result["signal"] = "HOLD"
+        result["confidence"] = 0.45
+        result["reason"] = f"规则仲裁-单方无趋势: {lone_vote[0]}={lone_vote[1]}, x4=SIDE"
+        print(f"[v3.680] ✅ 规则仲裁: HOLD (单方向+无趋势) conf=45%")
+        return result
+
+    # ─── 规则4: 全HOLD → HOLD ───
+    if len(hold_votes) == 3:
+        result["signal"] = "HOLD"
+        result["confidence"] = 0.6
+        result["reason"] = "规则仲裁-三方HOLD共识"
+        print(f"[v3.680] ✅ 规则仲裁: HOLD (三方共识) conf=60%")
+        return result
+
+    # ─── 兜底: 不应到达，但如果信号组合异常 → HOLD ───
+    result["signal"] = "HOLD"
+    result["confidence"] = 0.4
+    result["reason"] = f"规则仲裁-兜底: {ai_signal}/{human_signal}/{tech_signal}, x4={x4_trend}"
+    print(f"[v3.680] ⚠️ 规则仲裁兜底: HOLD ({ai_signal}/{human_signal}/{tech_signal})")
+    return result
+
 
 # =============================================================================
 # v3.330: DeepSeek趋势仲裁 - AI+Tech分歧时判断趋势/震荡
@@ -16217,11 +16384,26 @@ def negotiate_three_views_v2900(
     result["deepseek_trigger"] = trigger_info  # 保存触发信息
 
     if trigger_info["should_trigger"]:
-        print(f"[v2.999] ⚠️ DeepSeek触发: {trigger_info['trigger_reason']} "
+        print(f"[v3.680] ⚠️ 仲裁触发: {trigger_info['trigger_reason']} "
               f"| {ai_signal} vs {human_signal} vs {tech_signal}")
 
-        # v2.999: 调用 DeepSeek 仲裁 (含L2联动+增强数据)
-        if USE_DEEPSEEK_ARBITER:
+        arbiter_result = None
+
+        # v3.680 GCC-0198: 优先使用规则仲裁引擎
+        if USE_RULE_ARBITER:
+            arbiter_result = rule_based_arbiter(
+                ai_signal=ai_signal,
+                ai_confidence=result["ai_confidence"],
+                human_signal=human_signal,
+                human_confidence=result["human_confidence"],
+                tech_signal=tech_signal,
+                tech_confidence=result["tech_confidence"],
+                market_data=market_data,
+                symbol=symbol,
+                l2_info=l2_info,
+            )
+        elif USE_DEEPSEEK_ARBITER:
+            # 原有DeepSeek路径（已禁用，保留代码供回滚）
             arbiter_result = call_deepseek_arbiter(
                 ai_signal=ai_signal,
                 ai_confidence=result["ai_confidence"],
@@ -16231,38 +16413,50 @@ def negotiate_three_views_v2900(
                 tech_confidence=result["tech_confidence"],
                 market_data=market_data,
                 symbol=symbol,
-                l2_info=l2_info,  # v2.999 P1-4: 传递L2形态分析
+                l2_info=l2_info,
             )
-
             # v3.241 D1/D2: 记录仲裁结果
             log_deepseek_trigger(symbol or "UNKNOWN", trigger_info['trigger_reason'], arbiter_result)
 
-            if arbiter_result["success"]:
-                # DeepSeek 仲裁成功
-                result["signal"] = arbiter_result["signal"]
-                result["confidence"] = arbiter_result["confidence"]
-                result["consensus_type"] = f"DEEPSEEK_{trigger_info['trigger_reason']}"
-                result["weighted_value"] = signal_to_value_v2900(arbiter_result["signal"])
-                result["reason"] = f"DeepSeek仲裁({trigger_info['trigger_reason']}): {arbiter_result['reason']}"
-                result["deepseek_arbiter"] = arbiter_result
-                # v3.241: 添加deepseek_stats到结果
+        if arbiter_result and arbiter_result["success"]:
+            # 仲裁成功（规则或DeepSeek）
+            arbiter_source = "规则仲裁" if USE_RULE_ARBITER else "DeepSeek仲裁"
+            result["signal"] = arbiter_result["signal"]
+            result["confidence"] = arbiter_result["confidence"]
+            result["consensus_type"] = f"ARBITER_{trigger_info['trigger_reason']}"
+            result["weighted_value"] = signal_to_value_v2900(arbiter_result["signal"])
+            result["reason"] = f"{arbiter_source}({trigger_info['trigger_reason']}): {arbiter_result['reason']}"
+            result["deepseek_arbiter"] = arbiter_result  # 兼容字段名
+            if not USE_RULE_ARBITER:
                 result["deepseek_stats"] = {
                     "total": DEEPSEEK_STATS["total_triggers"],
                     "success_rate": DEEPSEEK_STATS["total_success"] / max(DEEPSEEK_STATS["total_triggers"], 1) * 100,
                 }
-                print(f"[v2.999] ✅ DeepSeek 仲裁结果: {result['signal']} (conf={result['confidence']:.0%})")
-                return result
-            else:
-                # DeepSeek 仲裁失败，使用原有逻辑
-                print(f"[v2.999] ⚠️ DeepSeek 仲裁失败，使用默认处理: {arbiter_result['error']}")
+            print(f"[v3.680] ✅ {arbiter_source}结果: {result['signal']} (conf={result['confidence']:.0%})")
+            return result
+        elif arbiter_result and not arbiter_result["success"]:
+            # 仲裁失败（仅DeepSeek可能失败，规则仲裁始终success=True）
+            print(f"[v3.680] ⚠️ 仲裁失败: {arbiter_result['error']}")
 
-        # 原有冲突处理逻辑（DeepSeek 不可用或失败时）
-        if result["has_conflict"]:
-            result["signal"] = "HOLD"
-            result["confidence"] = CONFIDENCE_MULTIPLIERS_V2900["CONFLICT"]
-            result["consensus_type"] = "CONFLICT"
-            result["weighted_value"] = 0.0
-            result["reason"] = f"方向冲突: {ai_signal} vs {human_signal} vs {tech_signal}"
+        # v3.680 GCC-0198: 冲突回退用规则仲裁（而非无脑HOLD）
+        if result["has_conflict"] and not USE_RULE_ARBITER:
+            # 只有当规则仲裁未启用时才走这里（否则上面已经处理）
+            fallback_result = rule_based_arbiter(
+                ai_signal=ai_signal,
+                ai_confidence=result["ai_confidence"],
+                human_signal=human_signal,
+                human_confidence=result["human_confidence"],
+                tech_signal=tech_signal,
+                tech_confidence=result["tech_confidence"],
+                market_data=market_data,
+                symbol=symbol,
+            )
+            result["signal"] = fallback_result["signal"]
+            result["confidence"] = fallback_result["confidence"]
+            result["consensus_type"] = "CONFLICT_RULE_FALLBACK"
+            result["weighted_value"] = signal_to_value_v2900(fallback_result["signal"])
+            result["reason"] = f"冲突回退-规则仲裁: {fallback_result['reason']}"
+            print(f"[v3.680] ✅ 冲突回退规则仲裁: {result['signal']} (conf={result['confidence']:.0%})")
             return result
         # 非方向冲突的其他触发情况，继续正常流程
     
@@ -48981,6 +49175,25 @@ def handle_tv_l2_10m():
                                 if _macd_phase == 1:
                                     log_to_server(f"[GCC-0173][MACD_GATE] {symbol} {macd_div_type} Phase1收紧 → 不执行")
                                     macd_triggered = False
+                            except Exception:
+                                pass
+                        # GCC-0199: MACD震荡过滤 — RANGING行情要求连续2周期确认
+                        if macd_triggered:
+                            try:
+                                _mr_state = state_for_macd.get("_last_final_decision", {}).get(
+                                    "three_way_signals", {}).get("market_regime", {})
+                                _macd_regime = _mr_state.get("regime", "RANGING")
+                                if _macd_regime == "RANGING":
+                                    _confirm_key = f"{symbol}_{macd_action}"
+                                    _prev = _macd_ranging_confirm.get(_confirm_key)
+                                    _now_ts = time.time()
+                                    if _prev and _now_ts - _prev["ts"] < 1200:  # 20min窗口(2x10min周期)
+                                        log_to_server(f"[GCC-0199][MACD_RANGING] {symbol} {macd_action} 震荡确认2/2 → 放行")
+                                        _macd_ranging_confirm.pop(_confirm_key, None)
+                                    else:
+                                        _macd_ranging_confirm[_confirm_key] = {"ts": _now_ts, "count": 1}
+                                        log_to_server(f"[GCC-0199][MACD_RANGING] {symbol} {macd_action} 震荡确认1/2 → 等待下周期")
+                                        macd_triggered = False
                             except Exception:
                                 pass
                         # GCC-0173: 记录MACD信号到jsonl (在KNN+Phase门控之后,仅记录实际执行的信号)

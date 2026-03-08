@@ -46,6 +46,9 @@ def _gcc_log(msg: str):
     except Exception:
         pass
 
+# GCC-0199: BV形态黑名单 — 准确率持续低于35%的形态直接排除,不进入EXECUTE
+BV_PATTERN_BLACKLIST = {"BEAR_FLAG"}
+
 NY_TZ = ZoneInfo("America/New_York")
 
 # ---------------------------------------------------------------------------
@@ -944,8 +947,15 @@ def scan_symbol(symbol: str, mods: dict) -> Optional[Dict]:
         record = record_observation(symbol, radar, filter_result, l2_signal, final)
         return record
 
-    # Step 4b: GCC-0172 形态Phase门控 (Phase1仅记录,不EXECUTE)
+    # Step 4a: GCC-0199 形态黑名单 (准确率<35%直接排除,不浪费Phase门控)
     bp = radar.get("brooks_pattern", "NONE")
+    if bp in BV_PATTERN_BLACKLIST:
+        final = f"{direction}_{agree_type}_BV_BLACKLIST"
+        _gcc_log(f"[GCC-0199][BV_BLACKLIST] {symbol} [{bp}] 黑名单形态 → 不执行")
+        record = record_observation(symbol, radar, filter_result, l2_signal, final)
+        return record
+
+    # Step 4b: GCC-0172 形态Phase门控 (Phase1仅记录,不EXECUTE)  — bp already set in Step 4a
     bp_phase = bv_acc_get_pattern_phase(bp, symbol)
     if bp_phase == 1:
         final = f"{direction}_{agree_type}_BV_PHASE1"
