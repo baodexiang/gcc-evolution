@@ -1,4 +1,4 @@
-﻿# Quick Start - gcc-evo v5.330
+﻿# Quick Start - gcc-evo v5.340
 
 This guide follows the canonical release model:
 

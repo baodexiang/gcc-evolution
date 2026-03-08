@@ -1,4 +1,4 @@
-﻿# gcc-evo v5.330
+﻿# gcc-evo v5.340
 
 See also: [FRAMEWORK_BOUNDARY.md](FRAMEWORK_BOUNDARY.md) | [FRAMEWORK_BOUNDARY.en.md](FRAMEWORK_BOUNDARY.en.md) | [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md) | [PRICING.en.md](PRICING.en.md)
 
@@ -87,7 +87,7 @@ This flow produces:
 gcc-evo loop GCC-0001 --once
 ```
 
-In the canonical v5.330 model, `loop` is a paid-core workflow because it relies on `L4 + L5`.
+In the canonical v5.340 model, `loop` is a paid-core workflow because it relies on `L4 + L5`.
 
 ## Pricing
 

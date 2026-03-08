@@ -1,4 +1,4 @@
-﻿# gcc-evo v5.330
+﻿# gcc-evo v5.340
 
 另见: [FRAMEWORK_BOUNDARY.md](FRAMEWORK_BOUNDARY.md) | [FRAMEWORK_BOUNDARY.en.md](FRAMEWORK_BOUNDARY.en.md) | [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md) | [PRICING.md](PRICING.md)
 
@@ -91,7 +91,7 @@ gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Cha
 gcc-evo loop GCC-0001 --once
 ```
 
-在权威 `v5.330` 口径里，`loop` 属于付费核心流程，因为它依赖 `L4 + L5` 的决策进化与闭环编排。
+在权威 `v5.340` 口径里，`loop` 属于付费核心流程，因为它依赖 `L4 + L5` 的决策进化与闭环编排。
 
 ## 定价
 

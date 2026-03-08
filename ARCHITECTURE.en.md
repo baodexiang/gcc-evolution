@@ -4,7 +4,7 @@
 
 ---
 
-> Canonical v5.330 commercial boundary: see [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md). Release-facing split is `5 Free + 3 Paid`: free foundation = `UI + L0 + L1 + L2 + L3`, paid core = `L4 + L5 + DA`.
+> Canonical v5.340 commercial boundary: see [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md). Release-facing split is `5 Free + 3 Paid`: free foundation = `UI + L0 + L1 + L2 + L3`, paid core = `L4 + L5 + DA`.
 
 ## Table of Contents
 

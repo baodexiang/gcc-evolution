@@ -1,4 +1,4 @@
-﻿# QUICKSTART - gcc-evo v5.330
+﻿# QUICKSTART - gcc-evo v5.340
 
 本手册严格按照权威发布口径编写：
 

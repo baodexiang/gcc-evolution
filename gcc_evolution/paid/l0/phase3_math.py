@@ -23,7 +23,7 @@ PHASE3_MATH = PaidBoundary(
 )
 
 STATE_VECTOR_SPEC = {
-    "version": "5.330",
+    "version": "5.340",
     "paper": "P002_nowcasting",
     "fields": (
         "prev_state",
