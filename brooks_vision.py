@@ -541,9 +541,11 @@ def radar_scan(symbol: str, mods: dict) -> Optional[Dict[str, Any]]:
         logger.warning(f"[{symbol}] pattern_latest.json读取失败: {e}")
         return None
 
-    entry = data.get(symbol)
+    # GCC-0200: 尝试yfinance名和内部名两种key (BTC-USD vs BTCUSDC)
+    internal_name = YF_TO_INTERNAL.get(symbol, symbol)
+    entry = data.get(symbol) or data.get(internal_name)
     if not entry:
-        logger.info(f"[{symbol}] pattern_latest.json无此品种数据")
+        logger.info(f"[{symbol}] pattern_latest.json无此品种数据 (tried: {symbol}, {internal_name})")
         return None
 
     # 转换为radar_scan原有输出格式
