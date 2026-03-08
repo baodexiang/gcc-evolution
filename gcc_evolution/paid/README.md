@@ -1,4 +1,4 @@
-﻿# Paid Surface
+# Paid Surface
 
 `gcc_evolution/paid/` is the canonical paid boundary.
 

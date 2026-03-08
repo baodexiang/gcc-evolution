@@ -1,4 +1,4 @@
-﻿"""
+"""
 gcc-evo CLI â€” Command-line interface for the self-evolution engine.
 
 Usage:

@@ -1,4 +1,4 @@
-﻿# Legacy Compatibility
+# Legacy Compatibility
 
 This directory documents compatibility-only packages that still exist at the package root:
 

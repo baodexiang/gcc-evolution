@@ -1,4 +1,4 @@
-﻿# gcc_evolution Package Boundary
+# gcc_evolution Package Boundary
 
 This package uses one canonical release-facing split:
 

@@ -1,4 +1,4 @@
-﻿# Free Surface
+# Free Surface
 
 `gcc_evolution/free/` is the canonical free/community boundary.
 

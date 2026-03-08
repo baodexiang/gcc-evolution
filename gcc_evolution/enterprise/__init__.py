@@ -1,4 +1,4 @@
-﻿"""
+"""
 Enterprise Features - Requires License
 License: BUSL 1.1 (Enterprise license required)
 Commercial: gcc-evo.dev/licensing

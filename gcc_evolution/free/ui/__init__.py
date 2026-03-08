@@ -1,4 +1,4 @@
-﻿"""Free UI layer (Setup Dashboard)."""
+"""Free UI layer (Setup Dashboard)."""
 from pathlib import Path
 
 from ...dashboard_server import DashboardServer

@@ -1,4 +1,4 @@
-﻿"""Paid L5 layer: canonical closed-loop orchestration core."""
+"""Paid L5 layer: canonical closed-loop orchestration core."""
 
 from importlib import import_module
 

@@ -1,1 +1,1 @@
-﻿"""Compatibility-only namespace for legacy package documentation."""
+"""Compatibility-only namespace for legacy package documentation."""

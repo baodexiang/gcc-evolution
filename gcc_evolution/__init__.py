@@ -1,4 +1,4 @@
-﻿"""
+"""
 gcc-evo - AI Self-Evolution Engine v5.340
 
 Open-source framework for LLM agent persistent memory + continuous learning.
@@ -97,3 +97,42 @@ def __getattr__(name):
         module = import_module(module_name)
         return getattr(module, attr_name)
     raise AttributeError(name)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# IRS-001~008: GCC Theoretical Framework v2.0 open-source interfaces
+# GCC-0241 (Apache 2.0)
+# ═══════════════════════════════════════════════════════════════════
+from .mem_action import (
+    MemAction, MemActionStatus, MemActionRequest, MemActionResult,
+    MemoryPolicy, MemActionLog, PollutionGuard,
+)
+from .retrieval_policy import (
+    RetrievalStrategy, RetrievalTrigger, RetrievalRequest, RetrievalDecision,
+    CounterfactualEstimate, RetrievalGate, SimpleThresholdGate, RetrievalStats,
+)
+from .direction_anchor import (
+    DACode, DAContext, DACheckResult, DAViolation, DABlockedError,
+    DirectionAnchorValidator,
+)
+from .da_audit import (
+    DAViolationRecord, DAViolationLog, DANotifyHook, DATransitionGuard, TransitionResult,
+)
+from .holdout import (
+    HoldoutSplitter, SkepticGate, SkepticAccessError, OverfitDetector,
+    OverfitCheckResult, WalkForwardWindow, SkepticVerdict, SkepticMonitor,
+)
+from .fault_tolerance import (
+    PhaseStatus, PhaseResult, HeartbeatRecord, RetryPolicy,
+    FaultIsolator, PhaseGuard, HeartbeatMonitor,
+)
+from .shapley import (
+    ShapleyValue, MonteCarloShapley, ShapleySnapshot, ShapleyLog,
+)
+from .divergence_monitor import (
+    VoteRecord, PerturbationRecord, FleissKappaCalculator,
+    DivergenceMonitor, PerturbationLog,
+)
+from .reasoning_trace import (
+    TraceRecord, ReasoningTraceLog, TraceQuery, REASONING_TRACE_DDL,
+)
