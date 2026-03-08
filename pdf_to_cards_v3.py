@@ -369,8 +369,9 @@ def build_extraction_prompt(chapter: Chapter, book_name: str, book_type: str) ->
     cfg = BOOK_CONFIGS[book_type]
     modules_str = ", ".join(cfg["modules"])
 
-    # 截取章节文本（避免超token）
-    text_sample = chapter.text[:4000] if len(chapter.text) > 4000 else chapter.text
+    # 截取章节文本（避免超token）— 12000字符 ≈ 4000 token 中文
+    max_text = 12000
+    text_sample = chapter.text[:max_text] if len(chapter.text) > max_text else chapter.text
 
     return f"""从以下交易书籍章节中提取知识卡，严格按JSON格式输出。
 
@@ -701,37 +702,54 @@ def process_book(txt_path: str, book_name: str = None, output_base: str = None,
         print(f"\n  [{ch.chapter_id}] {ch.title[:45]}...")
         prompt = build_extraction_prompt(ch, book_name, book_type)
 
-        try:
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[
-                    {"role": "system", "content": cfg["system_prompt"]},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=3000,
-                temperature=0.2
-            )
-            result = response.choices[0].message.content.strip()
-            cards = parse_cards_from_response(result, ch, book_name, book_type)
+        cards = None
+        for attempt in range(2):  # max 2 attempts
+            tok = 8000 if attempt == 0 else 12000
+            try:
+                response = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[
+                        {"role": "system", "content": cfg["system_prompt"]},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=tok,
+                    temperature=0.2
+                )
+                result = response.choices[0].message.content.strip()
+                cards = parse_cards_from_response(result, ch, book_name, book_type)
 
-            if cards:
-                print(f"  ✅ {len(cards)} 张卡片")
-                all_cards.extend(cards)
-                # 写入文件
-                for card in cards:
-                    safe_title = re.sub(r'[^\w\s-]', '', card.title)[:40]
-                    md_path = cards_dir / f"{card.id}.md"
-                    json_path = cards_dir / f"{card.id}.json"
-                    md_path.write_text(card_to_markdown(card), encoding='utf-8')
-                    json_path.write_text(
-                        json.dumps(card.to_dict(), ensure_ascii=False, indent=2),
-                        encoding='utf-8'
-                    )
-            else:
-                print(f"  ⏭️  跳过（无实质内容）")
+                if cards:
+                    break  # success
+                elif attempt == 0 and len(result) > 500:
+                    # API returned content but parse failed (likely JSON truncation)
+                    print(f"    ↻  重试 (max_tokens {tok}→{12000})...")
+                    time.sleep(1)
+                    continue
+                else:
+                    break  # truly empty or second attempt
 
-        except Exception as e:
-            print(f"  ❌ API错误: {e}")
+            except Exception as e:
+                print(f"  ❌ API错误: {e}")
+                if attempt == 0:
+                    print(f"    ↻  重试...")
+                    time.sleep(2)
+                    continue
+                break
+
+        if cards:
+            print(f"  ✅ {len(cards)} 张卡片")
+            all_cards.extend(cards)
+            for card in cards:
+                safe_title = re.sub(r'[^\w\s-]', '', card.title)[:40]
+                md_path = cards_dir / f"{card.id}.md"
+                json_path = cards_dir / f"{card.id}.json"
+                md_path.write_text(card_to_markdown(card), encoding='utf-8')
+                json_path.write_text(
+                    json.dumps(card.to_dict(), ensure_ascii=False, indent=2),
+                    encoding='utf-8'
+                )
+        else:
+            print(f"  ⏭️  跳过（无实质内容）")
 
         time.sleep(0.8)  # 避免限流
 
