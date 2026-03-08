@@ -642,11 +642,13 @@ def process_book(txt_path: str, book_name: str = None, output_base: str = None,
     cards_dir = output_dir / '最终知识卡'
     charts_dir = output_dir / '引用图片'
 
-    # 清理旧产物
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    cards_dir.mkdir(parents=True)
-    charts_dir.mkdir(parents=True)
+    # 清理旧产物（只删子目录，保留 page_*.md 输入文件）
+    if cards_dir.exists():
+        shutil.rmtree(cards_dir, ignore_errors=True)
+    if charts_dir.exists():
+        shutil.rmtree(charts_dir, ignore_errors=True)
+    cards_dir.mkdir(parents=True, exist_ok=True)
+    charts_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*60}")
     print(f'📚 {book_name}')

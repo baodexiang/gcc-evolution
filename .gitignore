@@ -83,5 +83,5 @@ ENV/
 .GCC/
 _audit_tmp_proj/
 load_db.py
-ocr.py
+# ocr.py  # now tracked — FireRed-OCR Qwen3-VL backend
 ocr_pdf.sh

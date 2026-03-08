@@ -21,7 +21,7 @@ from pathlib import Path
 from types import ModuleType
 
 
-DEFAULT_DPI = 300
+DEFAULT_DPI = 150  # 150 DPI for 8GB VRAM GPUs; use 300 for 16GB+
 DEFAULT_TIMEOUT = 120
 DEFAULT_MIN_TEXT_CHARS = 100
 
