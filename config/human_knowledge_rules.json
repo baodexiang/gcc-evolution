@@ -22,7 +22,7 @@
         "verify_window_bars": 2
       },
       "metrics": {
-        "total_triggers": 198,
+        "total_triggers": 199,
         "correct_predictions": 0,
         "false_positives": 0,
         "false_negatives": 0,
@@ -127,7 +127,7 @@
         "stage3_volume_ratio": 1.3
       },
       "metrics": {
-        "total_triggers": 152,
+        "total_triggers": 155,
         "correct_predictions": 0,
         "false_positives": 0,
         "false_negatives": 0,
@@ -163,7 +163,7 @@
         "calculation_bars": 12
       },
       "metrics": {
-        "total_triggers": 120,
+        "total_triggers": 122,
         "correct_predictions": 0,
         "false_positives": 0,
         "false_negatives": 0,
