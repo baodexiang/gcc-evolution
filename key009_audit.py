@@ -3049,6 +3049,31 @@ def main():
             # 注入到multi中供dashboard读取
             multi["1w"]["extracted_rules"] = rules
 
+        # ── 注入 human_guidance (来自 .GCC/human_anchors.json) ──
+        _ha_path = ROOT / ".GCC" / "human_anchors.json"
+        if _ha_path.exists():
+            try:
+                _ha_raw = json.loads(_ha_path.read_text(encoding="utf-8"))
+                _raw_list = _ha_raw if isinstance(_ha_raw, list) else _ha_raw.get("anchors", [])
+                _raw_list = sorted(_raw_list, key=lambda x: x.get("created_at", ""), reverse=True)[:8]
+                _dir_map = {"LONG": "bullish", "SHORT": "bearish", "NEUTRAL": "neutral",
+                            "BULLISH": "bullish", "BEARISH": "bearish"}
+                anchors = [{
+                    "anchor_id":    a.get("anchor_id", ""),
+                    "symbol":       a.get("key", "") or "全局",
+                    "direction":    _dir_map.get((a.get("direction", "NEUTRAL") or "NEUTRAL").upper(), "neutral"),
+                    "concern":      a.get("main_concern", a.get("concern", "")),
+                    "expires_after": a.get("expires_after", ""),
+                    "created_at":   (a.get("created_at", "") or "")[:10],
+                } for a in _raw_list]
+                multi["human_guidance"] = {
+                    "loop_running": False,
+                    "loop_last": "",
+                    "anchors": anchors,
+                }
+            except Exception:
+                pass
+
         EXPORT_FILE.write_text(json.dumps(multi, ensure_ascii=False), encoding="utf-8")
 
         # ── 生成嵌入数据的 dashboard HTML (可直接 file:// 打开) ──

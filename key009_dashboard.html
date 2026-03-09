@@ -63,6 +63,28 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 .tab.active{background:#f6f8fa;color:#0969da;border-color:#0969da;border-bottom:1px solid #f6f8fa;font-weight:600}
 .tab-content{display:none}
 .tab-content.active{display:block}
+/* Human Guidance */
+.hg-loop-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;margin-bottom:12px;font-size:0.82em}
+.hg-loop-dot{width:9px;height:9px;border-radius:50%;background:#cf222e;flex-shrink:0}
+.hg-loop-dot.running{background:#1a7f37;animation:hg-pulse 1.5s infinite}
+@keyframes hg-pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+.hg-loop-label{font-weight:600;color:#1f2328}
+.hg-loop-sub{color:#656d76;margin-left:auto}
+.hg-anchors{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-top:8px}
+.hg-anchor{background:#fff;border:1px solid #d0d7de;border-radius:6px;padding:8px 10px;border-left:3px solid #d0d7de;position:relative}
+.hg-anchor.bullish{border-left-color:#1a7f37}
+.hg-anchor.bearish{border-left-color:#cf222e}
+.hg-anchor.neutral{border-left-color:#9a6700}
+.hg-anchor-header{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.hg-anchor-sym{font-size:0.82em;font-weight:700;color:#1f2328}
+.hg-anchor-dir{font-size:0.75em;font-weight:700}
+.hg-anchor-dir.bullish{color:#1a7f37}
+.hg-anchor-dir.bearish{color:#cf222e}
+.hg-anchor-dir.neutral{color:#9a6700}
+.hg-anchor-concern{font-size:0.78em;color:#656d76;margin-top:4px;line-height:1.4}
+.hg-anchor-meta{font-size:0.7em;color:#afb8c1;margin-top:3px}
+.hg-del{background:none;border:none;cursor:pointer;font-size:12px;color:#afb8c1;padding:0 2px;position:absolute;top:6px;right:6px;line-height:1}
+.hg-del:hover{color:#cf222e}
 </style>
 </head>
 <body>
@@ -238,6 +260,18 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 
 <!-- Tab: 问题&风险 -->
 <div class="tab-content" id="tab-issues">
+
+<!-- Human Guidance -->
+<div class="section" id="hg-section">
+<h3>👤 人类指导中心</h3>
+<div class="hg-loop-bar">
+  <div class="hg-loop-dot" id="hg-loop-dot"></div>
+  <span class="hg-loop-label" id="hg-loop-label">GCC-EVO 循环: 检测中</span>
+  <span class="hg-loop-sub" id="hg-loop-sub"></span>
+</div>
+<div class="hg-anchors" id="hg-anchor-list"></div>
+</div>
+
 <div class="section" id="issues-box">
 <h3>问题 & 风险 & 改善建议</h3>
 <div id="issues-timerange" style="color:#666;font-size:0.9em;margin-bottom:8px"></div>
@@ -390,6 +424,52 @@ function topSymbols(obj, n) {
 }
 
 function $(id) { return document.getElementById(id) || {innerHTML:'',textContent:'',style:{},closest:()=>({insertAdjacentHTML:()=>{}}),classList:{add:()=>{},remove:()=>{}}}; }
+
+// ── Human Guidance ──
+const _HG_DEL_KEY = 'key009_deleted_anchors';
+function _hgDeleted() { try { return new Set(JSON.parse(localStorage.getItem(_HG_DEL_KEY)||'[]')); } catch(e) { return new Set(); } }
+function deleteHgAnchor(id) {
+  const s = _hgDeleted(); s.add(id);
+  localStorage.setItem(_HG_DEL_KEY, JSON.stringify([...s]));
+  renderHumanGuidance();
+  // Call server if available
+  if (location.protocol !== 'file:') {
+    fetch('/api/delete_anchor', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({anchor_id:id}) }).catch(()=>{});
+  }
+}
+function renderHumanGuidance() {
+  // human_guidance is a top-level key in MULTI_DATA (shared across ranges)
+  const hg = (MULTI_DATA && MULTI_DATA.human_guidance) || {};
+  const deleted = _hgDeleted();
+  // Loop status
+  const running = !!hg.loop_running;
+  const dotEl = $('hg-loop-dot'), labelEl = $('hg-loop-label'), subEl = $('hg-loop-sub');
+  if (dotEl.className !== undefined) {
+    dotEl.className = 'hg-loop-dot' + (running ? ' running' : '');
+    labelEl.textContent = running ? 'GCC-EVO 循环: 运行中' : 'GCC-EVO 循环: 未启动';
+    subEl.textContent = hg.loop_last ? ('最后活跃: ' + hg.loop_last) : '';
+  }
+  const anchors = (hg.anchors || []).filter(a => !deleted.has(a.anchor_id || (a.symbol + a.created_at)));
+  const listEl = $('hg-anchor-list');
+  if (!anchors.length) {
+    listEl.innerHTML = '<div style="color:#656d76;font-size:0.82em;padding:8px 0">无活跃锚点</div>';
+    return;
+  }
+  const _dmap = { bullish:'↑多', bearish:'↓空', neutral:'—中性' };
+  listEl.innerHTML = anchors.map(a => {
+    const aid = a.anchor_id || (a.symbol + a.created_at);
+    const dc = (a.direction||'neutral').toLowerCase();
+    return `<div class="hg-anchor ${dc}">
+      <button class="hg-del" onclick="deleteHgAnchor('${aid}')" title="删除">×</button>
+      <div class="hg-anchor-header">
+        <span class="hg-anchor-sym">${a.symbol||'全局'}</span>
+        <span class="hg-anchor-dir ${dc}">${_dmap[dc]||dc}</span>
+      </div>
+      <div class="hg-anchor-concern">${(a.concern||'').slice(0,70)}${(a.concern||'').length>70?'…':''}</div>
+      <div class="hg-anchor-meta">${a.expires_after||''} · ${a.created_at||''}</div>
+    </div>`;
+  }).join('');
+}
 
 function render() {
     if (!DATA) return;
@@ -909,6 +989,9 @@ function _doRender() {
             <td><span class="badge ${cls}">${t.status}</span></td>
         </tr>`;
     }
+
+    // ── 人类指导 ──
+    renderHumanGuidance();
 
     // ── 问题&风险 Tab ──
     const issTimerange = $('issues-timerange');
