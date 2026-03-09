@@ -1,5 +1,5 @@
 """
-GCC v5.300 — Agentic Retrieval Interface (IRS-004)
+GCC v5.340 — Agentic Retrieval Interface (IRS-004)
 
 Apache 2.0 — open-source interface layer.
 The retrieval decision strategy (counterfactual IC scoring, adaptive thresholds)
@@ -415,3 +415,172 @@ class RetrievalStats:
             "skip_rate":      round(self.skip_rate, 4),
             "retrieval_rate": round(1 - self.skip_rate, 4),
         }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CounterfactualEvaluator — IRS-004 S6 (反事实IC评估作为决策奖励)
+# ═══════════════════════════════════════════════════════════════════
+
+@dataclass
+class RetrievalOutcome:
+    """
+    Records the IC outcome of one retrieval decision.
+
+    decision:     the gate's RetrievalDecision
+    ic_observed:  IC measured after using this retrieval result
+    ic_baseline:  IC measured when retrieval was skipped (EMA baseline)
+    symbol:       trading symbol for this outcome
+    window_id:    walk-forward window identifier
+    recorded_at:  ISO timestamp
+    """
+    decision:    RetrievalDecision
+    ic_observed: float
+    ic_baseline: float
+    symbol:      str = ""
+    window_id:   str = ""
+    recorded_at: str = field(default_factory=_now)
+
+    @property
+    def ic_delta(self) -> float:
+        """IC improvement from retrieval vs. baseline (reward signal)."""
+        return self.ic_observed - self.ic_baseline
+
+    def to_estimate(self) -> CounterfactualEstimate:
+        return CounterfactualEstimate(
+            ic_with=self.ic_observed,
+            ic_without=self.ic_baseline,
+            confidence=min(1.0, max(0.0, 0.5 + abs(self.ic_delta) * 5)),
+        )
+
+
+class CounterfactualEvaluator:
+    """
+    Estimates the IC value of retrieval decisions using counterfactual comparison.
+
+    IRS-004 S6: 反事实IC评估作为决策奖励
+    Theory (arXiv:2601.12538): counterfactual rewards prevent the gate
+    from exploiting spurious correlations in the retrieved context.
+
+    Design:
+        baseline_ic = exponential moving average of IC when retrieval was SKIPPED
+        reward_t    = ic_with_retrieval_t − baseline_ic   (counterfactual delta)
+
+        Positive reward → retrieval helped → gate should prefer FORCE/CONDITION
+        Negative reward → retrieval hurt   → gate should prefer SKIP
+
+    The private engine feeds these rewards into the KNN gate policy update.
+    This open-source class provides the estimation interface and aggregation.
+
+    Open-source (Apache 2.0).  Private engine uses this to drive gate learning.
+
+    Args:
+        baseline_alpha: EMA decay for baseline IC (default 0.1, slow-moving)
+        min_samples:    minimum outcomes before estimates are reliable (default 10)
+    """
+
+    def __init__(self, baseline_alpha: float = 0.1, min_samples: int = 10):
+        if not 0 < baseline_alpha < 1:
+            raise ValueError(f"baseline_alpha must be in (0, 1), got {baseline_alpha}")
+        self.baseline_alpha = baseline_alpha
+        self.min_samples    = min_samples
+        self._baseline_ic:  float | None        = None
+        self._outcomes:     list[RetrievalOutcome] = []
+
+    def update_baseline(self, ic: float) -> None:
+        """
+        Update the skip-IC baseline with a new observation.
+
+        Call this after every SKIP decision with the resulting IC.
+        The EMA slowly tracks the "no-retrieval" performance floor.
+        """
+        if self._baseline_ic is None:
+            self._baseline_ic = ic
+        else:
+            self._baseline_ic = (
+                self.baseline_alpha * ic
+                + (1 - self.baseline_alpha) * self._baseline_ic
+            )
+        logger.debug("[CF_EVAL] baseline_ic updated → %.4f", self._baseline_ic)
+
+    def record_outcome(
+        self,
+        decision: RetrievalDecision,
+        ic_observed: float,
+        symbol: str = "",
+        window_id: str = "",
+    ) -> RetrievalOutcome:
+        """
+        Record the IC outcome of a retrieval decision.
+
+        Args:
+            decision:    the RetrievalDecision that was made
+            ic_observed: IC measured in the walk-forward window after this decision
+            symbol:      trading symbol
+            window_id:   walk-forward window identifier
+
+        Returns:
+            RetrievalOutcome with ic_delta computed against current baseline
+        """
+        baseline = self._baseline_ic if self._baseline_ic is not None else 0.0
+
+        # If this was a SKIP, update baseline with observed IC
+        if decision.strategy == RetrievalStrategy.SKIP:
+            self.update_baseline(ic_observed)
+
+        outcome = RetrievalOutcome(
+            decision=decision,
+            ic_observed=ic_observed,
+            ic_baseline=baseline,
+            symbol=symbol,
+            window_id=window_id,
+        )
+        self._outcomes.append(outcome)
+        logger.debug(
+            "[CF_EVAL] strategy=%s ic_obs=%.4f baseline=%.4f delta=%.4f",
+            decision.strategy.value, ic_observed, baseline, outcome.ic_delta,
+        )
+        return outcome
+
+    def reward_for_strategy(self, strategy: RetrievalStrategy) -> float | None:
+        """
+        Mean counterfactual IC delta for a given strategy.
+
+        Returns None if fewer than min_samples outcomes are available.
+        Used by the private KNN gate to update strategy preference weights.
+        """
+        relevant = [o for o in self._outcomes if o.decision.strategy == strategy]
+        if len(relevant) < self.min_samples:
+            return None
+        return sum(o.ic_delta for o in relevant) / len(relevant)
+
+    def is_retrieval_beneficial(self, strategy: RetrievalStrategy = RetrievalStrategy.FORCE) -> bool | None:
+        """
+        Returns True if the given strategy has positive mean IC delta.
+        Returns None when insufficient data.
+        """
+        reward = self.reward_for_strategy(strategy)
+        if reward is None:
+            return None
+        return reward > 0
+
+    def summary(self) -> dict:
+        """
+        Aggregate counterfactual IC statistics per strategy.
+
+        Returns per-strategy mean IC delta and whether retrieval is beneficial.
+        IRS-004 acceptance: conditional retrieval trigger accuracy > 75%.
+        """
+        result: dict = {
+            "total_outcomes": len(self._outcomes),
+            "baseline_ic":    round(self._baseline_ic, 6) if self._baseline_ic is not None else None,
+            "strategies":     {},
+        }
+        for strategy in RetrievalStrategy:
+            reward = self.reward_for_strategy(strategy)
+            count  = sum(1 for o in self._outcomes if o.decision.strategy == strategy)
+            result["strategies"][strategy.value] = {
+                "count":       count,
+                "mean_delta":  round(reward, 6) if reward is not None else None,
+                "beneficial":  self.is_retrieval_beneficial(strategy),
+            }
+        return result

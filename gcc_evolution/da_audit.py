@@ -1,5 +1,5 @@
 """
-GCC v5.300 — DA Transition Guard & Violation Audit Trail (IRS-002 S13~S16)
+GCC v5.340 — DA Transition Guard & Violation Audit Trail (IRS-002 S13~S16)
 
 Apache 2.0 — open-source interface layer.
 DuckDB write logic and Dashboard rendering are private (BUSL 1.1).

@@ -35,9 +35,8 @@ _builtins.print = _safe_print
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "your_key_here")
-MAX_CARDS_PER_CHAPTER = 5  # default; see get_max_cards()
-MAX_CARDS_BROOKS = 8
-TARGET_TOTAL_CARDS = (30, 600)  # IMP-002: raised upper bound for multi-book runs
+MAX_CARDS_PER_CHAPTER = 5
+TARGET_TOTAL_CARDS = (30, 80)
 EVIDENCE_RATE_TARGET = 0.80
 RULE_RATE_TARGET = 0.40
 MODULE_RATE_TARGET = 0.70
@@ -66,28 +65,6 @@ BOOK_CONFIGS = {
 - PatternRecognition: K线形态、价格模式
 - RiskManager: 风险控制、仓位管理
 - MarketStructure: 市场结构、支撑阻力"""
-    },
-    # IMP-002: Brooks-specific config with terminology presets
-    "brooks_price_action": {
-        "keywords": ["al brooks", "trading price action", "bar by bar",
-                    "trends", "ranges", "reversals", "always-in", "barbwire"],
-        "modules": ["TrendDetection", "SignalFilter", "EntryEngine", "ExitEngine",
-                    "PatternRecognition", "RiskManager", "MarketStructure"],
-        "domain": "Al Brooks价格行为交易系统(Brooks Price Action)",
-        "system_prompt": """你是Al Brooks价格行为交易系统的专家分析师。
-从书籍文本中提取精确、可操作的交易知识卡。
-
-Brooks核心术语（每个必须生成独立卡片）：
-趋势类: Always-In, Spike, Channel, Climax, Measured Move, Micro Channel, Broad Channel
-形态类: Barbwire, ii, iii, Wedge, Triangle, Flag, Final Flag, Double Bottom/Top, Head and Shoulders
-信号类: Signal Bar, Entry Bar, Reversal Bar, Outside Bar, Inside Bar, Gap Bar, Doji
-概念类: Two-Legged Pullback, Tight Trading Range, Breakout, Failed Breakout, Breakout Pullback
-
-提取规则：
-1. 每个核心术语应生成独立卡片
-2. 图表说明页生成EXAMPLE类型卡片
-3. 每章开头的概念定义必须生成至少1张卡片
-4. evidence必须标注真实页码，禁止P.0/P.xx占位符"""
     },
     "wyckoff": {
         "keywords": ["wyckoff", "威科夫", "composite man", "accumulation", "distribution"],
@@ -125,17 +102,11 @@ SKIP_PATTERNS = [
     r'^index$',
 ]
 
-def get_max_cards(book_type: str, chapter_text_len: int) -> int:
-    """IMP-002: dynamic max cards per chapter based on book type and content density"""
-    if book_type == 'brooks_price_action':
-        return 10 if chapter_text_len > 20000 else MAX_CARDS_BROOKS
-    return MAX_CARDS_PER_CHAPTER
 # ─── OCR page_*.md 目录输入支持 ───────────────────────────────────────────────────
 
 def load_from_md_dir(md_dir: Path) -> str:
     """Read page_*.md files from OCR output directory, merge into one text.
     Inserts page markers so chapter detection works correctly.
-    Returns merged text. Also prints page statistics (IMP-004).
     """
     md_dir = Path(md_dir)
     md_files = sorted(md_dir.glob('page_*.md'),
@@ -145,31 +116,19 @@ def load_from_md_dir(md_dir: Path) -> str:
         raise FileNotFoundError(f'No page_*.md files in {md_dir}')
 
     parts = []
-    # IMP-004: distinguish empty vs image-only pages
-    stats = {'total': len(md_files), 'empty': 0, 'image_only': 0, 'content': 0}
     for md_path in md_files:
         text = md_path.read_text(encoding='utf-8', errors='ignore').strip()
-        if not text or text in ('[EMPTY OCR RESULT]', '[EMPTY_PAGE]'):
-            stats['empty'] += 1
+        if not text or text == '[EMPTY OCR RESULT]' or text == '[EMPTY_PAGE]':
             continue
-        if text == '[IMAGE_ONLY_PAGE]' or (len(text) < 30 and not any(c.isalpha() for c in text)):
-            stats['image_only'] += 1
-            continue
-        stats['content'] += 1
-        # IMP-001: structured page marker (not stripped by clean_text)
+        # Insert page number marker for chapter detection context
         page_num = re.search(r'page_(\d+)', md_path.stem)
         page_label = int(page_num.group(1)) + 1 if page_num else 0
-        parts.append(f'\n<!-- PAGE:{page_label} -->\n{text}')
+        parts.append(f'\n{page_label}\n{text}')
 
     if not parts:
         raise ValueError(f'All page_*.md files in {md_dir} are empty')
 
-    # IMP-004: print page statistics
-    empty_pct = stats['empty'] / max(stats['total'], 1) * 100
-    img_pct = stats['image_only'] / max(stats['total'], 1) * 100
     print(f'   Loaded {len(parts)} pages from {md_dir}')
-    print(f'   \u2139\ufe0f  Page stats: {stats["total"]} total, {stats["content"]} content, '
-          f'{stats["empty"]} empty ({empty_pct:.0f}%), {stats["image_only"]} image-only ({img_pct:.0f}%)')
     return '\n'.join(parts)
 
 
@@ -230,29 +189,8 @@ class KnowledgeCard:
             r.get("if") and r.get("then") for r in self.rules
         ):
             failures.append("无有效IF/THEN规则")
-
-        # IMP-003: detect P.0/P.xx placeholder pages → auto-downgrade to draft
-        has_placeholder_page = False
-        for ac in self.atomic_claims:
-            ev = ac.get("evidence", "")
-            if re.match(r'^P\.(0|xx|XX)[:\s]', ev):
-                has_placeholder_page = True
-                break
-        if has_placeholder_page:
-            failures.append("evidence含P.0/P.xx占位页码")
-
         if failures:
             return "draft", failures
-
-        # IMP-003: reviewed tier — all evidence has real page numbers
-        all_have_real_pages = all(
-            re.match(r'^P\.\d+[^x]', ac.get("evidence", ""))
-            for ac in self.atomic_claims
-            if ac.get("evidence")
-        ) if self.atomic_claims else False
-        if all_have_real_pages and self.confidence >= 0.7:
-            return "reviewed", []
-
         return "extracted", []
 
 
@@ -290,23 +228,16 @@ def clean_text(raw: str) -> tuple[str, list]:
     page_markers = []  # [(clean_line_idx, page_num)]
 
     for i, line in enumerate(lines):
-        # IMP-001: detect structured page markers <!-- PAGE:N -->
-        page_match = re.match(r'^\s*<!--\s*PAGE:(\d+)\s*-->\s*$', line)
-        if page_match:
-            pnum = int(page_match.group(1))
-            page_markers.append((len(clean_lines), pnum))
-            clean_lines.append(line.strip())  # keep marker in text for chapter splitting
-            continue
         cleaned = clean_line(line)
         if cleaned is None:
             continue
-        # Legacy: detect standalone page numbers (ABBYY txt mode)
+        # 检测页码标记（纯数字行）
         if re.match(r'^\d{1,4}$', cleaned):
             try:
                 pnum = int(cleaned)
                 if 1 <= pnum <= 9999:
                     page_markers.append((len(clean_lines), pnum))
-                    continue  # strip standalone numbers
+                    continue  # 页码行不加入正文
             except:
                 pass
         clean_lines.append(cleaned)
@@ -401,14 +332,6 @@ def split_into_chapters(text: str, book_name: str) -> list[Chapter]:
                 line_end=len(lines) - 1
             ))
 
-    # IMP-001: extract page numbers from <!-- PAGE:N --> markers in each chapter
-    _page_re = re.compile(r'<!--\s*PAGE:(\d+)\s*-->')
-    for ch in chapters:
-        found_pages = sorted(set(int(m) for m in _page_re.findall(ch.text)))
-        ch.pages = found_pages
-        # strip markers from chapter text (LLM doesn't need HTML comments)
-        ch.text = _page_re.sub('', ch.text).strip()
-
     # 如果章节过少（<3），说明边界没识别到，降级为按大小切分
     if len(chapters) < 3:
         print("  ⚠️  章节边界识别不足，降级为大小切分...")
@@ -442,26 +365,18 @@ def _size_based_split(text: str, chunk_size: int = 8000) -> list[Chapter]:
     return chunks
 
 
-def build_extraction_prompt(chapter: Chapter, book_name: str, book_type: str,
-                             max_cards: int = 5) -> str:
+def build_extraction_prompt(chapter: Chapter, book_name: str, book_type: str) -> str:
     cfg = BOOK_CONFIGS[book_type]
     modules_str = ", ".join(cfg["modules"])
 
-    # IMP-002: dynamic text limit for dense books
-    max_text = 15000 if book_type in ('brooks_price_action',) else 12000
+    # 截取章节文本（避免超token）— 12000字符 ≈ 4000 token 中文
+    max_text = 12000
     text_sample = chapter.text[:max_text] if len(chapter.text) > max_text else chapter.text
-
-    # IMP-001: page range info
-    if chapter.pages:
-        page_range_str = f"页码范围：P.{min(chapter.pages)}-P.{max(chapter.pages)}"
-    else:
-        page_range_str = "页码范围：未知"
 
     return f"""从以下交易书籍章节中提取知识卡，严格按JSON格式输出。
 
 书名：{book_name}
 章节：{chapter.title} ({chapter.chapter_id})
-{page_range_str}
 领域：{cfg['domain']}
 可用系统模块：{modules_str}
 
@@ -470,10 +385,10 @@ def build_extraction_prompt(chapter: Chapter, book_name: str, book_type: str,
 ━━━━━━━━━━━━━━━
 
 要求：
-1. 提取 1-{max_cards} 张知识卡，只提取有实质交易内容的概念
+1. 提取 1-{MAX_CARDS_PER_CHAPTER} 张知识卡，只提取有实质交易内容的概念
 2. 如果本章节是目录/版权/致谢/索引等，返回：{{"cards": []}}
 3. summary必须 <=50字（中文）
-4. atomic_claims的evidence必须标注真实页码，格式：P.{{页码}}: 原文关键句（页码从上方"页码范围"获取，禁止使用P.0或P.xx）
+4. atomic_claims的evidence格式：从文本推断页码，引用原文关键句
 5. rules必须是可执行的IF/THEN交易规则
 6. 类型从以下选择：RULE|CONCEPT|PATTERN|STRATEGY|WARNING|PARAM
 7. confidence基于证据质量：0.6-0.9之间
@@ -494,7 +409,7 @@ def build_extraction_prompt(chapter: Chapter, book_name: str, book_type: str,
       "atomic_claims": [
         {{
           "claim": "具体断言",
-          "evidence": "P.69: 原文关键句（必须用真实页码，禁止P.0/P.xx）",
+          "evidence": "P.xx: 原文关键句",
           "context": "上下文说明",
           "invalidation": "何种情况下此断言无效"
         }}
@@ -569,7 +484,7 @@ def parse_cards_from_response(response_text: str, chapter: Chapter,
             source={
                 "book": book_name,
                 "chapter": re.sub(r'\t.*$', '', chapter.title).strip(),
-                "pages": chapter.pages if chapter.pages else []
+                "pages": chapter.pages if chapter.pages else [chapter.line_start, chapter.line_end]
             },
             system_mapping=raw.get("system_mapping", {"module": "", "implemented": False}),
             related_cards=[]
@@ -582,18 +497,6 @@ def parse_cards_from_response(response_text: str, chapter: Chapter,
             print(f"    ⚡ {card.title[:30]} → draft ({'; '.join(failures)})")
 
         cards.append(card)
-
-    # IMP-001: fixup P.0 / P.xx placeholder pages in evidence
-    for card in cards:
-        if not card.source.get('pages'):
-            continue
-        valid_pages = card.source['pages']
-        for ac in card.atomic_claims:
-            ev = ac.get('evidence', '')
-            if re.match(r'^P\.(0|xx|XX):', ev):
-                # Replace P.0/P.xx with first valid page from chapter
-                if valid_pages:
-                    ac['evidence'] = re.sub(r'^P\.(0|xx|XX):', f'P.{valid_pages[0]}:', ev)
 
     return cards
 
@@ -783,45 +686,9 @@ def process_book(txt_path: str, book_name: str = None, output_base: str = None,
     valid_chapters = [
         ch for ch in chapters
         if not any(s in ch.title.lower() for s in skip_titles)
-        # IMP-002: lower min chapter size for Brooks (200 vs 500 chars)
-        and len(ch.text) > (200 if book_type in ('brooks_price_action',) else 500)
+        and len(ch.text) > 500
     ]
     print(f"\n🎯 有效章节: {len(valid_chapters)} 个（跳过 {len(chapters)-len(valid_chapters)} 个）")
-
-    # IMP-002: sub-chunk long chapters for Brooks-type books
-    SUB_CHUNK_THRESHOLD = 15000
-    expanded_chapters = []
-    for ch in valid_chapters:
-        if len(ch.text) > SUB_CHUNK_THRESHOLD and book_type in ('brooks_price_action',):
-            # Split into ~10000 char sub-chunks at paragraph boundaries
-            parts = []
-            start = 0
-            sub_idx = 0
-            while start < len(ch.text):
-                end = min(start + 10000, len(ch.text))
-                if end < len(ch.text):
-                    # Find paragraph boundary
-                    nl = ch.text.rfind('\n\n', start, end)
-                    if nl > start + 5000:
-                        end = nl
-                sub_idx += 1
-                sub_chapter = Chapter(
-                    chapter_id=f"{ch.chapter_id}-{sub_idx}",
-                    title=f"{ch.title} (part {sub_idx})",
-                    pages=ch.pages,  # inherit parent pages
-                    text=ch.text[start:end],
-                    line_start=ch.line_start,
-                    line_end=ch.line_end
-                )
-                parts.append(sub_chapter)
-                start = end
-            print(f"   ✂️  {ch.chapter_id} ({len(ch.text):,}字符) → {len(parts)} sub-chunks")
-            expanded_chapters.extend(parts)
-        else:
-            expanded_chapters.append(ch)
-    if len(expanded_chapters) != len(valid_chapters):
-        print(f"   细分后章节数: {len(valid_chapters)} → {len(expanded_chapters)}")
-        valid_chapters = expanded_chapters
 
     # DeepSeek客户端
     client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
@@ -833,8 +700,7 @@ def process_book(txt_path: str, book_name: str = None, output_base: str = None,
 
     for ch in valid_chapters:
         print(f"\n  [{ch.chapter_id}] {ch.title[:45]}...")
-        max_cards = get_max_cards(book_type, len(ch.text))
-        prompt = build_extraction_prompt(ch, book_name, book_type, max_cards=max_cards)
+        prompt = build_extraction_prompt(ch, book_name, book_type)
 
         cards = None
         for attempt in range(2):  # max 2 attempts
@@ -933,61 +799,6 @@ def process_book(txt_path: str, book_name: str = None, output_base: str = None,
     print(f"   验收报告: {report_path}")
 
     return str(output_dir)
-
-
-# ─── IMP-005: Cross-book dedup utility ────────────────────────────────────────
-
-def find_duplicate_candidates(cards_dirs: list[str], threshold: float = 0.80) -> list[dict]:
-    """IMP-005: Find duplicate card candidates across multiple book outputs.
-    
-    Args:
-        cards_dirs: list of '最终知识卡' directory paths
-        threshold: title similarity threshold (0-1)
-    
-    Returns:
-        list of {card_a, card_b, similarity, titles} dicts
-    """
-    from difflib import SequenceMatcher
-    
-    all_cards_meta = []  # (title_normalized, card_path, book, original_title)
-    for d in cards_dirs:
-        dp = Path(d)
-        for jp in dp.glob('*.json'):
-            try:
-                data = json.loads(jp.read_text(encoding='utf-8'))
-                title = data.get('title', '')
-                book = data.get('source', {}).get('book', '')
-                # Normalize: lowercase, strip punctuation, collapse whitespace
-                norm = re.sub(r'[^\w\s]', '', title.lower()).strip()
-                norm = re.sub(r'\s+', ' ', norm)
-                all_cards_meta.append((norm, str(jp), book, title))
-            except:
-                continue
-    
-    candidates = []
-    seen = set()
-    for i, (na, pa, ba, ta) in enumerate(all_cards_meta):
-        for j, (nb, pb, bb, tb) in enumerate(all_cards_meta):
-            if j <= i or ba == bb:  # same book = not cross-book
-                continue
-            pair_key = tuple(sorted([pa, pb]))
-            if pair_key in seen:
-                continue
-            sim = SequenceMatcher(None, na, nb).ratio()
-            if sim >= threshold:
-                seen.add(pair_key)
-                candidates.append({
-                    'card_a': pa, 'card_b': pb,
-                    'title_a': ta, 'title_b': tb,
-                    'book_a': ba, 'book_b': bb,
-                    'similarity': round(sim, 3)
-                })
-    
-    candidates.sort(key=lambda x: -x['similarity'])
-    print(f"\n\U0001f50d IMP-005: Found {len(candidates)} cross-book duplicate candidates (threshold={threshold})")
-    for c in candidates[:20]:
-        print(f"   {c['similarity']:.0%} | {c['title_a'][:35]} <-> {c['title_b'][:35]}")
-    return candidates
 
 
 if __name__ == "__main__":
