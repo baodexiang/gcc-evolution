@@ -490,8 +490,9 @@ def check_n_structure_gate(
 
     # KEY-006: 非SIDE最低质量门槛 — 过滤底部低质量信号
     # v3.663: 0.65→0.55 — 分析显示quality=0.60(正常回调+ext_ok)被误杀74次
-    # quality=0.00(无结构1039次)和0.25(极深回调125次)仍被正确拦截
-    _min_quality = 0.55
+    # v3.678: 0.55→0.45 — dashboard显示门控拦截率过高(移动止盈65%,N字78%),quality=0.50被误杀
+    # quality=0.00(无结构)和0.25(极深回调)仍被正确拦截
+    _min_quality = 0.45
     if st != STATE_SIDE and n_state.quality < _min_quality:
         return False, f"质量不足({n_state.quality:.2f}<{_min_quality}),拦截{st}", False
 

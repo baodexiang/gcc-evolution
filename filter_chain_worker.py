@@ -268,13 +268,15 @@ def run_once():
                     weight = round(weight * 1.1, 3)
 
                 # Step 4: 计算 execution_size
+                # v1.3: SKIP阈值从0.5降至0.35 — 防止双降权(0.7*0.7=0.49)误杀
+                # VisionPattern 95触发0派发全因compound penalty低于0.5
                 if v_decision == "HOLD" or weight == 0.0:
                     execution_size = "SKIP"
                 elif weight >= 1.2:
                     execution_size = "FULL"
                 elif weight >= 0.8:
                     execution_size = "STANDARD"
-                elif weight >= 0.5:
+                elif weight >= 0.35:
                     execution_size = "REDUCED"
                 else:
                     execution_size = "SKIP"

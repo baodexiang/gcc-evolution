@@ -1,20 +1,21 @@
 {
-  "date": "2026-01-23",
+  "date": "2026-03-08",
   "bias": {
-    "BTCUSDC": "DOWN",
-    "ETHUSDC": "DOWN",
-    "SOLUSDC": "DOWN",
+    "BTCUSDC": "SIDE",
+    "ETHUSDC": "SIDE",
+    "SOLUSDC": "SIDE",
     "ZECUSDC": "SIDE",
     "TSLA": "SIDE",
-    "AMD": "UP",
-    "COIN": "DOWN",
-    "RKLB": "UP",
-    "RDDT": "DOWN",
-    "HIMS": "DOWN",
+    "AMD": "SIDE",
+    "COIN": "SIDE",
+    "RKLB": "SIDE",
+    "RDDT": "SIDE",
+    "HIMS": "SIDE",
     "CRWV": "SIDE",
-    "NBIS": "UP",
-    "ONDS": "UP",
-    "OPEN": "DOWN"
+    "NBIS": "SIDE",
+    "ONDS": "SIDE",
+    "OPEN": "SIDE",
+    "PLTR": "SIDE"
   },
-  "updated": "2026-01-23 18:30:14"
+  "updated": "2026-03-08 21:50:00"
 }

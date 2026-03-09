@@ -303,7 +303,7 @@ class ChanBSPlugin:
         symbol: str,
         ohlcv_bars: List[Dict],
         current_trend: str = "SIDE",
-        min_strength: float = 0.3,
+        min_strength: float = 0.15,  # v2.1: 0.3→0.15 dashboard显示9134扫描0触发,阈值过高
     ) -> ChanBSResult:
         result = ChanBSResult(freq=self.freq)
 
@@ -401,7 +401,7 @@ class ChanBSPlugin:
 
         return result
 
-    def should_activate_for_scan(self, result: ChanBSResult, min_strength: float = 0.3) -> bool:
+    def should_activate_for_scan(self, result: ChanBSResult, min_strength: float = 0.15) -> bool:  # v2.1: 0.3→0.15
         return result.signal in ("BUY", "SELL") and result.strength >= min_strength
 
     def get_action_for_scan(self, result: ChanBSResult) -> str:
