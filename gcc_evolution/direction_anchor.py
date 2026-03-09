@@ -1,5 +1,5 @@
 """
-GCC v5.300 — Direction Anchor Formal Verification (IRS-002)
+GCC v5.340 — Direction Anchor Formal Verification (IRS-002)
 
 Apache 2.0 — open-source interface layer.
 The private BUSL 1.1 engine builds on top of these definitions.

@@ -1,5 +1,5 @@
 """
-GCC v5.300 — L0 Fault Tolerance & Graceful Degradation (IRS-005)
+GCC v5.340 — L0 Fault Tolerance & Graceful Degradation (IRS-005)
 
 Apache 2.0 — open-source interface layer.
 The private engine registers concrete Phase implementations and wires

@@ -1,5 +1,5 @@
 """
-GCC v5.300 — Mem-as-Action Interface (IRS-001)
+GCC v5.340 — Mem-as-Action Interface (IRS-001)
 
 Apache 2.0 — open-source interface layer.
 The KNN-based memory evolution algorithm is private (BUSL 1.1).
@@ -377,4 +377,190 @@ class PollutionGuard:
             "contamination_rate": round(self.contamination_rate, 4),
             "threshold":          self.threshold,
             "is_safe":            self.is_safe(),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# WalkForwardICOptimizer — IRS-001 S8 (IC奖励函数+walk-forward记忆策略优化)
+# ═══════════════════════════════════════════════════════════════════
+
+@dataclass
+class MemActionRewardRecord:
+    """
+    One (action, context_hash, reward) tuple for walk-forward IC optimization.
+
+    action:       the MemAction that was taken
+    context_hash: hash of the context state at decision time (for KNN lookup)
+    reward:       Δ IC measured after this action (positive = helpful)
+    window_id:    walk-forward window where reward was measured
+    regime:       market regime at decision time (for regime-conditional policy)
+    recorded_at:  ISO timestamp
+    """
+    action:       MemAction
+    context_hash: str
+    reward:       float
+    window_id:    str  = ""
+    regime:       str  = ""
+    recorded_at:  str  = field(default_factory=_now)
+
+
+class WalkForwardICOptimizer:
+    """
+    IC reward function and walk-forward optimization interface for Mem-as-Action.
+
+    IRS-001 S8: IC奖励函数 + walk-forward记忆策略优化
+    Theory (arXiv:2601.12538 — Mem-as-Action):
+        Memory management rules (write/forget windows) must adapt to regime shifts.
+        The KNN engine learns the optimal policy by optimizing walk-forward IC,
+        not just signal weights.
+
+    Reward definition:
+        r_t = IC_{t+1} − IC_baseline
+        where IC_baseline = EMA of IC without the memory action
+        Positive r_t → action improved subsequent signal quality
+        Negative r_t → action degraded quality (should be avoided)
+
+    Walk-forward protocol:
+        Each window: train policy on IC history → evaluate on validation split
+        The private engine uses KNN to select action based on similar past contexts.
+        This open-source class provides:
+            - Reward accumulation per action type
+            - Per-regime action preference scores
+            - Optimal action selection (argmax mean reward)
+
+    Open-source (Apache 2.0).  The private KNN policy uses these scores
+    to initialize its weights and as a fallback when KNN confidence is low.
+
+    Args:
+        baseline_alpha: EMA decay for IC baseline (default 0.15)
+        min_samples:    minimum reward records before reliable recommendation (default 5)
+        window_size:    sliding window for reward tracking (default 300)
+    """
+
+    def __init__(
+        self,
+        baseline_alpha: float = 0.15,
+        min_samples:    int   = 5,
+        window_size:    int   = 300,
+    ):
+        if not 0 < baseline_alpha < 1:
+            raise ValueError(f"baseline_alpha must be in (0,1), got {baseline_alpha}")
+        self.baseline_alpha = baseline_alpha
+        self.min_samples    = min_samples
+        self.window_size    = window_size
+        self._baseline_ic:  float | None             = None
+        self._records:      list[MemActionRewardRecord] = []
+
+    def update_baseline(self, ic: float) -> None:
+        """Update the IC baseline EMA. Call after each signal evaluation."""
+        if self._baseline_ic is None:
+            self._baseline_ic = ic
+        else:
+            self._baseline_ic = (
+                self.baseline_alpha * ic
+                + (1 - self.baseline_alpha) * self._baseline_ic
+            )
+
+    def compute_reward(self, ic_after_action: float) -> float:
+        """
+        Compute reward for a memory action.
+
+        r = ic_after_action − baseline_ic
+        Call update_baseline() regularly so the baseline reflects
+        the "no-action" counterfactual.
+        """
+        baseline = self._baseline_ic if self._baseline_ic is not None else 0.0
+        return ic_after_action - baseline
+
+    def record(
+        self,
+        action:       MemAction,
+        reward:       float,
+        context_hash: str = "",
+        window_id:    str = "",
+        regime:       str = "",
+    ) -> MemActionRewardRecord:
+        """
+        Record a (action, reward) pair from a completed walk-forward window.
+
+        Args:
+            action:       the MemAction taken
+            reward:       Δ IC measured after this action (use compute_reward())
+            context_hash: optional hash of context for KNN lookup
+            window_id:    walk-forward window identifier
+            regime:       market regime (trending / ranging / crisis)
+        """
+        rec = MemActionRewardRecord(
+            action=action,
+            context_hash=context_hash,
+            reward=reward,
+            window_id=window_id,
+            regime=regime,
+        )
+        self._records.append(rec)
+        if len(self._records) > self.window_size:
+            self._records = self._records[-self.window_size:]
+        logger.debug(
+            "[WF_IC_OPT] action=%s reward=%.4f regime=%s",
+            action.value, reward, regime or "—",
+        )
+        return rec
+
+    def mean_reward(self, action: MemAction, regime: str = "") -> float | None:
+        """
+        Mean IC reward for a given action, optionally filtered by regime.
+
+        Returns None when fewer than min_samples records are available.
+        """
+        subset = [r for r in self._records if r.action == action]
+        if regime:
+            subset = [r for r in subset if r.regime == regime]
+        if len(subset) < self.min_samples:
+            return None
+        return sum(r.reward for r in subset) / len(subset)
+
+    def best_action(self, regime: str = "") -> MemAction | None:
+        """
+        Return the action with the highest mean IC reward.
+
+        Returns None when insufficient data for any action.
+        The private KNN engine uses this as a fallback when
+        KNN similarity is below confidence threshold.
+        """
+        scores: dict[MemAction, float] = {}
+        for action in MemAction:
+            r = self.mean_reward(action, regime=regime)
+            if r is not None:
+                scores[action] = r
+        if not scores:
+            return None
+        return max(scores, key=lambda a: scores[a])
+
+    def policy_table(self, regime: str = "") -> dict[str, float | None]:
+        """
+        Return the current policy table: action → mean_reward.
+
+        Useful for logging and Dashboard display.
+        """
+        return {
+            action.value: self.mean_reward(action, regime=regime)
+            for action in MemAction
+        }
+
+    def summary(self) -> dict:
+        """
+        Walk-forward IC optimization summary.
+
+        Returns per-action mean rewards (global + per-regime),
+        best action globally, and baseline IC.
+        """
+        regimes = list({r.regime for r in self._records if r.regime})
+        global_table = self.policy_table()
+        per_regime = {reg: self.policy_table(regime=reg) for reg in regimes}
+        return {
+            "total_records":  len(self._records),
+            "baseline_ic":    round(self._baseline_ic, 6) if self._baseline_ic is not None else None,
+            "global_policy":  global_table,
+            "best_action":    self.best_action().value if self.best_action() else None,
+            "per_regime":     per_regime,
         }

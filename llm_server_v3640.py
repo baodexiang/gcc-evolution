@@ -6766,6 +6766,22 @@ def determine_market_regime_v2951(
         "tech": tech_vote,
     }
 
+    # IRS-007 v5.340: 多智能体分歧监控 — 记录每次三方投票
+    try:
+        if _irs_divergence is not None:
+            from gcc_evolution.divergence_monitor import VoteRecord
+            _irs_divergence.record(VoteRecord(
+                ai_vote=ai_vote.get("vote", "RANGING"),
+                human_vote=human_vote.get("vote", "RANGING"),
+                technical_vote=tech_vote.get("vote", "RANGING"),
+                symbol=symbol or "",
+                market_regime=ai_vote.get("direction", "FLAT"),
+            ))
+            if _irs_divergence.is_homogenized:
+                log_to_server(f"[IRS-007] ⚠ 均质化警报 {symbol}: κ={_irs_divergence.kappa:.3f}")
+    except Exception:
+        pass
+
     # v3.150: 详细诊断日志 (同时输出到文件)
     from datetime import datetime
     diag_lines = []
@@ -47213,6 +47229,28 @@ def llm_decide():
             print(f"[v3.650] L1参考信号: {symbol} {final_action} @ {last_close:.4f} (不下单)")
             log_to_server(f"[v3.650] L1参考: {symbol} {final_action} price={last_close:.4f}")
 
+        # IRS-008 v5.340: 推理轨迹记录 — 每次决策后记录完整推理路径
+        try:
+            if _irs_trace_log is not None:
+                from gcc_evolution.reasoning_trace import TraceRecord
+                _irs_mr = market_regime.get("regime", "unknown") if 'market_regime' in locals() else "unknown"
+                _irs_plugins = []
+                if 'plugin_results' in locals() and isinstance(plugin_results, dict):
+                    for _pn, _ps in list(plugin_results.items())[:10]:
+                        _irs_plugins.append({"plugin": _pn, "signal": str(_ps.get("signal", "HOLD")), "confidence": float(_ps.get("confidence", 0.5))})
+                _irs_conf = float(decision.get("confidence", 0.5)) if 'decision' in locals() and isinstance(decision, dict) else 0.5
+                _irs_trace_log.append(TraceRecord(
+                    symbol=symbol,
+                    market_state=_irs_mr,
+                    signals_considered=_irs_plugins,
+                    skeptic_verdict="N/A",
+                    da_checks_passed=[],
+                    final_decision=final_action,
+                    confidence=_irs_conf,
+                ))
+        except Exception:
+            pass
+
         # v3.651: 交易记录+仓位更新移出else块，使plugin_bypass_l2路径可达
         if send_ok is True:  # v3.560 P2-1: 严格检查，排除COOLDOWN
             with _get_state_lock(symbol):
@@ -53829,3 +53867,15 @@ try:
 except Exception as _e_cb:
     log_to_server(f"[CARD-BRIDGE] 启动加载异常(非致命): {_e_cb}")
 
+
+# IRS v5.340 — DivergenceMonitor (IRS-007) + ReasoningTraceLog (IRS-008)
+_irs_divergence = None
+_irs_trace_log = None
+try:
+    from gcc_evolution.divergence_monitor import DivergenceMonitor
+    from gcc_evolution.reasoning_trace import ReasoningTraceLog
+    _irs_divergence = DivergenceMonitor(window_size=50, alert_threshold=0.3)
+    _irs_trace_log = ReasoningTraceLog(max_entries=2000)
+    log_to_server("[IRS] DivergenceMonitor + ReasoningTraceLog 已启动 (v5.340)")
+except Exception as _e_irs:
+    log_to_server(f"[IRS] 启动异常(非致命): {_e_irs}")
