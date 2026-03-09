@@ -254,10 +254,20 @@ SIGNALSTACK_WEBHOOK_URL = USStockConfig.WEBHOOK_URL
 
 # v3.280: 统一日志函数 - 同时print和写入server.log
 # v3.560 P1-11a: 使用RotatingFileHandler替代bare open()
+# v3.660+: 修复 OneDrive 路径下 stream.tell() OSError [Errno 22]
 _SERVER_LOG_PATH_EARLY = os.path.join(LOG_DIR, "server.log")
 import logging as _logging_server
 from logging.handlers import RotatingFileHandler as _RotatingFileHandler
-_server_log_handler = _RotatingFileHandler(
+
+class _SafeRotatingFileHandler(_RotatingFileHandler):
+    """RotatingFileHandler 子类：捕获 OneDrive/网络路径上 stream.tell() 的 OSError。"""
+    def shouldRollover(self, record):
+        try:
+            return super().shouldRollover(record)
+        except OSError:
+            return 0
+
+_server_log_handler = _SafeRotatingFileHandler(
     _SERVER_LOG_PATH_EARLY, maxBytes=50*1024*1024, backupCount=5, encoding='utf-8'
 )
 _server_log_handler.setFormatter(_logging_server.Formatter('%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
