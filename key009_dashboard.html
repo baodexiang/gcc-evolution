@@ -85,6 +85,15 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 .hg-anchor-meta{font-size:0.7em;color:#afb8c1;margin-top:3px}
 .hg-del{background:none;border:none;cursor:pointer;font-size:12px;color:#afb8c1;padding:0 2px;position:absolute;top:6px;right:6px;line-height:1}
 .hg-del:hover{color:#cf222e}
+/* 8-layer architecture strip */
+.layer-strip{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px}
+.layer-badge{display:flex;flex-direction:column;align-items:center;padding:5px 9px;border-radius:7px;min-width:52px;background:#fff;border:1px solid #d0d7de;cursor:default}
+.layer-badge.active{border-color:#0969da}
+.layer-badge.paid.active{border-color:#8250df;border-style:dashed}
+.layer-badge.inactive{opacity:0.35}
+.layer-id{font-size:11px;font-weight:700;color:#0969da}
+.layer-badge.paid.active .layer-id{color:#8250df}
+.layer-name{font-size:9px;color:#656d76;text-align:center;margin-top:2px;line-height:1.3}
 /* 5-step loop strip */
 .hg-steps{display:flex;align-items:center;gap:0;padding:5px 0 8px;font-size:0.78em;flex-wrap:wrap}
 .hg-step{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;color:#656d76}
@@ -269,6 +278,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <!-- Human Guidance -->
 <div class="section" id="hg-section">
 <h3>👤 人类指导中心</h3>
+<div class="layer-strip" id="hg-layer-strip"></div>
 <div class="hg-loop-bar">
   <div class="hg-loop-dot" id="hg-loop-dot"></div>
   <span class="hg-loop-label" id="hg-loop-label">GCC-EVO 循环: 检测中</span>
@@ -454,6 +464,20 @@ function deleteHgAnchor(id) {
     fetch('/api/delete_anchor', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({anchor_id:id}) }).catch(()=>{});
   }
 }
+function renderLayers() {
+  const el = $('hg-layer-strip'); if (!el) return;
+  const layers = (MULTI_DATA && MULTI_DATA.layers) || [];
+  if (!layers.length) { el.style.display='none'; return; }
+  el.style.display='flex';
+  el.innerHTML = layers.map(l => {
+    const cls = [l.active?'active':'inactive', l.tier==='paid'?'paid':''].filter(Boolean).join(' ');
+    return `<div class="layer-badge ${cls}" title="${l.tier==='paid'?'Paid':'Free'} · ${l.files||0} 文件">
+      <span class="layer-id">${l.id}</span>
+      <span class="layer-name">${l.name}</span>
+    </div>`;
+  }).join('');
+}
+
 function renderHumanGuidance() {
   // human_guidance is a top-level key in MULTI_DATA (shared across ranges)
   const hg = (MULTI_DATA && MULTI_DATA.human_guidance) || {};
@@ -1021,6 +1045,7 @@ function _doRender() {
     }
 
     // ── 人类指导 ──
+    renderLayers();
     renderHumanGuidance();
 
     // ── 问题&风险 Tab ──

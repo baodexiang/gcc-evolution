@@ -3075,6 +3075,24 @@ def main():
                 }
             except Exception:
                 pass
+        # ── 注入 8-layer 架构状态 ──
+        _gcc_evo_dir = ROOT / ".GCC" / "gcc_evolution"
+        _layer_spec = [
+            ('L0', 'Foundation\nGovernance', 'L0_setup',        'free'),
+            ('L1', 'Memory',                 'L1_memory',        'free'),
+            ('L2', 'Retrieval',              'L2_retrieval',     'free'),
+            ('L3', 'Distillation',           'L3_distillation',  'free'),
+            ('L4', 'Decision',               'L4_decision',      'paid'),
+            ('L5', 'Orchestration',          'L5_orchestration', 'paid'),
+            ('DA', 'Direction\nAnchor',      'direction_anchor', 'paid'),
+        ]
+        _layers = []
+        for _lid, _lname, _ldir, _ltier in _layer_spec:
+            _lpath = _gcc_evo_dir / _ldir
+            _py = [f for f in _lpath.glob('*.py') if f.name != '__init__.py'] if _lpath.exists() else []
+            _layers.append({'id': _lid, 'name': _lname, 'tier': _ltier, 'active': len(_py) > 0, 'files': len(_py)})
+        multi["layers"] = _layers
+
         # ── 注入 loop_state.json (覆盖 loop_running/loop_last/steps) ──
         _ls_path = ROOT / ".GCC" / "loop_state.json"
         if _ls_path.exists():

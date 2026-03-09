@@ -11,7 +11,7 @@ TEMPLATE = SCRIPT_DIR / ".GCC" / "gcc_dashboard.html"
 
 # ── Dashboard 格式锁 (2026-03-07 确认为最佳格式) ──────────────────────────
 # 修改模板前必须经用户明确同意，确认后更新此 hash
-TEMPLATE_HASH_LOCK = "f2a48bc20fa87bc67cd6fb7e974649fc087faf46efe9d19d65f35868cdf414d2"
+TEMPLATE_HASH_LOCK = "d8b0260ec4260a0c7cd4974d0c6f069e2f74ab308e49b6081be4f99a09b9ee34"
 
 if not TEMPLATE.exists():
     print(f"错误：找不到 {TEMPLATE}")
@@ -314,6 +314,24 @@ if _ls_path.exists():
         loaded.append(f"loop_state: round={_ls_patch['loop_round']}")
     except Exception:
         pass
+
+# 8-layer architecture status → DATA.layers
+_gcc_evo_dir = GCC_DIR / "gcc_evolution"
+_layer_spec = [
+    ('L0', 'Foundation Governance', 'L0_setup',        'free'),
+    ('L1', 'Memory',                'L1_memory',        'free'),
+    ('L2', 'Retrieval',             'L2_retrieval',     'free'),
+    ('L3', 'Distillation',          'L3_distillation',  'free'),
+    ('L4', 'Decision',              'L4_decision',      'paid'),
+    ('L5', 'Orchestration',         'L5_orchestration', 'paid'),
+    ('DA', 'Direction Anchor',      'direction_anchor', 'paid'),
+]
+_layers = []
+for _lid, _lname, _ldir, _ltier in _layer_spec:
+    _lpath = _gcc_evo_dir / _ldir
+    _py_files = [f for f in _lpath.glob('*.py') if f.name != '__init__.py'] if _lpath.exists() else []
+    _layers.append({'id': _lid, 'name': _lname, 'tier': _ltier, 'active': len(_py_files) > 0, 'files': len(_py_files)})
+inject_lines.append(f"DATA.layers = {json.dumps(_layers, ensure_ascii=False)};")
 
 # skillbank / suggestions
 for key, fname in [("skills","skillbank.jsonl"),("suggestions","suggestions.jsonl")]:
