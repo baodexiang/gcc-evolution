@@ -11,7 +11,7 @@ TEMPLATE = SCRIPT_DIR / ".GCC" / "gcc_dashboard.html"
 
 # ── Dashboard 格式锁 (2026-03-07 确认为最佳格式) ──────────────────────────
 # 修改模板前必须经用户明确同意，确认后更新此 hash
-TEMPLATE_HASH_LOCK = "08fa87122c4d5d32bc39604360455378e4eab77613a15de4629fa287f5db5e31"
+TEMPLATE_HASH_LOCK = "de1d1f43b73deaa75dea01ea55769ec12411c4da33726490548b1d699e79f095"
 
 if not TEMPLATE.exists():
     print(f"错误：找不到 {TEMPLATE}")
@@ -260,6 +260,24 @@ if all_tasks:
 
 if ho_sessions:
     inject_lines.append(f"DATA.sessions = {json.dumps(ho_sessions, ensure_ascii=False)};")
+
+# human_anchors.json → DATA.human_guidance
+_ha_path = GCC_DIR / "human_anchors.json"
+if _ha_path.exists():
+    try:
+        _ha_raw = json.loads(_ha_path.read_text(encoding="utf-8"))
+        # Build human_guidance object: anchors, loop status, prerequisites, approval_queue
+        _hg = {
+            "loop_running": _ha_raw.get("loop_running", False),
+            "loop_last":    _ha_raw.get("loop_last", ""),
+            "anchors":      _ha_raw.get("anchors", []),
+            "prerequisites": _ha_raw.get("prerequisites", []),
+            "approval_queue": _ha_raw.get("approval_queue", []),
+        }
+        inject_lines.append(f"DATA.human_guidance = {json.dumps(_hg, ensure_ascii=False)};")
+        loaded.append(f"human_anchors: {len(_hg['anchors'])} anchors")
+    except Exception:
+        pass
 
 # skillbank / suggestions
 for key, fname in [("skills","skillbank.jsonl"),("suggestions","suggestions.jsonl")]:
