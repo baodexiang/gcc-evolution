@@ -49766,14 +49766,16 @@ def key009_dashboard():
         _phase, _slot, _retries = "UNKNOWN", "", 0
     _sf_mode = _get_signal_filter_mode()
     _ds_health = _get_data_source_health_snapshot()
-    for d in multi_data.values():
-        d["review_status"] = {
-            "phase": _phase,
-            "slot": _slot,
-            "collect_retries": _retries,
-            "signal_filter": _sf_mode
-        }
-        d["data_source_health"] = _ds_health
+    for _rk in ("24h", "1w", "1m"):
+        d = multi_data.get(_rk)
+        if isinstance(d, dict):
+            d["review_status"] = {
+                "phase": _phase,
+                "slot": _slot,
+                "collect_retries": _retries,
+                "signal_filter": _sf_mode
+            }
+            d["data_source_health"] = _ds_health
 
     # 读取dashboard HTML模板并注入多范围数据
     try:
