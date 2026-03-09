@@ -11,7 +11,7 @@ TEMPLATE = SCRIPT_DIR / ".GCC" / "gcc_dashboard.html"
 
 # ── Dashboard 格式锁 (2026-03-07 确认为最佳格式) ──────────────────────────
 # 修改模板前必须经用户明确同意，确认后更新此 hash
-TEMPLATE_HASH_LOCK = "de1d1f43b73deaa75dea01ea55769ec12411c4da33726490548b1d699e79f095"
+TEMPLATE_HASH_LOCK = "67a81ebbf0281fb19d1bac16d801828ea529cb3de72233e9c1b9b0e3655d2c97"
 
 if not TEMPLATE.exists():
     print(f"错误：找不到 {TEMPLATE}")
@@ -262,20 +262,40 @@ if ho_sessions:
     inject_lines.append(f"DATA.sessions = {json.dumps(ho_sessions, ensure_ascii=False)};")
 
 # human_anchors.json → DATA.human_guidance
+# Format: flat array of anchor objects with fields: anchor_id, direction(NEUTRAL/LONG/SHORT),
+#   main_concern, key(symbol), created_at, expires_after, tracking_status
 _ha_path = GCC_DIR / "human_anchors.json"
 if _ha_path.exists():
     try:
         _ha_raw = json.loads(_ha_path.read_text(encoding="utf-8"))
-        # Build human_guidance object: anchors, loop status, prerequisites, approval_queue
+        # Normalize: flat array → list of display-ready anchor dicts
+        raw_list = _ha_raw if isinstance(_ha_raw, list) else _ha_raw.get("anchors", [])
+        # Sort by created_at desc, take last 8
+        raw_list = sorted(raw_list, key=lambda x: x.get("created_at",""), reverse=True)[:8]
+        # Map LONG→bullish, SHORT→bearish, NEUTRAL→neutral
+        _dir_map = {"LONG":"bullish","SHORT":"bearish","NEUTRAL":"neutral","BULLISH":"bullish","BEARISH":"bearish"}
+        anchors = []
+        for a in raw_list:
+            d = a.get("direction","NEUTRAL")
+            anchors.append({
+                "symbol":    a.get("key","") or "全局",
+                "direction": _dir_map.get(d.upper(), "neutral"),
+                "concern":   a.get("main_concern", a.get("concern","")),
+                "priority":  a.get("priority","normal"),
+                "expires_at": a.get("expires_at",""),
+                "expires_after": a.get("expires_after",""),
+                "created_at": (a.get("created_at","") or "")[:10],
+                "tracking_status": a.get("tracking_status",""),
+            })
         _hg = {
-            "loop_running": _ha_raw.get("loop_running", False),
-            "loop_last":    _ha_raw.get("loop_last", ""),
-            "anchors":      _ha_raw.get("anchors", []),
-            "prerequisites": _ha_raw.get("prerequisites", []),
-            "approval_queue": _ha_raw.get("approval_queue", []),
+            "loop_running":   _ha_raw.get("loop_running", False) if isinstance(_ha_raw, dict) else False,
+            "loop_last":      _ha_raw.get("loop_last", "")       if isinstance(_ha_raw, dict) else "",
+            "anchors":        anchors,
+            "prerequisites":  _ha_raw.get("prerequisites", [])   if isinstance(_ha_raw, dict) else [],
+            "approval_queue": _ha_raw.get("approval_queue", [])  if isinstance(_ha_raw, dict) else [],
         }
         inject_lines.append(f"DATA.human_guidance = {json.dumps(_hg, ensure_ascii=False)};")
-        loaded.append(f"human_anchors: {len(_hg['anchors'])} anchors")
+        loaded.append(f"human_anchors: {len(anchors)} anchors")
     except Exception:
         pass
 
