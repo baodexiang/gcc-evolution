@@ -260,12 +260,28 @@ import logging as _logging_server
 from logging.handlers import RotatingFileHandler as _RotatingFileHandler
 
 class _SafeRotatingFileHandler(_RotatingFileHandler):
-    """RotatingFileHandler 子类：捕获 OneDrive/网络路径上 stream.tell() 的 OSError。"""
+    """RotatingFileHandler 子类：捕获 OneDrive/网络路径上所有 OSError [Errno 22]。
+    - shouldRollover: stream.tell() 失败时跳过轮转
+    - flush: stream.flush() 失败时静默忽略
+    - emit: 整体捕获，确保写入失败不产生 '--- Logging error ---' 输出
+    """
     def shouldRollover(self, record):
         try:
             return super().shouldRollover(record)
         except OSError:
             return 0
+
+    def flush(self):
+        try:
+            super().flush()
+        except OSError:
+            pass
+
+    def emit(self, record):
+        try:
+            super().emit(record)
+        except OSError:
+            pass
 
 _server_log_handler = _SafeRotatingFileHandler(
     _SERVER_LOG_PATH_EARLY, maxBytes=50*1024*1024, backupCount=5, encoding='utf-8'
