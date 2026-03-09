@@ -3069,8 +3069,25 @@ def main():
                 multi["human_guidance"] = {
                     "loop_running": False,
                     "loop_last": "",
+                    "loop_round": 0,
+                    "loop_steps": {},
                     "anchors": anchors,
                 }
+            except Exception:
+                pass
+        # ── 注入 loop_state.json (覆盖 loop_running/loop_last/steps) ──
+        _ls_path = ROOT / ".GCC" / "loop_state.json"
+        if _ls_path.exists():
+            try:
+                _ls = json.loads(_ls_path.read_text(encoding="utf-8"))
+                if "human_guidance" not in multi:
+                    multi["human_guidance"] = {}
+                multi["human_guidance"].update({
+                    "loop_running": bool(_ls.get("running", False)),
+                    "loop_last": _ls.get("last_end", "") or _ls.get("last_start", ""),
+                    "loop_round": _ls.get("round", 0),
+                    "loop_steps": _ls.get("steps", {}),
+                })
             except Exception:
                 pass
 

@@ -11,7 +11,7 @@ TEMPLATE = SCRIPT_DIR / ".GCC" / "gcc_dashboard.html"
 
 # ── Dashboard 格式锁 (2026-03-07 确认为最佳格式) ──────────────────────────
 # 修改模板前必须经用户明确同意，确认后更新此 hash
-TEMPLATE_HASH_LOCK = "32ff1858e85f4eefea7a77fad700a25746e54c2639b79f1c5daf938be9b253a1"
+TEMPLATE_HASH_LOCK = "f2a48bc20fa87bc67cd6fb7e974649fc087faf46efe9d19d65f35868cdf414d2"
 
 if not TEMPLATE.exists():
     print(f"错误：找不到 {TEMPLATE}")
@@ -296,6 +296,22 @@ if _ha_path.exists():
         }
         inject_lines.append(f"DATA.human_guidance = {json.dumps(_hg, ensure_ascii=False)};")
         loaded.append(f"human_anchors: {len(anchors)} anchors")
+    except Exception:
+        pass
+
+# loop_state.json → merge into DATA.human_guidance (override loop_running/loop_last, add loop_steps/loop_round)
+_ls_path = GCC_DIR / "loop_state.json"
+if _ls_path.exists():
+    try:
+        _ls = json.loads(_ls_path.read_text(encoding="utf-8"))
+        _ls_patch = {
+            "loop_running": bool(_ls.get("running", False)),
+            "loop_last":    _ls.get("last_end", "") or _ls.get("last_start", ""),
+            "loop_round":   _ls.get("round", 0),
+            "loop_steps":   _ls.get("steps", {}),
+        }
+        inject_lines.append(f"Object.assign(DATA.human_guidance, {json.dumps(_ls_patch, ensure_ascii=False)});")
+        loaded.append(f"loop_state: round={_ls_patch['loop_round']}")
     except Exception:
         pass
 

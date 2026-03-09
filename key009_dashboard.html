@@ -85,6 +85,11 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 .hg-anchor-meta{font-size:0.7em;color:#afb8c1;margin-top:3px}
 .hg-del{background:none;border:none;cursor:pointer;font-size:12px;color:#afb8c1;padding:0 2px;position:absolute;top:6px;right:6px;line-height:1}
 .hg-del:hover{color:#cf222e}
+/* 5-step loop strip */
+.hg-steps{display:flex;align-items:center;gap:0;padding:5px 0 8px;font-size:0.78em;flex-wrap:wrap}
+.hg-step{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;color:#656d76}
+.hg-step.ok{color:#1a7f37}.hg-step.running{color:#0969da;font-weight:700}.hg-step.error{color:#cf222e}.hg-step.skip{opacity:0.45}
+.hg-step-sep{color:#d0d7de;margin:0 1px}.hg-step-detail{font-size:0.85em;opacity:0.7;margin-left:2px}
 </style>
 </head>
 <body>
@@ -269,6 +274,18 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
   <span class="hg-loop-label" id="hg-loop-label">GCC-EVO 循环: 检测中</span>
   <span class="hg-loop-sub" id="hg-loop-sub"></span>
 </div>
+<div class="hg-steps" id="hg-steps-bar">
+  <span class="hg-step" id="hg-s-tasks">○ 任务</span>
+  <span class="hg-step-sep">›</span>
+  <span class="hg-step" id="hg-s-audit">○ 审计</span>
+  <span class="hg-step-sep">›</span>
+  <span class="hg-step" id="hg-s-distill">○ 提炼</span>
+  <span class="hg-step-sep">›</span>
+  <span class="hg-step" id="hg-s-rules">○ 规则</span>
+  <span class="hg-step-sep">›</span>
+  <span class="hg-step" id="hg-s-dashboard">○ 看板</span>
+  <span id="hg-s-round" style="margin-left:auto;color:#afb8c1;font-size:0.85em"></span>
+</div>
 <div class="hg-anchors" id="hg-anchor-list"></div>
 </div>
 
@@ -447,8 +464,21 @@ function renderHumanGuidance() {
   if (dotEl.className !== undefined) {
     dotEl.className = 'hg-loop-dot' + (running ? ' running' : '');
     labelEl.textContent = running ? 'GCC-EVO 循环: 运行中' : 'GCC-EVO 循环: 未启动';
-    subEl.textContent = hg.loop_last ? ('最后活跃: ' + hg.loop_last) : '';
+    subEl.textContent = hg.loop_last ? ('最后活跃: ' + hg.loop_last.slice(0,16)) : '';
   }
+  // 5-step strip
+  const _sIcon = { ok:'✓', running:'⏳', error:'✗', skip:'—', pending:'○' };
+  const _sLabel = { tasks:'任务', audit:'审计', distill:'提炼', rules:'规则', dashboard:'看板' };
+  const steps = hg.loop_steps || {};
+  ['tasks','audit','distill','rules','dashboard'].forEach(k => {
+    const el = $('hg-s-' + k); if (!el) return;
+    const s = steps[k] || {}; const st = s.status || 'pending';
+    const detail = s.detail ? `<span class="hg-step-detail">(${s.detail})</span>` : '';
+    el.className = 'hg-step ' + st;
+    el.innerHTML = `${_sIcon[st]||'○'} ${_sLabel[k]}${detail}`;
+  });
+  const roundEl = $('hg-s-round');
+  if (roundEl && hg.loop_round) roundEl.textContent = `Round #${hg.loop_round}`;
   const anchors = (hg.anchors || []).filter(a => !deleted.has(a.anchor_id || (a.symbol + a.created_at)));
   const listEl = $('hg-anchor-list');
   if (!anchors.length) {
