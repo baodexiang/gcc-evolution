@@ -224,6 +224,17 @@
         "GCC-0202已完成系统级评分+协作检测+记忆解析+进化tab(S01-S41)"
       ],
       "sub_items": []
+    },
+    "KEY-011": {
+      "title": "GCC交易决策模块 — 树状搜索+三视角验证独立交易引擎",
+      "status": "IN_PROGRESS",
+      "phase": "Phase1观察模式",
+      "observations": [
+        "论文1: arXiv:2603.04735 (Google DeepMind 2026) — 树状搜索决策引擎：候选路径展开+数值验证+剪枝+存活路径取最优",
+        "论文2: arXiv:2407.09468 (Beyond Euclid) — 三视角独立验证：Topology(超图连通性)/Geometry(黎曼流形曲率)/Algebra(等变加权胜率)",
+        "架构：不动现有主程序，作为独立模块接入llm_decide()末尾一行，Phase1只观察记录，Phase2执行"
+      ],
+      "sub_items": []
     }
   }
 }
