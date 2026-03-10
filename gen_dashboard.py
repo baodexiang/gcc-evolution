@@ -11,7 +11,7 @@ TEMPLATE = SCRIPT_DIR / ".GCC" / "gcc_dashboard.html"
 
 # ── Dashboard 格式锁 (2026-03-07 确认为最佳格式) ──────────────────────────
 # 修改模板前必须经用户明确同意，确认后更新此 hash
-TEMPLATE_HASH_LOCK = "d7145f6dfa719524b57b6d716f412ad5116080a735bc05e2d01e26a234d79f7d"
+TEMPLATE_HASH_LOCK = "52af7362726092a241069ac1d4d502707d3c7372c8c49293e123a3e11d0b1cbe"
 
 if not TEMPLATE.exists():
     print(f"错误：找不到 {TEMPLATE}")
