@@ -25,7 +25,7 @@ so basic commands such as `gcc-evo version` do not fail during package import.
 
 from importlib import import_module
 
-__version__ = "5.340"
+__version__ = "5.345"
 __author__ = "baodexiang"
 __license__ = "BUSL-1.1"
 
