@@ -1,5 +1,7 @@
 # === 收费模块保护 (BIZ-2026-001 §3.3) ===
 # 即使路径写错也不会上传
+gcc_evolution/paid/
+gcc_evolution/L4_decision/
 **/knn_evolution/
 **/walk_forward*
 **/signal_evolution*

@@ -1,4 +1,4 @@
-﻿# gcc-evo v5.340 Framework Boundary
+﻿# gcc-evo v5.345 Framework Boundary
 
 This is the authoritative release-facing boundary for gcc-evo before open-source publication.
 

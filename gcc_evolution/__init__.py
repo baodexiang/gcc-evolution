@@ -6,18 +6,17 @@ Open-source framework for LLM agent persistent memory + continuous learning.
 License: BUSL 1.1 | Free for personal/academic/<$1M revenue
 Commercial: gcc-evo.dev/licensing
 
-Canonical v5.400 split:
-  UI: free
-  L0: free foundation layer
-  L1: free foundation layer
-  L2: free foundation layer
-  L3: free foundation layer
-  L4: paid core
-  L5: paid core
-  DA: paid core
+Open-source layers (this package):
+  UI: dashboard + event bus
+  L0: governance + setup
+  L1: memory tiers + storage
+  L2: retrieval + RAG pipeline
+  L3: distillation + experience cards
+  L5: self-improvement loop + DAG pipeline
 
-Commercial enhancement modules may still exist under paid/l0-l3,
-but the release-facing core split is Free 5 layers + Paid 3 layers.
+Paid layers (not included, available at gcc-evo.dev):
+  L4: multi-model ensemble + skeptic gate
+  DA: direction anchor
 
 This package keeps root import lightweight. Public symbols are resolved lazily
 so basic commands such as `gcc-evo version` do not fail during package import.
@@ -51,10 +50,6 @@ _LAZY_EXPORTS = {
     'CardGenerator': ('gcc_evolution.free.l3', 'CardGenerator'),
     'ExperienceCard': ('gcc_evolution.free.l3', 'ExperienceCard'),
     'CardType': ('gcc_evolution.free.l3', 'CardType'),
-    'SkepticValidator': ('gcc_evolution.L4_decision', 'SkepticValidator'),
-    'ValidationResult': ('gcc_evolution.L4_decision', 'ValidationResult'),
-    'MultiModelEnsemble': ('gcc_evolution.L4_decision', 'MultiModelEnsemble'),
-    'ModelPrediction': ('gcc_evolution.L4_decision', 'ModelPrediction'),
     'DAGPipeline': ('gcc_evolution.L5_orchestration', 'DAGPipeline'),
     'PipelineStage': ('gcc_evolution.L5_orchestration', 'PipelineStage'),
     'SelfImprovementLoop': ('gcc_evolution.free.l5.loop_engine', 'SelfImprovementLoop'),
@@ -65,8 +60,6 @@ _LAZY_EXPORTS = {
     'RunTracer': ('gcc_evolution.free.ui', 'RunTracer'),
     'Tracer': ('gcc_evolution.free.ui', 'Tracer'),
     'DashboardServer': ('gcc_evolution.free.ui', 'DashboardServer'),
-    'DirectionAnchor': ('gcc_evolution.paid.da', 'DirectionAnchor'),
-    'PrincipleSet': ('gcc_evolution.paid.da', 'PrincipleSet'),
     'LAYER_TIER_MATRIX': ('gcc_evolution.layer_manifest', 'LAYER_TIER_MATRIX'),
     'canonical_layers': ('gcc_evolution.layer_manifest', 'canonical_layers'),
 }
@@ -81,17 +74,16 @@ __all__ = [
     'JSONStorage', 'SQLiteStorage',
     'HybridRetriever', 'SemanticRetriever', 'KeywordRetriever', 'RAGPipeline',
     'ExperienceDistiller', 'CardGenerator', 'ExperienceCard', 'CardType',
-    'SkepticValidator', 'ValidationResult', 'MultiModelEnsemble', 'ModelPrediction',
     'DAGPipeline', 'PipelineStage', 'SelfImprovementLoop', 'LoopPhase',
     'EventBus', 'GCCEvent', 'LayerEmitter', 'RunTracer', 'Tracer', 'DashboardServer',
-    'DirectionAnchor', 'PrincipleSet', 'LAYER_TIER_MATRIX', 'canonical_layers',
-    'free', 'paid',
+    'LAYER_TIER_MATRIX', 'canonical_layers',
+    'free',
 ]
 
 
 def __getattr__(name):
-    if name in ('free', 'paid'):
-        return import_module(f'gcc_evolution.{name}')
+    if name == 'free':
+        return import_module('gcc_evolution.free')
     if name in _LAZY_EXPORTS:
         module_name, attr_name = _LAZY_EXPORTS[name]
         module = import_module(module_name)

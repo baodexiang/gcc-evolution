@@ -1,4 +1,4 @@
-﻿# gcc-evo v5.340 Program Split Map
+﻿# gcc-evo v5.345 Program Split Map
 
 This file is the release-facing inventory that places every public program surface
 into the canonical model: `5 Free foundation layers + 3 Paid core layers`, plus enhancement packs and legacy compatibility.
