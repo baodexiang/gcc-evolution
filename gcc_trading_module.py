@@ -36,6 +36,9 @@ _GCC_MODE_FILE   = _GCC_DIR / "signal_filter" / "mode_state.json"
 _PLUGIN_KNN_ACC  = _STATE_DIR / "plugin_knn_accuracy.json"
 _KNN_ACC_MAP     = _STATE_DIR / "knn_accuracy_map.json"
 _LOG_FILE        = _STATE_DIR / "gcc_trading_decisions.jsonl"
+_GOVERNANCE_FILE = _STATE_DIR / "plugin_governance_actions.json"
+_REGIME_FILE     = _STATE_DIR / "regime_validation.json"
+_CONTEXT_SNAP_DIR = _STATE_DIR / "gcc_decision_context"
 
 # ── 决策输出日志 ───────────────────────────────────────────────
 def _log_decision(record: dict) -> None:
@@ -241,6 +244,107 @@ def _read_signal_direction() -> str:
     except Exception as e:
         logger.debug("[GCC-TRADE] _read_signal_direction: %s", e)
         return "OFF"
+
+
+# ══════════════════════════════════════════════════════════════
+# L1-S02  _read_plugin_governor / _read_regime / _read_risk_budget
+# 补充输入槽位：外挂治理状态、市场体制、风险预算
+# ══════════════════════════════════════════════════════════════
+def _read_plugin_governor(symbol: str) -> dict:
+    """读 plugin_governance_actions.json → 该品种外挂治理状态。"""
+    if not _GOVERNANCE_FILE.exists():
+        return {"status": "UNKNOWN", "disabled_plugins": []}
+    try:
+        gov = json.loads(_GOVERNANCE_FILE.read_text(encoding="utf-8"))
+        by_asset = gov.get("by_asset", {})
+        asset_gov = by_asset.get(symbol, {})
+        disabled = [k for k, v in asset_gov.items()
+                    if isinstance(v, dict) and v.get("action") == "DISABLE"]
+        return {"status": "ACTIVE" if not disabled else "RESTRICTED",
+                "disabled_plugins": disabled}
+    except Exception as e:
+        logger.debug("[GCC-TRADE] _read_plugin_governor %s: %s", symbol, e)
+        return {"status": "UNKNOWN", "disabled_plugins": []}
+
+
+def _read_regime(symbol: str) -> dict:
+    """读 regime_validation.json → 最新市场体制 (TRENDING/RANGING/VOLATILE)。"""
+    if not _REGIME_FILE.exists():
+        return {"regime": "UNKNOWN", "direction": "NONE"}
+    try:
+        data = json.loads(_REGIME_FILE.read_text(encoding="utf-8"))
+        records = data.get("records", {}).get(symbol, [])
+        if not records:
+            return {"regime": "UNKNOWN", "direction": "NONE"}
+        latest = records[-1] if isinstance(records, list) else records
+        return {
+            "regime": latest.get("regime", "UNKNOWN"),
+            "direction": latest.get("direction", "NONE"),
+        }
+    except Exception as e:
+        logger.debug("[GCC-TRADE] _read_regime %s: %s", symbol, e)
+        return {"regime": "UNKNOWN", "direction": "NONE"}
+
+
+def _read_risk_budget() -> dict:
+    """风险预算槽位 — 当前固定值，后续接入账户层实时数据。"""
+    return {
+        "max_position_pct": 0.10,    # 单品种最大仓位占比
+        "daily_loss_limit_pct": 0.02, # 日止损线 -2%
+        "available": True,            # 是否可用（触发熔断后 False）
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# L1-S03  DecisionContext — 标准化决策上下文快照
+# 统一所有输入源为一个 dataclass，落盘供回放/dashboard/回填复用
+# ══════════════════════════════════════════════════════════════
+@dataclass
+class DecisionContext:
+    symbol: str
+    ts: str
+    # 原有输入 (L1-S01)
+    vision: tuple         # (bias, confidence)
+    scan: tuple           # (direction, confidence)
+    filter_buy: dict
+    filter_sell: dict
+    win_rate_buy: float
+    win_rate_sell: float
+    vol_ratio: float
+    n_gate_buy: str
+    n_gate_sell: str
+    # 新增输入 (L1-S02)
+    regime: dict = field(default_factory=dict)
+    governor: dict = field(default_factory=dict)
+    risk_budget: dict = field(default_factory=dict)
+    # 扩展槽位（docx P0 数据源预留）
+    extended: dict = field(default_factory=dict)
+
+    def as_dict(self) -> dict:
+        return {
+            "symbol": self.symbol, "ts": self.ts,
+            "vision": list(self.vision), "scan": list(self.scan),
+            "filter_buy": self.filter_buy, "filter_sell": self.filter_sell,
+            "win_rate_buy": self.win_rate_buy, "win_rate_sell": self.win_rate_sell,
+            "vol_ratio": round(self.vol_ratio, 4),
+            "n_gate_buy": self.n_gate_buy, "n_gate_sell": self.n_gate_sell,
+            "regime": self.regime, "governor": self.governor,
+            "risk_budget": self.risk_budget, "extended": self.extended,
+        }
+
+    def snapshot(self) -> None:
+        """落盘快照到 state/gcc_decision_context/{symbol}/{ts}.json。"""
+        try:
+            snap_dir = _CONTEXT_SNAP_DIR / self.symbol
+            snap_dir.mkdir(parents=True, exist_ok=True)
+            safe_ts = self.ts.replace(":", "-")
+            path = snap_dir / f"{safe_ts}.json"
+            path.write_text(
+                json.dumps(self.as_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.debug("[GCC-TRADE] context snapshot: %s", e)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -998,8 +1102,9 @@ class BeyondEuclidVerifier:
 # ══════════════════════════════════════════════════════════════
 # S35  PHASE 常量
 # ══════════════════════════════════════════════════════════════
-PHASE_OBSERVE = "observe"   # Phase1: 只记录，不发单
-PHASE_EXECUTE = "execute"   # Phase2: 写 pending_order.json
+PHASE_OBSERVE   = "observe"    # Phase1: 只记录，不发单
+PHASE_EXECUTE   = "execute"    # Phase2: 写 pending_order.json
+PHASE_HOLD_ONLY = "hold_only"  # Phase3: 强制 HOLD，风控熔断时使用
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1051,16 +1156,40 @@ class GCCTradingModule:
         closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
         current_price = closes[-1] if closes else 0.0
 
-        # 组装上下文（读所有数据源）
-        context = self._build_context(bars)
+        # L1: 组装 DecisionContext（含新增槽位 + 落盘快照）
+        ctx = self._build_context(bars, ts)
+        context = self._context_to_score_dict(ctx)
 
-        # S38: 树搜索
-        best_node = self._run_tree_search(bars, context)
+        # L3-S02: hold_only 模式 — 直接 HOLD，只记日志
+        if self.phase == PHASE_HOLD_ONLY:
+            result = {
+                "ts": ts, "symbol": self.symbol, "phase": self.phase,
+                "best_node": None, "final_action": "HOLD",
+                "verdict": "HOLD_ONLY", "consensus": 0,
+                "verifier_results": [], "current_price": current_price,
+                "rejected_nodes": [], "context": ctx.as_dict(),
+            }
+            self._write_decision_log(result)
+            if main_decision is not None:
+                self._compare_with_main("HOLD", main_decision, ts)
+            return result
 
-        # S39: 三视角验证
+        # L2: 树搜索（收集 rejected_nodes）
+        best_node, rejected_nodes = self._run_tree_search_with_rejected(
+            bars, context
+        )
+
+        # L3: 三视角验证
         final_action, consensus, verdict, ver_results = self._run_verification(
             best_node, closes, current_price
         )
+
+        # L2-S03: rejected_nodes 摘要
+        rejected_summary = [
+            {"action": n.action, "aggregate": round(n.aggregate, 4),
+             "prune_reason": n.prune_reason, "strategy": n.strategy}
+            for n in rejected_nodes
+        ]
 
         result = {
             "ts":           ts,
@@ -1076,6 +1205,8 @@ class GCCTradingModule:
                 for r in ver_results
             ],
             "current_price": current_price,
+            "rejected_nodes": rejected_summary,
+            "context":      ctx.as_dict(),
         }
 
         # S40: observe 模式只记录日志
@@ -1087,30 +1218,60 @@ class GCCTradingModule:
             self._write_pending_order(final_action, current_price, ts)
             self._write_decision_log(result)
 
-        # S42: 记录与主程序一致率
+        # L3-S04: 与主程序对比（含 divergence + takeover_ready）
         if main_decision is not None:
             self._compare_with_main(final_action, main_decision, ts)
 
         logger.info(
-            "[GCC-TRADE] %s action=%s verdict=%s consensus=%s/3",
-            self.symbol, final_action, verdict, consensus,
+            "[GCC-TRADE] %s action=%s verdict=%s consensus=%s/3 rejected=%d",
+            self.symbol, final_action, verdict, consensus, len(rejected_nodes),
         )
         return result
 
-    # ── 内部: 组装上下文 ───────────────────────────────────────
-    def _build_context(self, bars: list) -> dict:
+    # ── 内部: 组装上下文 → DecisionContext ────────────────────
+    def _build_context(self, bars: list, ts: str = "") -> DecisionContext:
         sym = self.symbol
+        ctx = DecisionContext(
+            symbol=sym, ts=ts,
+            vision=_read_vision(sym),
+            scan=_read_scan_signal(sym),
+            filter_buy=_read_filter_chain(sym, "BUY"),
+            filter_sell=_read_filter_chain(sym, "SELL"),
+            win_rate_buy=_read_win_rate(sym, "BUY"),
+            win_rate_sell=_read_win_rate(sym, "SELL"),
+            vol_ratio=_read_volume(bars),
+            n_gate_buy=_read_n_gate(sym, "BUY"),
+            n_gate_sell=_read_n_gate(sym, "SELL"),
+            # L1-S02 新增槽位
+            regime=_read_regime(sym),
+            governor=_read_plugin_governor(sym),
+            risk_budget=_read_risk_budget(),
+        )
+        # L1-S03 快照落盘
+        ctx.snapshot()
+        return ctx
+
+    def _context_to_score_dict(self, ctx: DecisionContext) -> dict:
+        """将 DecisionContext 转为向后兼容的 dict，供评分/剪枝函数使用。"""
         return {
-            "vision":          _read_vision(sym),
-            "scan":            _read_scan_signal(sym),
-            "filter_buy":      _read_filter_chain(sym, "BUY"),
-            "filter_sell":     _read_filter_chain(sym, "SELL"),
-            "win_rate_buy":    _read_win_rate(sym, "BUY"),
-            "win_rate_sell":   _read_win_rate(sym, "SELL"),
-            "vol_ratio":       _read_volume(bars),
-            "n_gate_buy":      _read_n_gate(sym, "BUY"),
-            "n_gate_sell":     _read_n_gate(sym, "SELL"),
+            "vision": ctx.vision, "scan": ctx.scan,
+            "filter_buy": ctx.filter_buy, "filter_sell": ctx.filter_sell,
+            "win_rate_buy": ctx.win_rate_buy, "win_rate_sell": ctx.win_rate_sell,
+            "vol_ratio": ctx.vol_ratio,
+            "n_gate_buy": ctx.n_gate_buy, "n_gate_sell": ctx.n_gate_sell,
+            "regime": ctx.regime, "governor": ctx.governor,
+            "risk_budget": ctx.risk_budget,
         }
+
+    # ── L2-S03: 树搜索 + rejected_nodes 收集 ────────────────────
+    def _run_tree_search_with_rejected(
+        self, bars: list, context: dict
+    ) -> Tuple[TreeNode, List[TreeNode]]:
+        """树搜索并收集所有被剪枝的节点，供 dashboard 展示。"""
+        best_node = self._run_tree_search(bars, context)
+        # 从内部状态收集 rejected（_run_tree_search 中标记 pruned 的节点）
+        rejected = getattr(self, "_last_rejected_nodes", [])
+        return best_node, rejected
 
     # ── S38: PUCT 多层树搜索 (arXiv:2603.04735) ────────────────
     def _run_tree_search(self, bars: list, context: dict) -> TreeNode:
@@ -1125,6 +1286,7 @@ class GCCTradingModule:
         sym = self.symbol
         closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
         current_price = closes[-1] if closes else 0.0
+        self._last_rejected_nodes: List[TreeNode] = []
 
         # ── Step 1: L1 展开 (方向层) ──
         buy_scores  = _score_buy_candidate(sym, bars, context)
@@ -1140,6 +1302,7 @@ class GCCTradingModule:
         # ── Step 2: L1 剪枝 ──
         _apply_pruning(l1_nodes, sym, context)
         surviving_l1 = [n for n in l1_nodes if not n.pruned]
+        self._last_rejected_nodes.extend(n for n in l1_nodes if n.pruned)
         if not surviving_l1:
             hold = TreeNode(action="HOLD", prune_reason="all_candidates_pruned")
             hold.scores_by_source = hold_scores
@@ -1207,6 +1370,7 @@ class GCCTradingModule:
                     if c.action != "HOLD":  # 保留HOLD
                         c.pruned = True
                         c.prune_reason = f"PUCT:low_q={c.q_value:.3f}"
+                        self._last_rejected_nodes.append(c)
 
         # ── Step 6: 保存访问统计 ──
         visit_stats[sym] = sym_stats
@@ -1272,24 +1436,47 @@ class GCCTradingModule:
         except Exception as e:
             logger.warning("[GCC-TRADE] write_pending_order: %s", e)
 
-    # ── S42: 与主程序决策对比 ──────────────────────────────────
+    # ── L3-S04: 与主程序决策对比 + divergence + takeover_ready ──
     def _compare_with_main(
         self, gcc_action: str, main_action: str, ts: str
     ) -> None:
-        """记录 GCC 模块与主程序决策一致率到 accuracy.json。"""
+        """
+        记录 GCC 模块与主程序决策一致率到 accuracy.json。
+        L3-S04: 增加 divergence_rate + takeover_ready 判定。
+        takeover_ready 条件: 样本 ≥ 30 且 GCC 准确率 > 主程序准确率 (divergence 中 GCC 胜出比例 > 55%)
+        """
         match = gcc_action == main_action
         try:
             acc: dict = {}
             if self._accuracy_file.exists():
                 acc = json.loads(self._accuracy_file.read_text(encoding="utf-8"))
 
-            sym_acc = acc.setdefault(self.symbol, {"total": 0, "match": 0, "rate": 0.0})
+            sym_acc = acc.setdefault(self.symbol, {
+                "total": 0, "match": 0, "rate": 0.0,
+                "divergence_count": 0, "gcc_win_on_diverge": 0,
+            })
             sym_acc["total"] += 1
             if match:
                 sym_acc["match"] += 1
-            sym_acc["rate"] = round(sym_acc["match"] / sym_acc["total"], 4)
+            else:
+                # 分歧计数（GCC 与主程序不同的次数）
+                sym_acc["divergence_count"] = sym_acc.get("divergence_count", 0) + 1
+
+            total = sym_acc["total"]
+            sym_acc["rate"] = round(sym_acc["match"] / total, 4)
+            diverge_count = sym_acc.get("divergence_count", 0)
+            sym_acc["divergence_rate"] = round(diverge_count / total, 4) if total else 0.0
+
+            # takeover_ready: 样本充足 + GCC 在分歧中胜出比例 > 55%
+            gcc_wins = sym_acc.get("gcc_win_on_diverge", 0)
+            sym_acc["takeover_ready"] = (
+                total >= 30
+                and diverge_count >= 10
+                and (gcc_wins / diverge_count > 0.55 if diverge_count else False)
+            )
+
             sym_acc["last_ts"] = ts
-            sym_acc["last_gcc"]  = gcc_action
+            sym_acc["last_gcc"] = gcc_action
             sym_acc["last_main"] = main_action
 
             self._accuracy_file.write_text(
@@ -1297,6 +1484,36 @@ class GCCTradingModule:
             )
         except Exception as e:
             logger.warning("[GCC-TRADE] compare_with_main: %s", e)
+
+    def record_divergence_outcome(
+        self, symbol: str, gcc_was_right: bool
+    ) -> None:
+        """
+        回填分歧结果：GCC 和主程序决策不同时，谁的方向最终正确。
+        由 _backfill_outcome 在8根K线后调用。
+        """
+        try:
+            acc: dict = {}
+            if self._accuracy_file.exists():
+                acc = json.loads(self._accuracy_file.read_text(encoding="utf-8"))
+            sym_acc = acc.get(symbol, {})
+            if gcc_was_right:
+                sym_acc["gcc_win_on_diverge"] = sym_acc.get("gcc_win_on_diverge", 0) + 1
+            # 重算 takeover_ready
+            total = sym_acc.get("total", 0)
+            diverge_count = sym_acc.get("divergence_count", 0)
+            gcc_wins = sym_acc.get("gcc_win_on_diverge", 0)
+            sym_acc["takeover_ready"] = (
+                total >= 30
+                and diverge_count >= 10
+                and (gcc_wins / diverge_count > 0.55 if diverge_count else False)
+            )
+            acc[symbol] = sym_acc
+            self._accuracy_file.write_text(
+                json.dumps(acc, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception as e:
+            logger.warning("[GCC-TRADE] record_divergence_outcome: %s", e)
 
 
 # ══════════════════════════════════════════════════════════════
