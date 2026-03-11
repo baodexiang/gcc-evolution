@@ -229,6 +229,14 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <h2>扫描引擎外挂运行 (每个外挂)</h2>
 <table><thead><tr><th>外挂</th><th>扫描</th><th>触发</th><th>触发率</th><th>发送</th><th>执行</th><th>拦截</th><th>拦截原因</th></tr></thead>
 <tbody id="scan-plugin-body"></tbody></table>
+
+<!-- GCC-0252: 方向锁 Leader -->
+<h2 style="margin-top:20px">🔒 方向锁 — 加密品种 Leader</h2>
+<div id="direction-lock-panel" style="margin-bottom:16px">
+<table><thead><tr><th>品种</th><th>Leader</th><th>准确率</th><th>样本</th><th>更新时间</th></tr></thead>
+<tbody id="direction-lock-body"></tbody></table>
+<div id="direction-lock-note" style="font-size:0.8em;color:#656d76;margin-top:6px">Phase1: 观察模式（记录日志，不实际拦截）· 锁定2h过期 · 样本≥10才选leader</div>
+</div>
 </div>
 
 <!-- Tab: L2 MACD -->
@@ -844,6 +852,29 @@ function _doRender() {
         brHTML += '</tbody></table>';
         $('scan-plugin-body').closest('table').insertAdjacentHTML('afterend', brHTML);
     }
+
+    // ── 方向锁 Leader (GCC-0252) ──
+    fetch('/key009/direction-leaders').then(r => r.ok ? r.json() : {}).then(leaders => {
+        const tbody = $('direction-lock-body');
+        if (!tbody) return;
+        const syms = Object.keys(leaders).sort();
+        if (!syms.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="color:#656d76;text-align:center">暂无 Leader 数据 (需运行 key009_audit 或样本不足)</td></tr>';
+            return;
+        }
+        tbody.innerHTML = syms.map(sym => {
+            const ld = leaders[sym];
+            const acc = (ld.acc * 100).toFixed(1);
+            const accColor = ld.acc >= 0.8 ? '#3fb950' : ld.acc >= 0.5 ? '#d29922' : '#f85149';
+            return `<tr>
+                <td><strong>${sym}</strong></td>
+                <td>🏆 ${ld.leader}</td>
+                <td style="color:${accColor};font-weight:600">${acc}%</td>
+                <td>${ld.sample_n}</td>
+                <td style="font-size:0.85em;color:#656d76">${ld.updated || ''}</td>
+            </tr>`;
+        }).join('');
+    }).catch(() => {});
 
     // ── L2 MACD Tab ──
     $('macd-summary').innerHTML = `

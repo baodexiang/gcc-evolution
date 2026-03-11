@@ -50339,6 +50339,21 @@ def key009_reject():
 # =========================================================
 # KEY-011: GCC交易决策模块 GCCTM 数据接口
 # =========================================================
+@app.route("/key009/direction-leaders", methods=["GET"])
+def key009_direction_leaders():
+    """GCC-0252: 方向锁 Leader 数据"""
+    leader_path = ROOT / "state" / "plugin_direction_leader.json"
+    if not leader_path.exists():
+        return jsonify({})
+    try:
+        return app.response_class(
+            leader_path.read_text(encoding="utf-8"),
+            mimetype="application/json",
+        )
+    except Exception:
+        return jsonify({})
+
+
 @app.route("/key009/gcctm", methods=["GET"])
 def key009_gcctm():
     """KEY-011 GCC-TM: 返回最近决策日志 + KNN经验条目 + pipeline任务"""
