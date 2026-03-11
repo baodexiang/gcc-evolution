@@ -42703,8 +42703,8 @@ def llm_decide():
 
     print(f"[DEBUG] {symbol}: === START llm_decide ===", flush=True)
 
-    # ── B3: GCC-TM 美股执行 — 消费 pending_order ──
-    if _HAS_GCC_TM and is_us_stock(symbol):
+    # ── B3: GCC-TM 执行 — 消费 pending_order（美股+加密货币）──
+    if _HAS_GCC_TM and (is_us_stock(symbol) or is_crypto_symbol(symbol)):
         _gcc_order = _gcc_consume(symbol)
         if _gcc_order:
             _gcc_act = _gcc_order.get("action", "HOLD")
