@@ -151,6 +151,66 @@ class SchwabDataProvider:
                     "message": f"Token检查失败: {e}"}
 
     # ──────────────────────────────────────────
+    # Token 过期前2小时邮件提醒
+    # ──────────────────────────────────────────
+    _email_sent_flag = None  # 类级别：防止重复发送
+
+    def check_and_notify_token_expiry(self) -> None:
+        """
+        检查 Token 年龄，过期前2小时发一次邮件提醒。
+        由主程序定时调用（如每小时一次）。
+        """
+        status = self.check_token_age()
+        age_hours = status["age_hours"]
+        if age_hours < 0:
+            return
+
+        # 7天 = 168小时，过期前2小时 = 166小时
+        hours_remaining = 168 - age_hours
+        if hours_remaining <= 2 and not SchwabDataProvider._email_sent_flag:
+            self._send_token_expiry_email(age_hours, hours_remaining)
+            SchwabDataProvider._email_sent_flag = True
+        elif hours_remaining > 24:
+            # Token 刷新后重置标记
+            SchwabDataProvider._email_sent_flag = False
+
+    def _send_token_expiry_email(self, age_hours: float, hours_remaining: float) -> None:
+        """发送 Token 即将过期的邮件提醒。"""
+        try:
+            import smtplib
+            import ssl
+            from email.message import EmailMessage
+
+            subject = f"⚠️ Schwab Token 即将过期 — 剩余{hours_remaining:.1f}小时"
+            body = (
+                f"Schwab API Token 即将过期：\n\n"
+                f"  Token 年龄: {age_hours:.1f} 小时 ({age_hours/24:.1f} 天)\n"
+                f"  剩余时间: {hours_remaining:.1f} 小时\n"
+                f"  过期时间: 约 {hours_remaining:.0f} 小时后\n\n"
+                f"请立即重新授权：\n"
+                f"  1. mv state/schwab_token.json state/schwab_token.json.bak\n"
+                f"  2. python schwab_data_provider.py\n"
+                f"  3. 在浏览器完成 Schwab 登录授权\n"
+                f"  4. 复制回调 URL 粘贴回终端\n"
+            )
+
+            msg = EmailMessage()
+            msg["Subject"] = subject
+            msg["From"] = "aistockllmpro@gmail.com"
+            msg["To"] = "baodexiang@hotmail.com"
+            msg.set_content(body)
+
+            context = ssl.create_default_context()
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+                server.starttls(context=context)
+                server.login("aistockllmpro@gmail.com", "ficw ovws zvzb qmfs")
+                server.send_message(msg)
+
+            logger.info("[SCHWAB] Token过期提醒邮件已发送 (剩余%.1f小时)", hours_remaining)
+        except Exception as e:
+            logger.warning("[SCHWAB] Token过期提醒邮件发送失败: %s", e)
+
+    # ──────────────────────────────────────────
     # 客户端初始化（懒加载，首次调用时触发）
     # ──────────────────────────────────────────
     def _get_client(self):

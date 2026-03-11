@@ -50141,8 +50141,41 @@ def key009_dashboard():
     # 读取dashboard HTML模板并注入多范围数据
     try:
         html = (ROOT / "key009_dashboard.html").read_text(encoding="utf-8")
-        inject = (f"<script>window.MULTI_DATA = {json.dumps(multi_data, ensure_ascii=False)};"
-                  f"window.EMBEDDED_DATA = window.MULTI_DATA['24h'];</script>")
+        inject = (
+            f"<script>window.MULTI_DATA = {json.dumps(multi_data, ensure_ascii=False)};"
+            f"window.EMBEDDED_DATA = window.MULTI_DATA['24h'];</script>"
+            "<script>"
+            "(function(){"
+            "function renderSigaccLeaders(){"
+            "  try {"
+            "    const data = (window.MULTI_DATA && window.MULTI_DATA['24h']) || {};"
+            "    const pa = data.plugin_accuracy || {};"
+            "    const host = document.getElementById('sigacc-summary');"
+            "    if (!host || host.dataset.leaderCards === '1') return;"
+            "    const ranked = Object.entries(pa).map(([src, syms]) => {"
+            "      const ov = (syms && syms._overall) || {};"
+            "      const total = Number(ov.total || 0);"
+            "      const correct = Number(ov.correct || 0);"
+            "      const acc = ov.acc != null ? Number(ov.acc) : (total > 0 ? correct / total : null);"
+            "      return { src, total, acc };"
+            "    }).filter(x => x.acc != null).sort((a,b) => (b.acc - a.acc) || (b.total - a.total));"
+            "    if (!ranked.length) return;"
+            "    const cards = ranked.slice(0, 2).map((item, idx) => {"
+            "      const color = item.acc >= 0.55 ? '#1a7f37' : (item.acc < 0.5 ? '#cf222e' : '#9a6700');"
+            "      const label = idx === 0 ? '最强外挂' : '第二名';"
+            "      return `<div class=\"card\"><div class=\"label\">${label}</div><div class=\"value\" style=\"color:${color}\">${item.src} ${(item.acc*100).toFixed(1)}%</div><div class=\"sub\">${item.total} decisive</div></div>`;"
+            "    }).join('');"
+            "    host.insertAdjacentHTML('beforeend', cards);"
+            "    host.dataset.leaderCards = '1';"
+            "  } catch (e) {}"
+            "}"
+            "document.addEventListener('DOMContentLoaded', function(){"
+            "  setTimeout(renderSigaccLeaders, 0);"
+            "  setTimeout(renderSigaccLeaders, 300);"
+            "});"
+            "})();"
+            "</script>"
+        )
         html = html.replace("</head>", inject + "\n</head>")
         return html
     except Exception:
@@ -50235,11 +50268,13 @@ def key009_reject():
 # =========================================================
 @app.route("/key009/gcctm", methods=["GET"])
 def key009_gcctm():
-    """KEY-011 GCC-TM: 返回最近决策日志 + KNN经验条目"""
+    """KEY-011 GCC-TM: 返回最近决策日志 + KNN经验条目 + pipeline任务"""
     decisions = []
     knn_entries = []
+    pipeline_tasks = []
     dec_path = ROOT / "state" / "gcc_trading_decisions.jsonl"
     knn_path = ROOT / "state" / "gcc_knn_experience.jsonl"
+    tasks_path = ROOT / ".GCC" / "pipeline" / "tasks.json"
     try:
         if dec_path.exists():
             lines = dec_path.read_text(encoding="utf-8").splitlines()
@@ -50260,10 +50295,52 @@ def key009_gcctm():
                     pass
     except Exception:
         pass
+    try:
+        if tasks_path.exists():
+            payload = json.loads(tasks_path.read_text(encoding="utf-8"))
+            all_tasks = payload.get("tasks", []) if isinstance(payload, dict) else []
+            for task in all_tasks:
+                if task.get("key") != "KEY-011":
+                    continue
+                if task.get("task_id") not in ("GCC-0244", "GCC-0251"):
+                    continue
+                steps = task.get("steps", []) if isinstance(task.get("steps"), list) else []
+                layer_counts = {"L1": 0, "L2": 0, "L3": 0}
+                for step in steps:
+                    sid = str(step.get("id", ""))
+                    title = str(step.get("title", ""))
+                    if sid.startswith("L1-") or "[L1]" in title:
+                        layer_counts["L1"] += 1
+                    elif sid.startswith("L2-") or "[L2]" in title:
+                        layer_counts["L2"] += 1
+                    elif sid.startswith("L3-") or "[L3]" in title:
+                        layer_counts["L3"] += 1
+                pipeline_tasks.append({
+                    "task_id": task.get("task_id"),
+                    "title": task.get("title"),
+                    "status": task.get("status", "pending"),
+                    "stage": task.get("stage", ""),
+                    "priority": task.get("priority", ""),
+                    "description": task.get("description", ""),
+                    "updated_at": task.get("updated_at", ""),
+                    "dependencies": task.get("dependencies", []),
+                    "steps": steps,
+                    "layer_counts": layer_counts,
+                })
+            pipeline_tasks.sort(key=lambda x: x.get("task_id", ""))
+    except Exception:
+        pass
     decisions = list(reversed(decisions))
     knn_entries = list(reversed(knn_entries))
     return app.response_class(
-        json.dumps({"decisions": decisions, "knn_entries": knn_entries}, ensure_ascii=False),
+        json.dumps(
+            {
+                "decisions": decisions,
+                "knn_entries": knn_entries,
+                "pipeline_tasks": pipeline_tasks,
+            },
+            ensure_ascii=False,
+        ),
         mimetype="application/json"
     )
 
@@ -53292,6 +53369,22 @@ def _autosave_worker():
                         _json_ng.dump(_n_gate_active, _f_ng)
                 except Exception:
                     pass
+
+                # Schwab Token 过期检查（每小时一次，过期前2h发邮件）
+                try:
+                    if not hasattr(_autosave_worker, "_schwab_token_last_check"):
+                        _autosave_worker._schwab_token_last_check = 0.0
+                    _now_stc = time.time()
+                    if (_now_stc - _autosave_worker._schwab_token_last_check) >= 3600:
+                        _autosave_worker._schwab_token_last_check = _now_stc
+                        from schwab_data_provider import SchwabDataProvider
+                        _stc_provider = SchwabDataProvider(use_cache=False)
+                        _stc_status = _stc_provider.check_token_age()
+                        if _stc_status.get("warn") or _stc_status.get("expired"):
+                            log_to_server(f"[SCHWAB][TOKEN] {_stc_status['message']}")
+                        _stc_provider.check_and_notify_token_expiry()
+                except Exception as _e_stc:
+                    pass  # schwab 检查不影响主循环
 
                 # KEY-004 T06: N字转换回填评估
                 try:
