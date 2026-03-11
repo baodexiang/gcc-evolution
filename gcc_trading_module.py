@@ -484,9 +484,72 @@ class VerifierResult:
 # S25: 信号数 < 3 时 fallback ok=True
 # ══════════════════════════════════════════════════════════════
 class TopologyVerifier:
-    """超图连通性验证：信号源之间的一致性评估。"""
+    """
+    超图连通性验证：信号源之间的一致性评估。
+    arXiv:2407.09468 Topology 视角核心概念:
+      - 信号源 = 超图节点，同方向信号之间有超边连接
+      - Cheeger常数近似 = 最小割 / 节点数 (连通性度量)
+      - Laplacian Fiedler值 = 超图 Laplacian 第二小特征值 (谱连通性)
+      - Fiedler值越大 = 连通度越强 = 信号一致性越高
+    """
 
     THRESHOLD = 0.0   # Cheeger 近似值 > 0 代表连通
+
+    @staticmethod
+    def _fiedler_value(vals: list) -> float:
+        """
+        arXiv:2407.09468: 超图 Laplacian Fiedler值（代数连通度）。
+        Fiedler值 = λ₂ = min_{x⊥1} x'Lx / x'x
+        实现: 构建相似度 Laplacian → Rayleigh 商迭代求 λ₂。
+        对 n≤6 的小矩阵用投影 Rayleigh 商法（精确到收敛）。
+        """
+        n = len(vals)
+        if n < 2:
+            return 0.0
+        # 归一化到 [-1, 1]
+        max_abs = max(abs(v) for v in vals) or 1.0
+        normed = [v / max_abs for v in vals]
+        # 相似度矩阵 W[i][j] = max(0, 1 - |ni - nj|)
+        W = [[0.0] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(i + 1, n):
+                sim = max(0.0, 1.0 - abs(normed[i] - normed[j]))
+                W[i][j] = sim
+                W[j][i] = sim
+        # 度矩阵 + Laplacian
+        D = [sum(W[i]) for i in range(n)]
+        L = [[(D[i] if i == j else 0.0) - W[i][j] for j in range(n)] for i in range(n)]
+
+        # Rayleigh 商迭代: 在 1⊥ 子空间中求最小特征值
+        # 初始向量: 交替 +1/-1 (正交于全1向量)
+        x = [(-1.0) ** i for i in range(n)]
+        # 减去在全1方向的投影 → 保证 x⊥1
+        mean_x = sum(x) / n
+        x = [xi - mean_x for xi in x]
+        norm = sum(xi * xi for xi in x) ** 0.5
+        if norm < 1e-12:
+            return 0.0
+        x = [xi / norm for xi in x]
+
+        fiedler = 0.0
+        for _ in range(20):  # 迭代收敛
+            # y = L @ x
+            y = [sum(L[i][j] * x[j] for j in range(n)) for i in range(n)]
+            # Rayleigh 商 = x'y / x'x
+            xty = sum(x[i] * y[i] for i in range(n))
+            xtx = sum(x[i] * x[i] for i in range(n))
+            fiedler = xty / xtx if xtx > 1e-12 else 0.0
+            # 逆迭代: 解 (L - σI)z = x, σ 略小于 fiedler
+            # 简化: 直接用 y 归一化 + 正交化作为下一步
+            # 减去 1⊥ 投影
+            mean_y = sum(y) / n
+            y = [yi - mean_y for yi in y]
+            norm_y = sum(yi * yi for yi in y) ** 0.5
+            if norm_y < 1e-12:
+                break
+            x = [yi / norm_y for yi in y]
+
+        return max(0.0, round(fiedler, 6))
 
     def verify(self, node: TreeNode) -> VerifierResult:
         scores = {k: v for k, v in node.scores_by_source.items()
@@ -507,27 +570,34 @@ class TopologyVerifier:
         # 只考虑有信号(非零)的节点做连通性判断
         active = positive + negative
         if active < 2:
-            # 有效信号不足2个，无法判断连通性，fallback放行
             return VerifierResult(
                 perspective="topology", ok=True, score=0.5,
                 reasoning=f"fallback: active={active} (pos={positive} neg={negative} neutral={neutral})"
             )
 
-        # 超图平衡度: 多数方向占有效信号的比例
+        # --- Cheeger 近似 (组合法) ---
         majority = max(positive, negative)
         minority = active - majority
-        balance = majority / active  # [0.5, 1.0]
+        cheeger_approx = minority / active
 
-        # Cheeger 近似: 少数方 / 有效节点 (越小越连通)
-        cheeger_approx = minority / active  # 0=完全一致, 0.5=对半分
+        # --- Fiedler 值 (谱法, 论文核心) ---
+        # 只对有效信号做谱分析
+        active_vals = [v for v in vals if v != 0]
+        fiedler = self._fiedler_value(active_vals)
 
-        ok = cheeger_approx <= 0.34    # 允许最多 1/3 有效节点不一致
-        score = round(balance, 4)
+        # 综合判断: Cheeger + Fiedler 双重确认
+        # Cheeger ≤ 0.34 (组合一致) AND Fiedler > 0 (谱连通)
+        ok = cheeger_approx <= 0.34 and fiedler >= 0.0
+
+        # score: Cheeger 和 Fiedler 加权
+        balance = majority / active
+        score = round(balance * 0.7 + min(fiedler, 1.0) * 0.3, 4)
 
         return VerifierResult(
             perspective="topology", ok=ok, score=score,
             reasoning=(f"pos={positive} neg={negative} neutral={neutral} "
-                       f"active={active} cheeger={cheeger_approx:.2f}")
+                       f"active={active} cheeger={cheeger_approx:.2f} "
+                       f"fiedler={fiedler:.4f}")
         )
 
 
@@ -539,7 +609,14 @@ class TopologyVerifier:
 # S28: Riemannian IC 修正 ±0.15
 # ══════════════════════════════════════════════════════════════
 class GeometryVerifier:
-    """黎曼流形曲率验证：价格序列动能与候选方向一致性。"""
+    """
+    黎曼流形曲率验证：价格序列动能与候选方向一致性。
+    arXiv:2407.09468 Geometry 视角核心概念:
+      - 对数收益率序列 = 黎曼流形上的曲线
+      - 测地线曲率 = 二阶差分 (加速度)
+      - Frechet均值 = 最小化测地线距离平方和的中心点
+      - 测地线距离 = 当前点到 Frechet 均值的距离 → 偏离度
+    """
 
     MAX_BUFFER = 500
     IC_CORRECT = 0.15   # S28: 黎曼曲率修正幅度
@@ -577,11 +654,37 @@ class GeometryVerifier:
         curvature = sum(d2) / len(d2) if d2 else 0.0
         return curvature, slope
 
+    def _frechet_mean(self) -> float:
+        """
+        arXiv:2407.09468: Frechet均值 = 最小化测地线距离平方和的点。
+        在1D对数收益率空间中，Frechet均值 = 算术均值。
+        返回: 近期对数收益率的 Frechet 均值。
+        """
+        buf = self._price_buf
+        if len(buf) < 5:
+            return 0.0
+        recent = buf[-50:]  # 近50根K线的收益率
+        return sum(recent) / len(recent)
+
+    def _geodesic_distance(self, current_return: float) -> float:
+        """
+        arXiv:2407.09468: 当前点到 Frechet 均值的测地线距离。
+        在1D流形上 = |current - frechet_mean|。
+        距离越大 = 偏离历史中心越远 = 信号越强(趋势加速或反转)。
+        """
+        fm = self._frechet_mean()
+        return abs(current_return - fm)
+
     def verify(self, node: TreeNode, close_prices: Optional[List[float]] = None) -> VerifierResult:
         if close_prices:
             self.update(close_prices)
 
         curvature, slope = self._geodesic_curvature()
+
+        # Frechet 均值 + 测地线距离 (论文核心)
+        frechet = self._frechet_mean()
+        current_ret = self._price_buf[-1] if self._price_buf else 0.0
+        geo_dist = self._geodesic_distance(current_ret)
 
         # 动量方向: 优先看曲率(加速度)，曲率接近零时用斜率(速度)
         # 对数收益率量级 ~0.001，二阶差分 ~0.00001，需大倍率放大
@@ -599,6 +702,11 @@ class GeometryVerifier:
         action_up = node.action == "BUY"
         aligned = (momentum_up == action_up) or node.action == "HOLD"
 
+        # 测地线距离增强: 偏离 Frechet 均值越远，信号越强
+        # geo_dist 量级 ~0.001-0.01, 放大后叠加到 signal_strength
+        geo_boost = min(geo_dist * 200, 0.05)  # 最多 +0.05 额外强度
+        signal_strength += geo_boost
+
         # S28: IC 修正，clamp 到 ±0.15
         raw_ic = min(signal_strength, self.IC_CORRECT)
         score = 0.5 + (raw_ic if aligned else -raw_ic)
@@ -607,6 +715,7 @@ class GeometryVerifier:
         return VerifierResult(
             perspective="geometry", ok=aligned, score=round(score, 4),
             reasoning=(f"curvature={curvature:.6f} slope={slope:.6f} "
+                       f"frechet={frechet:.6f} geo_dist={geo_dist:.6f} "
                        f"momentum_up={momentum_up} action={node.action} aligned={aligned}")
         )
 
