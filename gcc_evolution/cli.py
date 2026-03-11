@@ -29,6 +29,13 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
+STRUCTURE_AUTHORITY_FILE = Path(".GCC") / "STRUCTURE_AUTHORITY.json"
+ENTRYPOINTS_FILE = Path(".GCC") / "ENTRYPOINTS.md"
+SKILL_SOURCE_FILE = Path(".GCC") / "skill" / "SKILL.md"
+SKILL_MIRROR_FILE = Path("AIPro") / "v5.640" / "SKILL.md"
+RUNTIME_BLOCK_START = "<!-- gcc-evo:runtime-structure:start -->"
+RUNTIME_BLOCK_END = "<!-- gcc-evo:runtime-structure:end -->"
+
 
 def _safe_print(text: str) -> None:
     """Print with a safe fallback for legacy console encodings."""
@@ -171,7 +178,7 @@ def cmd_init(args):
     if not config_path.exists():
         config_path.write_text(
             "# gcc-evo configuration\n"
-            "version: '5.330'\n"
+            "version: '5.400'\n"
             "project: '{}'\n"
             "loop_interval: 300  # seconds\n"
             "skeptic_threshold: 0.75\n"
@@ -628,19 +635,41 @@ def cmd_ho_create(args):
 def _sync_docs_after_ho_create() -> tuple[bool, str]:
     """
     Best-effort doc sync hook after `gcc-evo ho create`.
-    Source of truth: .GCC/skill/SKILL.md
-    Mirror target:    AIPro/v5.640/SKILL.md
+    Structure source of truth: .GCC/ENTRYPOINTS.md
+    Skill source for mirroring: .GCC/skill/SKILL.md
+    Mirror target: AIPro/v5.640/SKILL.md
+
+    Requirement:
+    - `gcc-evo ho create` must attempt to refresh the mirrored skill after handoff.
+    - The mirrored skill must stay aligned with the latest runtime structure defined by
+      `.GCC/ENTRYPOINTS.md`.
+    - If sync or validation fails, the command must surface a warning instead of failing silently.
     """
-    src = Path(".GCC") / "skill" / "SKILL.md"
-    dst = Path("AIPro") / "v5.640" / "SKILL.md"
+    authority_ok, authority_msg = _validate_structure_authority()
+    if not authority_ok:
+        return False, authority_msg
+
+    src = SKILL_SOURCE_FILE
+    dst = SKILL_MIRROR_FILE
     if not src.exists():
         return False, f"source not found: {src}"
+
+    sync_ok, sync_msg = _refresh_skill_runtime_structure_block(
+        skill_path=src,
+        entrypoints_path=ENTRYPOINTS_FILE,
+    )
+    if not sync_ok:
+        return False, sync_msg
 
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
     except Exception as exc:
         return False, f"sync failed ({src} -> {dst}): {exc}"
+
+    mirror_ok, mirror_msg = _validate_skill_structure_alignment(dst)
+    if not mirror_ok:
+        return False, f"synced, but mirror validation failed: {mirror_msg}"
 
     checker_candidates = [
         Path(".GCC") / "improvement" / "key-010" / "03062026" / "doc_consistency_check.py",
@@ -665,8 +694,141 @@ def _sync_docs_after_ho_create() -> tuple[bool, str]:
     if res.returncode != 0:
         err = (res.stderr or "").strip()
         tail = output or err or "unknown checker error"
-        return False, f"synced, checker failed: {tail}"
-    return True, f"synced {src} -> {dst}; checker passed"
+        return True, f"{sync_msg}; synced {src} -> {dst}; checker warning: {tail}"
+    return True, f"{sync_msg}; synced {src} -> {dst}; checker passed"
+
+
+def _validate_structure_authority() -> tuple[bool, str]:
+    """Validate the machine-readable structure authority pointer."""
+    if not ENTRYPOINTS_FILE.exists():
+        return False, f"structure source missing: {ENTRYPOINTS_FILE}"
+
+    if not STRUCTURE_AUTHORITY_FILE.exists():
+        return False, f"structure authority file missing: {STRUCTURE_AUTHORITY_FILE}"
+
+    try:
+        data = json.loads(STRUCTURE_AUTHORITY_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return False, f"failed to parse {STRUCTURE_AUTHORITY_FILE}: {exc}"
+
+    source = str(data.get("structure_source_of_truth", "")).strip().replace("\\", "/")
+    if source != ".GCC/ENTRYPOINTS.md":
+        return False, (
+            f"{STRUCTURE_AUTHORITY_FILE} points to {source or '<empty>'}, "
+            "expected .GCC/ENTRYPOINTS.md"
+        )
+    return True, "structure authority validated"
+
+
+def _refresh_skill_runtime_structure_block(skill_path: Path, entrypoints_path: Path) -> tuple[bool, str]:
+    """Update the generated runtime structure block inside the skill file."""
+    if not skill_path.exists():
+        return False, f"skill file missing: {skill_path}"
+    if not entrypoints_path.exists():
+        return False, f"entrypoints file missing: {entrypoints_path}"
+
+    try:
+        skill_text = skill_path.read_text(encoding="utf-8")
+        entrypoints_text = entrypoints_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        return False, f"failed to read skill/entrypoints: {exc}"
+
+    rows = _extract_entrypoint_rows(entrypoints_text)
+    if not rows:
+        return False, f"no entrypoints parsed from {entrypoints_path}"
+
+    generated_block = _render_runtime_structure_block(rows)
+    new_text = _upsert_runtime_structure_block(skill_text, generated_block)
+
+    if new_text != skill_text:
+        try:
+            skill_path.write_text(new_text, encoding="utf-8")
+        except Exception as exc:
+            return False, f"failed to update {skill_path}: {exc}"
+        return True, f"refreshed runtime structure block from {entrypoints_path}"
+
+    validate_ok, validate_msg = _validate_skill_structure_alignment(skill_path)
+    if not validate_ok:
+        return False, validate_msg
+    return True, f"runtime structure block already aligned with {entrypoints_path}"
+
+
+def _extract_entrypoint_rows(entrypoints_text: str) -> list[tuple[str, str, str]]:
+    """Extract markdown table rows from the official entrypoints doc."""
+    rows: list[tuple[str, str, str]] = []
+    in_table = False
+    for raw_line in entrypoints_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if in_table and rows:
+                continue
+            in_table = False
+            continue
+
+        if line.startswith("| 入口 |") or line.startswith("| entrypoint |"):
+            in_table = True
+            continue
+        if in_table and line.startswith("|------"):
+            continue
+        if in_table and line.startswith("|"):
+            parts = [part.strip() for part in line.strip("|").split("|")]
+            if len(parts) >= 3 and parts[0].startswith("`") and parts[0].endswith("`"):
+                rows.append((parts[0], parts[1], parts[2]))
+            continue
+
+        in_table = False
+    return rows
+
+
+def _render_runtime_structure_block(rows: list[tuple[str, str, str]]) -> str:
+    """Render a generated skill block that mirrors current runtime entrypoints."""
+    top_rows = rows[:8]
+    lines = [
+        RUNTIME_BLOCK_START,
+        "## Runtime Structure Mirror",
+        "",
+        "- Auto-generated by `gcc-evo ho create` doc sync.",
+        "- Structure source of truth: `.GCC/ENTRYPOINTS.md`",
+        "- Do not edit this block manually.",
+        "",
+        "| Entrypoint | Purpose | Start |",
+        "|------|------|----------|",
+    ]
+    for entrypoint, purpose, start_cmd in top_rows:
+        lines.append(f"| {entrypoint} | {purpose} | {start_cmd} |")
+    lines.extend(["", RUNTIME_BLOCK_END, ""])
+    return "\n".join(lines)
+
+
+def _upsert_runtime_structure_block(skill_text: str, generated_block: str) -> str:
+    """Insert or replace the generated runtime structure block."""
+    if RUNTIME_BLOCK_START in skill_text and RUNTIME_BLOCK_END in skill_text:
+        pattern = re.compile(
+            re.escape(RUNTIME_BLOCK_START) + r".*?" + re.escape(RUNTIME_BLOCK_END),
+            re.DOTALL,
+        )
+        return pattern.sub(generated_block.strip(), skill_text, count=1)
+
+    trimmed = skill_text.rstrip()
+    return f"{trimmed}\n\n{generated_block}"
+
+
+def _validate_skill_structure_alignment(skill_path: Path) -> tuple[bool, str]:
+    """Check that a skill file points to ENTRYPOINTS and contains the generated block."""
+    try:
+        text = skill_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        return False, f"failed to read {skill_path}: {exc}"
+
+    required_snippets = [
+        ".GCC/ENTRYPOINTS.md",
+        RUNTIME_BLOCK_START,
+        RUNTIME_BLOCK_END,
+    ]
+    for snippet in required_snippets:
+        if snippet not in text:
+            return False, f"{skill_path} missing required snippet: {snippet}"
+    return True, f"{skill_path} aligned to .GCC/ENTRYPOINTS.md"
 
 
 def cmd_commit(args):

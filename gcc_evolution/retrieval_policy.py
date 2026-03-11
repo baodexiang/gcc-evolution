@@ -1,5 +1,5 @@
 """
-GCC v5.340 — Agentic Retrieval Interface (IRS-004)
+GCC v5.400 — Agentic Retrieval Interface (IRS-004)
 
 Apache 2.0 — open-source interface layer.
 The retrieval decision strategy (counterfactual IC scoring, adaptive thresholds)

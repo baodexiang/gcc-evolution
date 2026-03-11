@@ -21,9 +21,9 @@ if readme_path.exists():
 
 setup(
     name="gcc-evolution",
-    version="5.325",
+    version="5.400",
 
-    description="GCC v5.325 - Self-Evolution Engine + Smart Handoff",
+    description="GCC v5.400 - Self-Evolution Engine + Smart Handoff",
     long_description=long_description,
     long_description_content_type="text/markdown",
 

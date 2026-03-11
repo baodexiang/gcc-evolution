@@ -1,5 +1,5 @@
 """
-GCC v5.340 — Reasoning Trace Logger (IRS-008)
+GCC v5.400 — Reasoning Trace Logger (IRS-008)
 
 Apache 2.0 — open-source interface layer.
 DuckDB persistence and Dashboard query interface are private (BUSL 1.1).

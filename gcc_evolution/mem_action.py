@@ -1,5 +1,5 @@
 """
-GCC v5.340 — Mem-as-Action Interface (IRS-001)
+GCC v5.400 — Mem-as-Action Interface (IRS-001)
 
 Apache 2.0 — open-source interface layer.
 The KNN-based memory evolution algorithm is private (BUSL 1.1).

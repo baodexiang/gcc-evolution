@@ -1,4 +1,4 @@
-"""Canonical v5.330 8-layer tier manifest for gcc-evo."""
+"""Canonical v5.400 8-layer tier manifest for gcc-evo."""
 from __future__ import annotations
 
 LAYER_TIER_MATRIX = {

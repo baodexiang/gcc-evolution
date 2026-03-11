@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gcc-evo v5.340 — GCC Evolution Engine with Visual Dashboard"""
+"""gcc-evo v5.400 — GCC Evolution Engine with Visual Dashboard"""
 from __future__ import annotations
 
 import json
@@ -31,7 +31,7 @@ if _GCC_SELF_DIR not in sys.path:
 
 KEYS_FILE = Path(".gcc/keys.yaml")
 
-HELP_TEXT = """  GCC v5.340 — Active Evolution Engine
+HELP_TEXT = """  GCC v5.400 — Active Evolution Engine
   ═══════════════════════════════════════════════════
 
   Daily Use:
@@ -1895,6 +1895,17 @@ def cmd_ho_create(description, key):
 
     # ── Step 7: Auto-update dashboard ──
     _auto_export_dashboard()
+
+    # ── Step 8: Auto-refresh mirrored skill docs ──
+    try:
+        from gcc_evolution.cli import _sync_docs_after_ho_create
+        sync_ok, sync_msg = _sync_docs_after_ho_create()
+        if sync_ok:
+            click.echo(f"  ✓ Skill sync: {sync_msg}")
+        else:
+            click.echo(f"  · Skill sync warning: {sync_msg}")
+    except Exception as e:
+        click.echo(f"  · Skill sync warning: {e}")
 
 
 def _db_auto_sync():
