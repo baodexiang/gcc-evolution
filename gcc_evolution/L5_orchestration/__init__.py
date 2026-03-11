@@ -8,12 +8,14 @@ Community: base loop + simple sequential DAG
 Enterprise: adaptive DAG + multi-arm bandit scheduling
 """
 
-from .pipeline import DAGPipeline, PipelineStage
+from .pipeline import DAGPipeline, PipelineStage, ResearchWorkflow, build_research_workflow
 from .loop_engine_base import SelfImprovementLoop, LoopPhase
 
 __all__ = [
     "DAGPipeline",
     "PipelineStage",
+    "ResearchWorkflow",
+    "build_research_workflow",
     "SelfImprovementLoop",
     "LoopPhase",
 ]

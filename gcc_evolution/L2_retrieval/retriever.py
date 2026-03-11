@@ -16,11 +16,16 @@ import math
 # E5 (Engram#5): session_prefetch_priority from P001_engram eq.(11)
 try:
     from gcc.papers.formulas.P001_engram import (
+        eq_5_decay_factor as _decay_factor,
         eq_7_normalize_key as _normalize_key,
         eq_11_session_prefetch_priority as _prefetch_score,
     )
 except ImportError:
     import re as _re, math as _math
+    def _decay_factor(age_days: float, lambda_decay: float = 0.08) -> float:
+        age = max(0.0, float(age_days))
+        lam = max(1e-8, float(lambda_decay))
+        return max(0.0, min(1.0, _math.exp(-lam * age)))
     def _normalize_key(context: str) -> str:  # inline fallback
         if context is None:
             return ""
@@ -136,12 +141,52 @@ class HybridRetriever(BaseRetriever):
       >>> results = retriever.retrieve("market signal", top_k=5)
     """
 
-    def __init__(self):
+    def __init__(self, current_regime: Optional[str] = None, decay_rate: float = 0.08):
         self.semantic = SemanticRetriever()
         self.keyword = KeywordRetriever()
         self.documents = []
         self.weights = {"semantic": 0.5, "temporal": 0.3, "keyword": 0.2}
-        self.alias_map: Dict[str, str] = {}  # E1: alias → canonical key dedup
+        self.alias_map: Dict[str, str] = {}  # E1: alias -> canonical key dedup
+        self.current_regime = _normalize_key(current_regime) if current_regime else ""
+        self.decay_rate = max(1e-8, float(decay_rate))
+
+    def set_current_regime(self, regime: Optional[str]) -> None:
+        """Update the active regime for future retrieval calls."""
+        self.current_regime = _normalize_key(regime) if regime else ""
+
+    @staticmethod
+    def _parse_created_at(value: Any, default: datetime) -> datetime:
+        if isinstance(value, datetime):
+            return value.replace(tzinfo=None) if value.tzinfo is not None else value
+        if isinstance(value, str) and value:
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                return parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+            except ValueError:
+                return default
+        return default
+
+    @staticmethod
+    def _doc_regime(doc: Dict[str, Any]) -> str:
+        for key in ("regime", "current_regime"):
+            value = doc.get(key)
+            if value:
+                return _normalize_key(value)
+        metadata = doc.get("metadata")
+        if isinstance(metadata, dict):
+            for key in ("regime", "current_regime"):
+                value = metadata.get(key)
+                if value:
+                    return _normalize_key(value)
+        return ""
+
+    def _regime_multiplier(self, doc: Dict[str, Any], effective_regime: str) -> float:
+        if not effective_regime:
+            return 1.0
+        doc_regime = self._doc_regime(doc)
+        if not doc_regime:
+            return 1.0
+        return 1.15 if doc_regime == effective_regime else 0.85
 
     def add_alias(self, alias: str, canonical: str) -> None:
         """E1: Register alias so both keys resolve to the same canonical context."""
@@ -152,11 +197,17 @@ class HybridRetriever(BaseRetriever):
         key = _normalize_key(query)
         return self.alias_map.get(key, key)
 
-    def retrieve(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        current_regime: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Retrieve using hybrid scoring."""
         if not self.documents:
             return []
         query = self._resolve_query(query)  # E1: normalize + alias resolution
+        effective_regime = _normalize_key(current_regime) if current_regime else self.current_regime
 
         # Get results from each retriever
         semantic_results = self.semantic.retrieve(query, top_k * 2)
@@ -166,11 +217,9 @@ class HybridRetriever(BaseRetriever):
         now = datetime.utcnow()
         temporal_scores = {}
         for doc in self.documents:
-            created = doc.get("created_at", now)
-            if isinstance(created, str):
-                created = datetime.fromisoformat(created)
-            age_days = (now - created).days
-            temporal_scores[doc["id"]] = math.exp(-age_days / 30)  # Decay over 30 days
+            created = self._parse_created_at(doc.get("created_at", now), now)
+            age_days = max(0.0, (now - created).total_seconds() / 86400.0)
+            temporal_scores[doc["id"]] = _decay_factor(age_days, lambda_decay=self.decay_rate)
 
         # Combine scores
         combined = {}
@@ -198,7 +247,10 @@ class HybridRetriever(BaseRetriever):
         for doc_id in sorted_ids[:top_k]:
             doc = next((d for d in self.documents if d["id"] == doc_id), None)
             if doc:
-                results.append({"document": doc, "score": combined[doc_id]})
+                score = combined[doc_id] * self._regime_multiplier(doc, effective_regime)
+                results.append({"document": doc, "score": score})
+
+        results.sort(key=lambda item: item["score"], reverse=True)
 
         return results
 

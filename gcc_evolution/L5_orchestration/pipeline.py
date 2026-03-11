@@ -231,3 +231,44 @@ class DAGPipeline:
             stage.started_at = None
             stage.completed_at = None
         self.execution_log.clear()
+
+
+class ResearchWorkflow(DAGPipeline):
+    """
+    Fixed 5-stage research workflow built on the generic DAG pipeline.
+
+    Stages:
+      1. exploration
+      2. hypothesis
+      3. implement
+      4. validate
+      5. distill
+    """
+
+    DEFAULT_STAGE_ORDER = [
+        "exploration",
+        "hypothesis",
+        "implement",
+        "validate",
+        "distill",
+    ]
+
+    def __init__(self, handlers: Dict[str, Callable]):
+        super().__init__()
+        self._install_default_stages(handlers)
+
+    def _install_default_stages(self, handlers: Dict[str, Callable]) -> None:
+        for stage_name in self.DEFAULT_STAGE_ORDER:
+            if stage_name not in handlers:
+                raise ValueError(f"Missing handler for research stage '{stage_name}'")
+
+        self.add_stage("exploration", handlers["exploration"], depends_on=[])
+        self.add_stage("hypothesis", handlers["hypothesis"], depends_on=["exploration"])
+        self.add_stage("implement", handlers["implement"], depends_on=["hypothesis"])
+        self.add_stage("validate", handlers["validate"], depends_on=["implement"])
+        self.add_stage("distill", handlers["distill"], depends_on=["validate"])
+
+
+def build_research_workflow(handlers: Dict[str, Callable]) -> ResearchWorkflow:
+    """Factory for the fixed 5-stage research workflow."""
+    return ResearchWorkflow(handlers)

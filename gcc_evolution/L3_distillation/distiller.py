@@ -10,6 +10,11 @@ from dataclasses import dataclass, asdict
 import hashlib
 import json
 
+try:
+    from gcc_evolution.L4_decision import HallucinationDetector
+except ImportError:  # pragma: no cover - fallback for stripped builds
+    HallucinationDetector = None
+
 
 @dataclass
 class DistillationResult:
@@ -41,6 +46,8 @@ class ExperienceDistiller:
         self.min_confidence = min_confidence
         self.experience_log = []
         self.generated_cards = []
+        self.hallucination_detector = HallucinationDetector() if HallucinationDetector else None
+        self.rejected_patterns: List[Dict[str, Any]] = []
 
     def add_experience(self, experience: Dict[str, Any]) -> None:
         """Log an experience for later distillation."""
@@ -66,6 +73,8 @@ class ExperienceDistiller:
             confidence = pattern["confidence"]
             if confidence < self.min_confidence:
                 continue
+            if not self._passes_hallucination_gate(pattern):
+                continue
 
             card = DistillationResult(
                 card_id=self._generate_card_id(pattern),
@@ -81,6 +90,48 @@ class ExperienceDistiller:
             self.generated_cards.append(card)
 
         return cards
+
+    def _passes_hallucination_gate(self, pattern: Dict[str, Any]) -> bool:
+        """Run a lightweight L4 hallucination gate before finalizing a card."""
+        if not self.hallucination_detector:
+            return True
+
+        reasoning = " | ".join(
+            [
+                str(pattern.get("summary", "")),
+                json.dumps(pattern.get("conditions", {}), ensure_ascii=False, sort_keys=True, default=str),
+                json.dumps(pattern.get("actions", []), ensure_ascii=False, default=str),
+            ]
+        )
+        decision_like = {
+            "signal": "DISTILL",
+            "action": "STORE_CARD",
+            "confidence": pattern.get("confidence", 0.0),
+            "reasoning": reasoning,
+            "data_references": list((pattern.get("metadata") or {}).keys()),
+        }
+        context = dict(pattern.get("metadata") or {})
+        issues = []
+        for detector in (
+            self.hallucination_detector.detect_overconfidence,
+            self.hallucination_detector.detect_contradictions,
+        ):
+            issue = detector(decision_like)
+            if issue:
+                issues.append(issue)
+        data_issue = self.hallucination_detector.detect_data_hallucination(decision_like, context)
+        if data_issue:
+            issues.append(data_issue)
+        if issues:
+            self.rejected_patterns.append(
+                {
+                    "title": pattern.get("title", "Unknown Pattern"),
+                    "issues": issues,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+            return False
+        return True
 
     def _extract_patterns(self) -> List[Dict[str, Any]]:
         """Find recurring patterns in experience log."""
