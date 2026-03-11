@@ -1760,7 +1760,11 @@ function loadGccTm() {
     // KNN 9维特征名称 (与 gcc_trading_module.py KNNExperience.feature_names 对齐)
     const FEAT_NAMES = ['vision_conf','scan_conf','n_gate_buy','filter_passed',
         'filter_vol_score','win_rate','vol_ratio','topology_score','geometry_score'];
-    fetch('/key009/gcctm').then(r => r.json()).then(d => {
+    fetch('/key009/gcctm').then(r => {
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('json')) throw new Error('API未就绪(需重启服务器加载/key009/gcctm路由)');
+        return r.json();
+    }).then(d => {
         const decisions = d.decisions || [];
         const knn = d.knn_entries || [];
         // Summary
