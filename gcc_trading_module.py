@@ -1936,13 +1936,12 @@ def _load_algebra_history(mod: "GCCTradingModule") -> int:
 # 安全开关：只有在此集合中的美股品种才会走 EXECUTE 模式
 _GCC_TM_EXECUTE_SYMBOLS: frozenset = frozenset({
     "TSLA", "CRWV", "NBIS", "ONDS", "OPEN",
+    "ZECUSDC", "SOLUSDC",
 })  # B4: 逐品种开启，随时可关
 
 
 def _get_symbol_phase(symbol: str) -> str:
-    """按品种决定 phase：加密 → OBSERVE，美股且在白名单 → EXECUTE，否则 OBSERVE。"""
-    if symbol in _CRYPTO_SYMBOLS:
-        return PHASE_OBSERVE
+    """按品种决定 phase：白名单 → EXECUTE，否则 OBSERVE。"""
     if symbol in _GCC_TM_EXECUTE_SYMBOLS:
         return PHASE_EXECUTE
     return PHASE_OBSERVE

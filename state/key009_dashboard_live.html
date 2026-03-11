@@ -432,8 +432,8 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <!-- Tab: GCC交易决策模块 (KEY-011) -->
 <div class="tab-content" id="tab-gcctm">
 
-<!-- 美股执行区域 -->
-<h2>🟢 美股 GCC-TM 执行</h2>
+<!-- 执行区域 (美股+加密) -->
+<h2>🟢 GCC-TM 执行 (7品种)</h2>
 <div id="gcctm-us-status" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
 <table>
 <thead><tr>
@@ -444,7 +444,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 </table>
 
 <!-- 加密观察区域 -->
-<h2 style="margin-top:24px">🔍 加密货币 GCC-TM 观察</h2>
+<h2 style="margin-top:24px">🔍 加密货币 GCC-TM 观察 (BTC/ETH)</h2>
 <div id="gcctm-crypto-status" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
 <table>
 <thead><tr>
@@ -1892,7 +1892,7 @@ function loadGccTm() {
     const FEAT_NAMES = ['vision_conf','scan_conf','n_gate_buy','filter_passed',
         'filter_vol_score','win_rate','vol_ratio','topology_score','geometry_score'];
     const CRYPTO_SYMS = new Set(['BTCUSDC','ETHUSDC','SOLUSDC','ZECUSDC']);
-    const US_EXECUTE = new Set(['TSLA','CRWV','NBIS','ONDS','OPEN']);
+    const EXECUTE_SYMS = new Set(['TSLA','CRWV','NBIS','ONDS','OPEN','ZECUSDC','SOLUSDC']);
     const formatGccTmTimestamp = (rawTs) => {
         if (!rawTs) return '-';
         try {
@@ -2054,21 +2054,21 @@ function loadGccTm() {
         const knn = d.knn_entries || [];
         const pipelineTasks = d.pipeline_tasks || [];
 
-        // 分离美股 vs 加密决策（同时支持 gcc_trading_decisions 和 process() 两种数据源）
-        const usDec = decisions.filter(x => US_EXECUTE.has(x.symbol));
-        const cryptoDec = decisions.filter(x => CRYPTO_SYMS.has(x.symbol));
-        const otherDec = decisions.filter(x => !US_EXECUTE.has(x.symbol) && !CRYPTO_SYMS.has(x.symbol));
+        // 分离: 执行品种(美股+加密) vs 加密观察 vs 其他美股观察
+        const execDec = decisions.filter(x => EXECUTE_SYMS.has(x.symbol));
+        const cryptoDec = decisions.filter(x => CRYPTO_SYMS.has(x.symbol) && !EXECUTE_SYMS.has(x.symbol));
+        const otherDec = decisions.filter(x => !EXECUTE_SYMS.has(x.symbol) && !CRYPTO_SYMS.has(x.symbol));
 
         // 美股执行区域
         const usStatus = $('gcctm-us-status');
-        const usBuys = usDec.filter(x => (x.gcc_action||x.final_action) === 'BUY').length;
-        const usSells = usDec.filter(x => (x.gcc_action||x.final_action) === 'SELL').length;
-        usStatus.textContent = `执行品种: ${[...US_EXECUTE].join(', ')} | 共 ${usDec.length} 条 | BUY:${usBuys} SELL:${usSells}`;
+        const execBuys = execDec.filter(x => (x.gcc_action||x.final_action) === 'BUY').length;
+        const execSells = execDec.filter(x => (x.gcc_action||x.final_action) === 'SELL').length;
+        usStatus.textContent = `执行品种: ${[...EXECUTE_SYMS].join(', ')} | 共 ${execDec.length} 条 | BUY:${execBuys} SELL:${execSells}`;
         const usBody = $('gcctm-us-body');
-        if (!usDec.length) {
-            usBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">暂无美股执行数据 (等待4H K线结束)</td></tr>';
+        if (!execDec.length) {
+            usBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">暂无执行数据 (等待4H K线结束)</td></tr>';
         } else {
-            usBody.innerHTML = usDec.map(renderDecisionRow).join('');
+            usBody.innerHTML = execDec.map(renderDecisionRow).join('');
         }
 
         // 加密观察区域
@@ -2098,7 +2098,7 @@ function loadGccTm() {
 
         // Summary
         const summary = $('gcctm-summary');
-        summary.textContent = `共 ${decisions.length} 条决策 | 美股执行:${usDec.length} | 美股观察:${otherDec.length} | 加密观察:${cryptoDec.length} | KNN:${knn.length} | 任务:${pipelineTasks.length}`;
+        summary.textContent = `共 ${decisions.length} 条决策 | 执行:${execDec.length} | 美股观察:${otherDec.length} | 加密观察:${cryptoDec.length} | KNN:${knn.length} | 任务:${pipelineTasks.length}`;
         renderPipelineTasks(pipelineTasks);
         // KNN cards — features 是 List[float] 长度9, outcome 是 bool|null
         const cardsEl = $('gcctm-knn-cards');
@@ -2134,7 +2134,7 @@ function loadGccTm() {
 
         // ── 管线对比: accuracy data ──
         const accuracy = d.accuracy || {};
-        const US_EX = new Set(['TSLA','CRWV','NBIS','ONDS','OPEN']);
+        const US_EX = new Set(['TSLA','CRWV','NBIS','ONDS','OPEN','ZECUSDC','SOLUSDC']);
         const CR_SY = new Set(['BTCUSDC','ETHUSDC','SOLUSDC','ZECUSDC']);
         const compareBody = $('pipeline-compare-body');
         const compareSummary = $('pipeline-compare-summary');
