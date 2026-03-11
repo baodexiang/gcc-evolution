@@ -25,6 +25,7 @@ import argparse
 import importlib
 import io
 import sys
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
@@ -41,6 +42,7 @@ NY_TZ = ZoneInfo("America/New_York")
 ROOT = Path(__file__).parent
 STATE_DIR = ROOT / "state"
 EXPORT_FILE = STATE_DIR / "key009_audit.json"
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # KEY-009 GCC任务 → 日志标签映射
@@ -2253,10 +2255,17 @@ def _plugin_accuracy_backfill(new_signals: list) -> dict:
         except Exception:
             continue
 
-        # 尝试获取当前价格 (从tracking state或yfinance)
-        _cur_price = _get_current_price_safe(sig["symbol"])
+        # 获取信号发出4H后的历史价格 (非实时价格)
+        eval_ts = sig_ts + timedelta(hours=4)
+        if eval_ts > now:
+            continue  # 还没到评估时间
+        _cur_price = _get_price_at_time(sig["symbol"], eval_ts)
+        # 回退: 历史价格取不到时用实时价格(仅信号>24H时)
+        if (not _cur_price or _cur_price <= 0) and hours_elapsed > 24:
+            _cur_price = _get_current_price_safe(sig["symbol"])
         if _cur_price and _cur_price > 0:
             sig["current_price"] = _cur_price
+            sig["eval_ts"] = eval_ts.isoformat()
             entry_price = sig.get("price", 0)
             # price=0时: 从trade_history查找同品种同时间附近的价格作为entry_price
             if not entry_price:
@@ -2404,6 +2413,35 @@ def _plugin_phase_update(plugin_accuracy: dict) -> dict:
             pass
 
     return phases
+
+
+def _get_price_at_time(symbol: str, target_ts: "datetime") -> float:
+    """获取指定时间点的历史价格 (yfinance 1H K线)。
+    用于信号准确率回填: 取 target_ts 附近最近的收盘价。
+    """
+    try:
+        import yfinance as yf
+        # 品种映射: BTCUSDC → BTC-USD, TSLA → TSLA
+        yf_symbol = symbol
+        if symbol.endswith("USDC"):
+            yf_symbol = symbol[:-4] + "-USD"
+        elif symbol.endswith("USDT"):
+            yf_symbol = symbol[:-4] + "-USD"
+
+        # 取 target_ts 前后各1H 的数据窗口
+        start = target_ts - timedelta(hours=1)
+        end = target_ts + timedelta(hours=1)
+        ticker = yf.Ticker(yf_symbol)
+        df = ticker.history(start=start, end=end, interval="1h")
+        if df.empty:
+            return 0.0
+        # 取最接近 target_ts 的行
+        df.index = df.index.tz_convert("US/Eastern") if df.index.tz else df.index.tz_localize("US/Eastern")
+        target_aware = target_ts if target_ts.tzinfo else target_ts.replace(tzinfo=NY_TZ)
+        closest_idx = min(df.index, key=lambda t: abs((t - target_aware).total_seconds()))
+        return float(df.loc[closest_idx, "Close"])
+    except Exception:
+        return 0.0
 
 
 def _get_current_price_safe(symbol: str) -> float:
