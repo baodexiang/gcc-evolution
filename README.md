@@ -1,142 +1,129 @@
 # gcc-evo v5.400
 
-See also: [FRAMEWORK_BOUNDARY.md](FRAMEWORK_BOUNDARY.md) | [FRAMEWORK_BOUNDARY.en.md](FRAMEWORK_BOUNDARY.en.md) | [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md) | [PRICING.en.md](PRICING.en.md)
+**AI Self-Evolution Engine** — Persistent memory + continuous learning framework for LLM agents.
 
-`gcc-evo` is an AI self-evolution framework with a strict release boundary:
+[![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9+-green.svg)](https://www.python.org)
 
-- `5 Free foundation layers`: `UI`, `L0`, `L1`, `L2`, `L3`
-- `3 Paid core layers`: `L4`, `L5`, `DA`
-- `paid/l0-l3` are commercial enhancement packs for the free foundation layers
+## What is gcc-evo?
 
-## Release Model
+gcc-evo is a framework that gives LLM agents the ability to **learn from experience and improve over time**. Instead of starting fresh every session, your agent accumulates knowledge, distills patterns, and evolves its decision-making.
 
-### Free Foundation
+### Core Capabilities
 
-| Layer | Purpose | CLI / Entry |
-|---|---|---|
-| `UI` | Dashboard, setup, visibility | `gcc-evo version`, `gcc-evo health` |
-| `L0` | Setup, prerequisites, safe bootstrap | `gcc-evo setup KEY-001`, `gcc-evo l0 scaffold`, `gcc-evo l0 check` |
-| `L1` | Persistent memory | `gcc-evo memory compact`, `gcc-evo memory export` |
-| `L2` | Retrieval and normalization | Integrated module surface in the free foundation; no standalone CLI in the opensource package |
-| `L3` | Distillation and reusable skills | Integrated module surface in the free foundation; task-driven through `pipe` and runtime outputs |
-
-### Paid Core
-
-| Layer | Purpose | Why it is paid |
-|---|---|---|
-| `L4` | Decision evolution, skeptic gate, benchmark acceptance | It is the model-comparison and acceptance control center |
-| `L5` | Closed-loop orchestration, adaptive scheduling, drift-aware execution | It turns isolated tools into a self-improving operating loop |
-| `DA` | Direction Anchor constitutional governance | It enforces non-negotiable strategic constraints |
-
-### Commercial Enhancement Packs
-
-`paid/l0`, `paid/l1`, `paid/l2`, and `paid/l3` are commercial enhancement packs. They strengthen the free layers, but they do not change the public release count.
-
-The release-facing statement must always remain:
-
-- `5 Free + 3 Paid`
-
-## Why the Paid Core Exists
-
-The strongest gcc-evo design goal is not simple memory or retrieval. It is a governed improvement engine that can:
-
-1. evaluate competing decisions with measurable acceptance criteria
-2. orchestrate a closed loop instead of isolated commands
-3. enforce a constitutional direction anchor so the system does not drift
-
-That design goal lives in the paid core: `L4 + L5 + DA`.
+- **L0 Governance** — Safe bootstrap with prerequisite gates and quality checks
+- **L1 Memory** — Three-tier memory (sensory → short-term → long-term) with configurable storage backends
+- **L2 Retrieval** — Hybrid retrieval (semantic + keyword + temporal) with RAG pipeline
+- **L3 Distillation** — Extract reusable experience cards from raw interactions
+- **L5 Orchestration** — 6-step self-improvement loop (Observe → Analyze → Hypothesize → Test → Improve → Integrate)
+- **UI Dashboard** — Real-time WebSocket dashboard with event bus and execution tracing
 
 ## Installation
-
-### Community
 
 ```bash
 pip install gcc-evo
 gcc-evo version
 ```
 
-### Source
+### From Source
 
 ```bash
-git clone https://github.com/baodexiang/gcc-evo.git
-cd gcc-evo/opensource
+git clone https://github.com/baodexiang/gcc-evolution.git
+cd gcc-evolution
 pip install -e "."
 ```
 
 ## Quick Start
 
-### Free Foundation Flow
-
 ```bash
+# Initialize project
 gcc-evo init
+
+# Setup an improvement key
 gcc-evo setup KEY-001
+
+# Bootstrap L0 governance gate
 gcc-evo l0 scaffold
 gcc-evo l0 check
-gcc-evo l0 set-prereq data_quality --status pass --evidence "acceptance"
-gcc-evo l0 set-prereq deterministic_rules --status pass --evidence "acceptance"
-gcc-evo l0 set-prereq mathematical_filters --status pass --evidence "acceptance"
+gcc-evo l0 set-prereq data_quality --status pass --evidence "validated"
+gcc-evo l0 set-prereq deterministic_rules --status pass --evidence "validated"
+gcc-evo l0 set-prereq mathematical_filters --status pass --evidence "validated"
+
+# Create and manage pipeline tasks
 gcc-evo pipe task "Improve error handling" -k KEY-001 -m core -p P1
 gcc-evo pipe list
 gcc-evo pipe status GCC-0001
+
+# Memory operations
 gcc-evo memory compact
 gcc-evo memory export
+
+# Health check
 gcc-evo health
-```
 
-### Community Demo Loop
-
-```bash
+# Run a demo evolution loop
 gcc-evo loop DEMO-001 --once --dry-run
 ```
 
-This community loop is a smoke-test orchestration path. It proves the package
-can run a single end-to-end iteration and write audit artifacts locally.
-It does not replace the full paid-core orchestration model.
+## Architecture
 
-### OCR and Card Utilities
-
-The `opensource/` tree still includes OCR and paper-processing scripts such as
-`ocr.py`, `ocr_pdf.py`, and `pdf_to_cards_v3.py`, but they are not exposed as
-`gcc-evo` subcommands in the current open-source CLI.
-
-### Paid Core Flow
-
-```bash
-gcc-evo loop GCC-0001 --once
+```
+gcc_evolution/
+  free/
+    ui/        — Dashboard, event bus, execution tracer
+    l0/        — Governance, setup wizard, prerequisites
+    l1/        — Memory tiers (sensory/short/long-term) + storage
+    l2/        — Hybrid retriever + RAG pipeline
+    l3/        — Experience distiller + card generator
+    l5/        — Self-improvement loop + DAG pipeline
 ```
 
-The paid core flow activates the full governed orchestration model. In the
-canonical model, production `loop` usage belongs to paid `L5` and depends on
-paid `L4` controls.
+### Theory Foundation
 
-Before running a non-dry-run loop, make sure the L0 gate is green:
+gcc-evo's design is grounded in peer-reviewed research. All referenced papers are included in [`gcc/papers/pdf/`](gcc/papers/pdf/):
 
-```bash
-gcc-evo l0 check
-gcc-evo l0 set-prereq data_quality --status pass --evidence "acceptance"
-gcc-evo l0 set-prereq deterministic_rules --status pass --evidence "acceptance"
-gcc-evo l0 set-prereq mathematical_filters --status pass --evidence "acceptance"
-```
+| Paper | arXiv | Used In |
+|-------|-------|---------|
+| DeepSeek Engram (Memory Update & Decay) | [2601.07372](https://arxiv.org/abs/2601.07372) | L1 Memory equations |
+| POMDP Safety Constraint (Mem-as-Action) | [2601.12538](https://arxiv.org/abs/2601.12538) | Direction Anchor, Memory Policy, Retrieval Gate |
+| History Is Not Enough (Drift-Aware) | [2601.10143](https://arxiv.org/abs/2601.10143) | Drift detection, adaptive windows |
+| PUCT Multi-Layer Tree Search | [2603.04735](https://arxiv.org/abs/2603.04735) | Decision tree search |
+| Autonomous Market Intelligence | [2601.11958](https://arxiv.org/abs/2601.11958) | Nowcasting signals |
+| FINSABER | [2505.07078](https://arxiv.org/abs/2505.07078) | Market regime classification |
+| Time-Inhomogeneous Volatility Aversion | [2602.12030](https://arxiv.org/abs/2602.12030) | Risk management |
+| Three-Perspective Verification | [2407.09468](https://arxiv.org/abs/2407.09468) | Multi-angle validation |
 
-## Pricing
+Formula implementations: [`gcc/papers/formulas/`](gcc/papers/formulas/) (P001–P006 with full test coverage)
 
-| Tier | Includes |
-|---|---|
-| `Community` | `UI + L0 + L1 + L2 + L3` |
-| `Evolve` | `Community + paid/l0-l3` |
-| `Pro` | `Evolve + L4 + L5` |
-| `Enterprise` | `Pro + DA + enterprise deployment` |
+### Open-Source Interfaces (Apache 2.0)
 
-## Stability Notes
+8 theoretical interfaces (IRS-001~008) are published under Apache 2.0:
 
-- Free layers should run independently for setup, memory, retrieval, distillation, and visibility.
-- Paid layers should fail clearly with upgrade guidance rather than silently pretending to be available.
-- Legacy packages remain for compatibility only and do not define the commercial boundary.
+- `mem_action.py` — Memory-as-Action protocol
+- `retrieval_policy.py` — Agentic RAG gate with counterfactual rewards
+- `direction_anchor.py` — Constitutional governance validator
+- `holdout.py` — Holdout splitter + skeptic gate
+- `fault_tolerance.py` — Phase isolation + heartbeat monitor
+- `shapley.py` — Monte Carlo Shapley attribution
+- `divergence_monitor.py` — Fleiss' Kappa consistency checking
+- `reasoning_trace.py` — Execution trace logging
+
+## Paid Layers (not included)
+
+| Layer | Purpose |
+|-------|---------|
+| **L4** | Multi-model ensemble + skeptic gate + benchmark acceptance |
+| **DA** | Direction Anchor constitutional governance enforcement |
+
+Available at [gcc-evo.dev/licensing](https://gcc-evo.dev/licensing)
+
+## License
+
+[Business Source License 1.1](LICENSE) — Free for personal, academic, and small business use (<$1M revenue). Converts to Apache 2.0 on May 1, 2028.
 
 ## Documents
 
-- [QUICKSTART.en.md](QUICKSTART.en.md)
-- [README.zh.md](README.zh.md)
-- [PRICING.md](PRICING.md)
-- [FRAMEWORK_BOUNDARY.md](FRAMEWORK_BOUNDARY.md)
-- [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md)
+- [Quick Start (EN)](QUICKSTART.en.md) | [中文说明](README.zh.md)
+- [Architecture](ARCHITECTURE.en.md) | [Layer Structure](LAYER_STRUCTURE.md)
+- [Pricing](PRICING.en.md) | [Framework Boundary](FRAMEWORK_BOUNDARY.en.md)
+- [Contributing](CONTRIBUTING.en.md) | [Security](SECURITY.en.md)
