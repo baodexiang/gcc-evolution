@@ -9718,21 +9718,25 @@ class PriceScanEngine:
             "position_valid_range": "无限制",
         }
 
-        # 通知主程序
+        # v21.25: 缠论外挂降级为观察模式 — 准确率过低(25.5%)，只记录不执行
         main_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
-        server_response = self._notify_main_server(main_symbol, signal_data)
-
-        signal_data["server_executed"] = server_response.get("executed", False)
-        signal_data["server_reason"] = server_response.get("reason", "")
-
-        # 只在实际执行成功时更新配额和发送邮件
-        if server_response.get("executed", False):
-            status_msg = update_plugin_daily_state(state, action, trend=current_trend_for_limit, market_type=market_type)
-            logger.info(f"[v21.1] {symbol} 缠论BS 执行成功，更新配额: {status_msg}")
-            self._save_chan_bs_state()
-            self.email_notifier.send_signal_notification(symbol, signal_data)
-        else:
-            logger.info(f"[{symbol}] 缠论BS: 未执行({server_response.get('reason', '')}), 不消耗配额")
+        logger.info(f"[ChanBS][OBSERVE] {symbol} {action} 信号已记录(观察模式，不发送执行)")
+        logger.info(f"  └─ 降级原因: 缠论准确率25.5%，暂停实际交易，仅观察")
+        signal_data["server_executed"] = False
+        signal_data["server_reason"] = "ChanBS观察模式(准确率不足)"
+        server_response = {"executed": False, "reason": "ChanBS观察模式"}
+        # 原执行路径保留但注释，待准确率回升后恢复:
+        # main_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
+        # server_response = self._notify_main_server(main_symbol, signal_data)
+        # signal_data["server_executed"] = server_response.get("executed", False)
+        # signal_data["server_reason"] = server_response.get("reason", "")
+        # if server_response.get("executed", False):
+        #     status_msg = update_plugin_daily_state(state, action, trend=current_trend_for_limit, market_type=market_type)
+        #     logger.info(f"[v21.1] {symbol} 缠论BS 执行成功，更新配额: {status_msg}")
+        #     self._save_chan_bs_state()
+        #     self.email_notifier.send_signal_notification(symbol, signal_data)
+        # else:
+        #     logger.info(f"[{symbol}] 缠论BS: 未执行({server_response.get('reason', '')}), 不消耗配额")
 
         # 外挂利润追踪
         if self.profit_tracker:
@@ -10293,7 +10297,15 @@ class PriceScanEngine:
                             f"[{_bv_pattern}] conf={_bv_conf} price={_bv_price:.2f}")
                 _bv_resp = self._notify_main_server(_bv_main_sym, _bv_signal_data)
                 _bv_executed = _bv_resp.get('executed', False)
-                logger.info(f"[BROOKS_VISION] P0响应: {_bv_main_sym} executed={_bv_executed}")
+                logger.info(
+                    f"[BROOKS_VISION] P0响应: {_bv_main_sym} executed={_bv_executed} "
+                    f"reason={_bv_resp.get('reason', '')}"
+                )
+                try:
+                    from brooks_vision import log_dispatch_result
+                    log_dispatch_result(_bv_main_sym, _bv_resp, _bv_r.get("radar", {}))
+                except Exception as _bv_log_err:
+                    logger.debug(f"[BROOKS_VISION] dispatch log skipped: {_bv_log_err}")
                 # v2.4: 只在实际成交后才消耗Brooks Vision每日配额 + v2.2: 成交后才发邮件
                 if _bv_executed:
                     try:
