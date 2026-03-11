@@ -466,6 +466,249 @@ def _select_best_candidate(nodes: List[TreeNode]) -> TreeNode:
 
 
 # ══════════════════════════════════════════════════════════════
+# S23  VerifierResult — 三视角验证结果
+# ══════════════════════════════════════════════════════════════
+@dataclass
+class VerifierResult:
+    perspective: str    # "topology" | "geometry" | "algebra"
+    ok: bool            # 是否支持该候选方向
+    score: float        # 置信度 [0, 1]
+    reasoning: str = ""
+
+
+# ══════════════════════════════════════════════════════════════
+# S24-S25  TopologyVerifier
+# 论文: arXiv:2407.09468 Sec.3 Topology (超图连通性)
+# 思路: 把各数据源分数看作超图节点，连通度反映信号一致性
+# 实现: Cheeger常数近似 = 最小割 / 节点数（连通=ok）
+# S25: 信号数 < 3 时 fallback ok=True
+# ══════════════════════════════════════════════════════════════
+class TopologyVerifier:
+    """超图连通性验证：信号源之间的一致性评估。"""
+
+    THRESHOLD = 0.0   # Cheeger 近似值 > 0 代表连通
+
+    def verify(self, node: TreeNode) -> VerifierResult:
+        scores = {k: v for k, v in node.scores_by_source.items()
+                  if not k.startswith("_")}  # 排除元数据 key
+
+        # S25: 信号源不足 3 个时 fallback 放行
+        if len(scores) < 3:
+            return VerifierResult(
+                perspective="topology", ok=True, score=0.5,
+                reasoning=f"fallback: only {len(scores)} sources"
+            )
+
+        vals = list(scores.values())
+        n = len(vals)
+        positive = sum(1 for v in vals if v > 0)
+        negative = sum(1 for v in vals if v < 0)
+
+        # 超图平衡度: 多数方向比例
+        majority = max(positive, negative)
+        balance = majority / n  # [0.5, 1.0]
+
+        # Cheeger 近似: 少数边 / 总节点 (越小越连通)
+        minority = n - majority
+        cheeger_approx = minority / n   # 0=完全连通, 0.5=最不连通
+
+        ok = cheeger_approx <= 0.34    # 允许最多 1/3 节点不一致
+        score = round(balance, 4)
+
+        return VerifierResult(
+            perspective="topology", ok=ok, score=score,
+            reasoning=(f"pos={positive} neg={negative} minority={minority}/{n} "
+                       f"cheeger={cheeger_approx:.2f}")
+        )
+
+
+# ══════════════════════════════════════════════════════════════
+# S26-S28  GeometryVerifier
+# 论文: arXiv:2407.09468 Sec.4 Geometry (黎曼流形曲率)
+# 思路: 对数收益率序列的局部曲率 → 判断当前价格动能方向
+# S27: 滚动缓冲区最多 500 根 bars
+# S28: Riemannian IC 修正 ±0.15
+# ══════════════════════════════════════════════════════════════
+class GeometryVerifier:
+    """黎曼流形曲率验证：价格序列动能与候选方向一致性。"""
+
+    MAX_BUFFER = 500
+    IC_CORRECT = 0.15   # S28: 黎曼曲率修正幅度
+
+    def __init__(self):
+        self._price_buf: List[float] = []  # 对数收益率序列 (S27)
+
+    def update(self, close_prices: List[float]) -> None:
+        """喂入收盘价，维护对数收益率滚动缓冲。"""
+        import math
+        new_returns = []
+        for i in range(1, len(close_prices)):
+            p0, p1 = close_prices[i - 1], close_prices[i]
+            if p0 > 0 and p1 > 0:
+                new_returns.append(math.log(p1 / p0))
+        self._price_buf.extend(new_returns)
+        # 截断到最近 MAX_BUFFER 条
+        if len(self._price_buf) > self.MAX_BUFFER:
+            self._price_buf = self._price_buf[-self.MAX_BUFFER:]
+
+    def _geodesic_curvature(self) -> float:
+        """计算近期收益率序列的测地线曲率（二阶差分均值）。"""
+        buf = self._price_buf
+        if len(buf) < 10:
+            return 0.0
+        recent = buf[-20:]
+        # 一阶差分（速度）
+        d1 = [recent[i] - recent[i - 1] for i in range(1, len(recent))]
+        # 二阶差分（曲率）
+        d2 = [d1[i] - d1[i - 1] for i in range(1, len(d1))]
+        return sum(d2) / len(d2) if d2 else 0.0
+
+    def verify(self, node: TreeNode, close_prices: Optional[List[float]] = None) -> VerifierResult:
+        if close_prices:
+            self.update(close_prices)
+
+        curvature = self._geodesic_curvature()
+
+        # 动量方向判断
+        momentum_up = curvature >= 0    # 正曲率=加速向上
+        action_up   = node.action == "BUY"
+
+        aligned = (momentum_up == action_up) or node.action == "HOLD"
+
+        # S28: 以曲率量级作为 IC 修正，clamp 到 ±0.15
+        raw_ic = min(abs(curvature) * 100, self.IC_CORRECT)
+        score = 0.5 + (raw_ic if aligned else -raw_ic)
+        score = max(0.0, min(1.0, score))
+
+        return VerifierResult(
+            perspective="geometry", ok=aligned, score=round(score, 4),
+            reasoning=(f"curvature={curvature:.6f} momentum_up={momentum_up} "
+                       f"action={node.action} aligned={aligned}")
+        )
+
+
+# ══════════════════════════════════════════════════════════════
+# S29-S31  AlgebraVerifier
+# 论文: arXiv:2407.09468 Sec.5 Algebra (等变加权胜率)
+# 思路: 用双曲空间距离加权历史胜率，支持等变变换
+# S30: record_outcome() 记录历史结果
+# S31: reference_price 首次价格作为等变基准点
+# ══════════════════════════════════════════════════════════════
+class AlgebraVerifier:
+    """等变加权胜率验证：双曲空间距离调权的历史胜率。"""
+
+    def __init__(self):
+        self._history: List[dict] = []   # {price, action, outcome: bool}
+        self._ref_price: Optional[float] = None   # S31 等变基准点
+
+    def record_outcome(self, price: float, action: str, outcome: bool) -> None:
+        """S30: 记录一次交易结果（outcome=True 为盈利）。"""
+        if self._ref_price is None:
+            self._ref_price = price   # S31: 首次价格初始化
+        self._history.append({"price": price, "action": action, "outcome": outcome})
+        # 只保留最近 200 条
+        if len(self._history) > 200:
+            self._history = self._history[-200:]
+
+    def _hyperbolic_distance(self, p1: float, p2: float) -> float:
+        """双曲空间距离近似：对数价格比的绝对值。"""
+        import math
+        if p1 <= 0 or p2 <= 0:
+            return 1.0
+        return abs(math.log(p2 / p1))
+
+    def verify(self, node: TreeNode, current_price: float = 0.0) -> VerifierResult:
+        """S29: 等变加权胜率验证。"""
+        if not self._history or current_price <= 0:
+            # 无历史数据时 fallback
+            return VerifierResult(
+                perspective="algebra", ok=True, score=0.5,
+                reasoning="no history, fallback ok=True"
+            )
+
+        ref = self._ref_price or current_price
+        same_action = [h for h in self._history if h["action"] == node.action]
+        if len(same_action) < 3:
+            return VerifierResult(
+                perspective="algebra", ok=True, score=0.5,
+                reasoning=f"insufficient history ({len(same_action)}<3), fallback"
+            )
+
+        # 双曲距离加权胜率
+        weighted_win = 0.0
+        weighted_total = 0.0
+        for h in same_action:
+            dist = self._hyperbolic_distance(h["price"], current_price)
+            # 距离越近权重越大（距离反比）
+            weight = 1.0 / (1.0 + dist)
+            weighted_total += weight
+            if h["outcome"]:
+                weighted_win += weight
+
+        if weighted_total <= 0:
+            return VerifierResult(perspective="algebra", ok=True, score=0.5,
+                                  reasoning="zero weight, fallback")
+
+        win_rate = weighted_win / weighted_total
+        ok = win_rate >= 0.5
+        score = round(win_rate, 4)
+
+        return VerifierResult(
+            perspective="algebra", ok=ok, score=score,
+            reasoning=(f"weighted_wr={win_rate:.3f} "
+                       f"n={len(same_action)} action={node.action}")
+        )
+
+
+# ══════════════════════════════════════════════════════════════
+# S32-S34  BeyondEuclidVerifier
+# arXiv:2407.09468: 三视角独立验证，≥2/3 通过才执行
+# S32: verify(best_node) → (consensus_count, results)
+# S33: 共识规则 ≥2/3 → EXECUTE，<2/3 → SKIP
+# S34: 无存活候选 → 直接 SKIP 跳过验证
+# ══════════════════════════════════════════════════════════════
+class BeyondEuclidVerifier:
+    """三视角独立验证器：Topology + Geometry + Algebra。"""
+
+    def __init__(self):
+        self.topology = TopologyVerifier()
+        self.geometry = GeometryVerifier()
+        self.algebra  = AlgebraVerifier()
+
+    def verify(
+        self,
+        best_node: Optional[TreeNode],
+        close_prices: Optional[List[float]] = None,
+        current_price: float = 0.0,
+    ) -> Tuple[int, List[VerifierResult], str]:
+        """
+        S32: 对最优候选节点进行三视角验证。
+        返回: (consensus_count, results, verdict)
+        verdict: "EXECUTE" | "SKIP" | "NOTIFY"
+        """
+        # S34: 无候选 (all_pruned) 直接 SKIP
+        if best_node is None or best_node.prune_reason == "all_candidates_pruned":
+            return 0, [], "SKIP"
+
+        # HOLD 节点不需要三视角验证（保守策略）
+        if best_node.action == "HOLD":
+            return 0, [], "SKIP"
+
+        results: List[VerifierResult] = [
+            self.topology.verify(best_node),
+            self.geometry.verify(best_node, close_prices),
+            self.algebra.verify(best_node, current_price),
+        ]
+
+        consensus_count = sum(1 for r in results if r.ok)
+
+        # S33: ≥2/3 → EXECUTE，否则 SKIP
+        verdict = "EXECUTE" if consensus_count >= 2 else "SKIP"
+
+        return consensus_count, results, verdict
+
+
+# ══════════════════════════════════════════════════════════════
 # 自测 (直接运行时)
 # ══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
@@ -528,3 +771,30 @@ if __name__ == "__main__":
     best2 = _select_best_candidate([b2, s2, h2])
     print(f"  BUY pruned={b2.pruned} ({b2.prune_reason})")
     print(f"  Best: {best2.action}")
+
+    print(f"\n=== S23-S34 三视角验证层自测 ===")
+    verifier = BeyondEuclidVerifier()
+
+    # 喂入模拟价格序列（上升趋势）
+    import math
+    prices = [100.0 * math.exp(0.002 * i + 0.001 * (i % 3 - 1)) for i in range(60)]
+    verifier.geometry.update(prices)
+
+    # 模拟有历史记录的 Algebra
+    for i in range(10):
+        verifier.algebra.record_outcome(prices[i], "BUY", i % 3 != 0)  # 约67%胜率
+
+    # 用 best (BUY, agg=0.7458) 跑三视角验证
+    consensus, results, verdict = verifier.verify(best, prices, prices[-1])
+    print(f"S32 consensus={consensus}/3  verdict={verdict}")
+    for r in results:
+        print(f"  {r.perspective:10s}: ok={r.ok}  score={r.score:.4f}  {r.reasoning}")
+
+    # S34: HOLD 节点直接 SKIP
+    hold_test = TreeNode("HOLD", {}, 0.0)
+    cnt2, _, v2 = verifier.verify(hold_test)
+    print(f"S34 HOLD → verdict={v2} (expected SKIP)")
+
+    # S34: None 节点直接 SKIP
+    _, _, v3 = verifier.verify(None)
+    print(f"S34 None → verdict={v3} (expected SKIP)")
