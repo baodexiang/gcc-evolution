@@ -64,7 +64,15 @@ except ImportError:
         from signal_direction_filter import SignalDirectionFilter, ValidSignal
     except ImportError:
         SignalDirectionFilter = None
-        ValidSignal = None
+
+# S48: KEY-011 GCC交易决策模块 (Phase1 observe, 不影响主流程)
+try:
+    from gcc_trading_module import gcc_observe as _gcc_observe
+    _HAS_GCC_TM = True
+except ImportError:
+    _HAS_GCC_TM = False
+    def _gcc_observe(*a, **kw): pass
+ValidSignal = None
 try:
     from modules.behavior_finance import evaluate_behavior_finance  # KEY-005: 行为金融增强层
     _BEHAVIOR_FINANCE_LOADED = True
@@ -16092,6 +16100,27 @@ def rule_based_arbiter(
                 result["reason"] = f"规则仲裁-x8趋势裁决: x4=SIDE,x8={x8_trend}, 弱跟随{sell_v[0]}"
                 print(f"[v3.680] ✅ 规则仲裁: SELL (x8=DOWN弱裁决) conf={result['confidence']:.0%}")
                 return result
+            # v3.681 GCC-0242: x4=SIDE + x8=SIDE → 置信度裁决（不再无脑落入兜底HOLD）
+            else:
+                if buy_v[2] >= sell_v[2] + 0.10:
+                    result["signal"] = "BUY"
+                    result["confidence"] = min(0.50, buy_v[2] * 0.7)
+                    result["reason"] = f"规则仲裁-置信度裁决: {buy_v[0]}({buy_v[2]:.0%})>{sell_v[0]}({sell_v[2]:.0%}), x4=x8=SIDE"
+                    print(f"[v3.681] ✅ 规则仲裁: BUY (置信度裁决 x4=x8=SIDE) conf={result['confidence']:.0%}")
+                    return result
+                elif sell_v[2] >= buy_v[2] + 0.10:
+                    result["signal"] = "SELL"
+                    result["confidence"] = min(0.50, sell_v[2] * 0.7)
+                    result["reason"] = f"规则仲裁-置信度裁决: {sell_v[0]}({sell_v[2]:.0%})>{buy_v[0]}({buy_v[2]:.0%}), x4=x8=SIDE"
+                    print(f"[v3.681] ✅ 规则仲裁: SELL (置信度裁决 x4=x8=SIDE) conf={result['confidence']:.0%}")
+                    return result
+                else:
+                    # 置信度差距<10%，真正的分歧 → HOLD
+                    result["signal"] = "HOLD"
+                    result["confidence"] = 0.45
+                    result["reason"] = f"规则仲裁-真分歧: {buy_v[0]}({buy_v[2]:.0%}) vs {sell_v[0]}({sell_v[2]:.0%}), x4=x8=SIDE"
+                    print(f"[v3.681] ✅ 规则仲裁: HOLD (真分歧+无趋势) conf=45%")
+                    return result
 
     # ─── 规则3: 1方向 + 2 HOLD → 看大趋势是否支持该方向 ───
     if len(hold_votes) == 2 and (len(buy_votes) == 1 or len(sell_votes) == 1):
@@ -16114,11 +16143,28 @@ def rule_based_arbiter(
             print(f"[v3.680] ✅ 规则仲裁: HOLD (单方向逆势) conf=50%")
             return result
 
-        # x4=SIDE → HOLD（无趋势支撑，单方不足）
+        # v3.681 GCC-0242: x4=SIDE → 不再无脑HOLD，分层检查
+        # 层1: x8有方向且支持 → 弱跟随
+        if (lone_dir == "BUY" and x8_trend == "UP") or (lone_dir == "SELL" and x8_trend == "DOWN"):
+            result["signal"] = lone_dir
+            result["confidence"] = min(0.50, lone_vote[2] * 0.7)
+            result["reason"] = f"规则仲裁-单方+x8确认: {lone_vote[0]}={lone_vote[1]}, x4=SIDE,x8={x8_trend}"
+            print(f"[v3.681] ✅ 规则仲裁: {lone_dir} (单方向+x8确认) conf={result['confidence']:.0%}")
+            return result
+
+        # 层2: 高置信度(>=0.65)单方信号 → 弱跟随
+        if lone_vote[2] >= 0.65:
+            result["signal"] = lone_dir
+            result["confidence"] = min(0.45, lone_vote[2] * 0.6)
+            result["reason"] = f"规则仲裁-单方高置信度: {lone_vote[0]}={lone_vote[1]}(conf={lone_vote[2]:.0%}), x4=SIDE"
+            print(f"[v3.681] ✅ 规则仲裁: {lone_dir} (单方向高置信度) conf={result['confidence']:.0%}")
+            return result
+
+        # 层3: 低置信度+无趋势 → HOLD（合理保守）
         result["signal"] = "HOLD"
         result["confidence"] = 0.45
-        result["reason"] = f"规则仲裁-单方无趋势: {lone_vote[0]}={lone_vote[1]}, x4=SIDE"
-        print(f"[v3.680] ✅ 规则仲裁: HOLD (单方向+无趋势) conf=45%")
+        result["reason"] = f"规则仲裁-单方低置信度无趋势: {lone_vote[0]}={lone_vote[1]}(conf={lone_vote[2]:.0%}), x4=SIDE"
+        print(f"[v3.681] ✅ 规则仲裁: HOLD (单方向+无趋势+低置信度) conf=45%")
         return result
 
     # ─── 规则4: 全HOLD → HOLD ───
@@ -16135,6 +16181,39 @@ def rule_based_arbiter(
     result["reason"] = f"规则仲裁-兜底: {ai_signal}/{human_signal}/{tech_signal}, x4={x4_trend}"
     print(f"[v3.680] ⚠️ 规则仲裁兜底: HOLD ({ai_signal}/{human_signal}/{tech_signal})")
     return result
+
+
+def _log_arbiter_decision(symbol, ai_signal, ai_conf, human_signal, human_conf,
+                          tech_signal, tech_conf, arbiter_result, market_data):
+    """v3.681 GCC-0242: 规则仲裁结果写入arbiter日志（让Dashboard可见）"""
+    try:
+        from datetime import datetime
+        _arb_log_path = os.path.join(LOG_DIR if 'LOG_DIR' in globals() else "logs", "deepseek_arbiter.log")
+        os.makedirs(os.path.dirname(_arb_log_path) if os.path.dirname(_arb_log_path) else "logs", exist_ok=True)
+        _arb_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "symbol": symbol or "UNKNOWN",
+            "source": "rule_arbiter",
+            "price_at_decision": (market_data.get("price", 0) if market_data else 0),
+            "input_signals": {
+                "ai": {"signal": ai_signal, "confidence": ai_conf},
+                "human": {"signal": human_signal, "confidence": human_conf},
+                "tech": {"signal": tech_signal, "confidence": tech_conf},
+            },
+            "arbiter_decision": {
+                "signal": arbiter_result.get("signal", "HOLD"),
+                "confidence": arbiter_result.get("confidence", 0.5),
+                "reason": arbiter_result.get("reason", ""),
+            },
+            "market_context": {
+                "trend_x4": (market_data.get("trend_x4") if market_data else None),
+                "trend_x8": (market_data.get("trend_x8") if market_data else None),
+            },
+        }
+        with open(_arb_log_path, "a", encoding="utf-8") as _af:
+            _af.write(json.dumps(_arb_entry, ensure_ascii=False) + "\n")
+    except Exception as _arb_log_err:
+        print(f"[v3.681] ⚠️ 仲裁日志写入失败: {_arb_log_err}")
 
 
 # =============================================================================
@@ -16444,6 +16523,11 @@ def negotiate_three_views_v2900(
                 symbol=symbol,
                 l2_info=l2_info,
             )
+            # v3.681 GCC-0242: 规则仲裁结果写入arbiter日志
+            _log_arbiter_decision(symbol, ai_signal, result["ai_confidence"],
+                                  human_signal, result["human_confidence"],
+                                  tech_signal, result["tech_confidence"],
+                                  arbiter_result, market_data)
         elif USE_DEEPSEEK_ARBITER:
             # 原有DeepSeek路径（已禁用，保留代码供回滚）
             arbiter_result = call_deepseek_arbiter(
@@ -17044,7 +17128,14 @@ def compute_l1_three_way_signal_v2900(
             }
             _cb_rules = _card_bridge.query_contextual(
                 module="TrendDetection", context=_cb_ctx, min_samples=3)
+            if not _cb_rules:
+                log_to_server(
+                    f"[GCC-0174][CARD-BRIDGE] {symbol} 无候选卡 "
+                    f"trend={fm_current_trend} regime={_cb_ctx['regime']}"
+                )
             if _cb_rules:
+                _cb_matched_count = 0
+                _cb_phase1_skip = 0
                 for _cb_r in _cb_rules[:3]:  # 最多匹配3张卡
                     _cb_match = False
                     for _ri, _rule in enumerate(_cb_r.get("rules", [])[:2]):
@@ -17066,21 +17157,41 @@ def compute_l1_three_way_signal_v2900(
                             pass
                         _phase_tag = f"P{_cb_phase}"
                         log_to_server(
-                            f"[CARD-BRIDGE][{symbol}] 因果匹配: {_cb_r['card_id']} "
+                            f"[GCC-0174][CARD-BRIDGE] {symbol} 因果匹配: {_cb_r['card_id']} "
                             f"\"{_cb_r['title'][:25]}\" "
                             f"ctx_rate={_cb_rate_str} src={_cb_src} "
                             f"phase={_phase_tag} "
                             f"trend={fm_current_trend} regime={_cb_ctx['regime']}")
+                        _cb_matched_count += 1
                         # Phase1=低准确率 → 跳过激活 (不记录,不参与决策)
                         if _cb_phase == 1:
+                            _cb_phase1_skip += 1
                             log_to_server(
-                                f"[CARD-BRIDGE][PHASE] {symbol} {_cb_r['card_id']} "
+                                f"[GCC-0174][CARD-BRIDGE][PHASE] {symbol} {_cb_r['card_id']} "
                                 f"Phase1收紧 → 跳过激活")
                             continue
                         _card_bridge.record_activation(
                             _cb_r["card_id"], 0, symbol, fm_current_trend,
                             last_close if 'last_close' in dir() else 0,
                             context=_cb_ctx)
+                        log_to_server(
+                            f"[GCC-0174][CARD-BRIDGE] {symbol} 激活成功: {_cb_r['card_id']} "
+                            f"action={fm_current_trend} price={last_close if 'last_close' in dir() else 0}"
+                        )
+                if _cb_matched_count == 0:
+                    log_to_server(
+                        f"[GCC-0174][CARD-BRIDGE] {symbol} 有候选但无环境匹配 "
+                        f"trend={fm_current_trend} regime={_cb_ctx['regime']}"
+                    )
+                elif _cb_phase1_skip == _cb_matched_count:
+                    log_to_server(
+                        f"[GCC-0174][CARD-BRIDGE] {symbol} 匹配{_cb_matched_count}张卡但全部Phase1跳过"
+                    )
+                else:
+                    log_to_server(
+                        f"[GCC-0174][CARD-BRIDGE] {symbol} 匹配={_cb_matched_count} "
+                        f"phase1_skip={_cb_phase1_skip}"
+                    )
     except Exception as _e_cb_q:
         pass  # Phase1: 静默，不影响主流程
     # ========= KEY-009 + GCC-0174 S5d END =========
@@ -25302,6 +25413,179 @@ def normalize_signal_and_level(raw_signal: str, raw_level: str) -> tuple[str, st
 
 
 # =========================================================
+# GCC-0244: Crypto Anchor Signal Detection (人类模式)
+# 2连阳线+DC低位 → BUY锚定(units=3)
+# 2连阴线+DC高位 → SELL锚定(units=3)
+# 锚定持久: 直到反向锚定触发或手动取消
+# =========================================================
+CRYPTO_ANCHOR_ENABLED = False  # GCC-0244: 加密货币锚定开关 (True=启用, False=休眠)
+_CRYPTO_ANCHOR_SYMBOLS = {"BTCUSDC", "ETHUSDC", "SOLUSDC", "ZECUSDC"}
+_CRYPTO_ANCHOR_STATE_FILE = os.path.join(".GCC", "human_anchors.json")
+_crypto_anchor_last_trigger = {}  # {symbol: bar_timestamp} dedup
+
+
+def _load_crypto_anchor_for_symbol(symbol: str) -> dict:
+    """读取 .GCC/human_anchors.json 中某个 symbol 的活跃锚定。"""
+    try:
+        if not os.path.exists(_CRYPTO_ANCHOR_STATE_FILE):
+            return {}
+        with open(_CRYPTO_ANCHOR_STATE_FILE, encoding="utf-8") as f:
+            anchors = json.load(f)
+        if not isinstance(anchors, list):
+            return {}
+        for a in reversed(anchors):
+            if a.get("key") == symbol and a.get("tracking_status") == "ACTIVE":
+                return a
+        return {}
+    except Exception:
+        return {}
+
+
+def _detect_crypto_anchor(symbol: str, bars: list, tv_pos_in_channel=None) -> dict | None:
+    """
+    GCC-0244: 检测加密货币锚定信号。
+    条件:
+      BUY:  2连阳线 (close > open) + DC位置 < 0.30
+      SELL: 2连阴线 (close < open) + DC位置 > 0.70
+    返回: {direction, pos_in_channel, trigger_price, bar_timestamp} 或 None
+    """
+    if symbol not in _CRYPTO_ANCHOR_SYMBOLS or len(bars) < 22:
+        return None
+
+    bar_prev = bars[-2]  # 倒数第2根
+    bar_last = bars[-1]  # 最后1根
+
+    o1 = float(bar_prev.get("open", bar_prev.get("o", 0)))
+    c1 = float(bar_prev.get("close", bar_prev.get("c", 0)))
+    o2 = float(bar_last.get("open", bar_last.get("o", 0)))
+    c2 = float(bar_last.get("close", bar_last.get("c", 0)))
+
+    bullish_1, bullish_2 = c1 > o1, c2 > o2
+    bearish_1, bearish_2 = c1 < o1, c2 < o2
+
+    # DC位置: 优先用TV推送值, 否则从K线计算
+    if tv_pos_in_channel is not None:
+        pos = tv_pos_in_channel / 100.0 if tv_pos_in_channel > 1 else tv_pos_in_channel
+    else:
+        highs_20 = [float(b.get("high", b.get("h", 0))) for b in bars[-22:-2]]
+        lows_20 = [float(b.get("low", b.get("l", 0))) for b in bars[-22:-2]]
+        h20 = max(highs_20) if highs_20 else 0
+        l20 = min(lows_20) if lows_20 else 0
+        if h20 <= l20:
+            return None
+        pos = (c2 - l20) / (h20 - l20)
+
+    # Dedup: 同一根K线只触发一次
+    bar_ts = bar_last.get("timestamp", 0)
+    if _crypto_anchor_last_trigger.get(symbol) == bar_ts and bar_ts > 0:
+        return None
+
+    direction = None
+    if bullish_1 and bullish_2 and pos < 0.30:
+        direction = "BUY"
+    elif bearish_1 and bearish_2 and pos > 0.70:
+        direction = "SELL"
+
+    if not direction:
+        return None
+
+    # 同方向锚定已存在 → 不重复触发
+    existing = _load_crypto_anchor_for_symbol(symbol)
+    if existing:
+        existing_dir = (existing.get("direction") or "").upper()
+        if (direction == "BUY" and existing_dir in ("LONG", "BULLISH")) or \
+           (direction == "SELL" and existing_dir in ("SHORT", "BEARISH")):
+            return None  # 同方向, 跳过
+
+    _crypto_anchor_last_trigger[symbol] = bar_ts
+    return {
+        "direction": direction,
+        "pos_in_channel": pos,
+        "trigger_price": c2,
+        "bar_timestamp": bar_ts,
+    }
+
+
+def _write_crypto_anchor(symbol: str, direction: str, pos_in_channel: float, trigger_price: float):
+    """
+    GCC-0244: 写入加密货币锚定到 .GCC/human_anchors.json
+    格式兼容 dashboard renderHumanGuidance()
+    锚定持久: 直到反向锚定触发或手动取消
+    """
+    from datetime import datetime, timezone
+    try:
+        if os.path.exists(_CRYPTO_ANCHOR_STATE_FILE):
+            with open(_CRYPTO_ANCHOR_STATE_FILE, encoding="utf-8") as f:
+                anchors = json.load(f)
+        else:
+            anchors = []
+        if not isinstance(anchors, list):
+            anchors = []
+
+        # 移除该symbol的旧锚定 (反向替换)
+        anchors = [a for a in anchors if a.get("key") != symbol]
+
+        now_str = datetime.now(timezone.utc).isoformat()
+        anchor_dir = "LONG" if direction == "BUY" else "SHORT"
+        candle_type = "阳" if direction == "BUY" else "阴"
+        dc_label = "低" if direction == "BUY" else "高"
+
+        anchors.append({
+            "anchor_id": f"crypto-{symbol}-{int(datetime.now(timezone.utc).timestamp())}",
+            "key": symbol,
+            "direction": anchor_dir,
+            "main_concern": f"2连{candle_type}线 DC{dc_label}位({pos_in_channel:.0%}) → {direction}锚定 units=3",
+            "constraints": [f"{direction} units=3", "persistent until reversed"],
+            "expires_after": "until_reversed",
+            "created_at": now_str,
+            "trigger_price": trigger_price,
+            "tracking_status": "ACTIVE",
+            "created_by": "CRYPTO_ANCHOR_DETECTOR",
+        })
+
+        with open(_CRYPTO_ANCHOR_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(anchors, f, ensure_ascii=False, indent=2)
+
+        log_to_server(
+            f"[GCC-0244][ANCHOR] {symbol} 锚定设置: {anchor_dir} "
+            f"price={trigger_price:.2f} DC={pos_in_channel:.1%}"
+        )
+    except Exception as e:
+        log_to_server(f"[GCC-0244][ANCHOR][ERROR] {symbol} 写入失败: {e}")
+
+
+def _dispatch_crypto_anchor_signal(symbol: str, direction: str, trigger_price: float):
+    """
+    GCC-0244: 锚定信号发送 units=3
+    连续发送3次webhook (每次间隔2秒避免rate-limit)
+    """
+    import time as _t
+    units_target = 3
+    units_sent = 0
+
+    for i in range(units_target):
+        result = send_3commas_signal(direction, trigger_price, symbol,
+                                     signal_type="人类锚定", bypass_cooldown=True)
+        if result is True:
+            units_sent += 1
+            log_to_server(f"[GCC-0244][DISPATCH] {symbol} {direction} unit {i+1}/{units_target} ✓")
+        elif result == "COOLDOWN":
+            log_to_server(f"[GCC-0244][DISPATCH] {symbol} {direction} unit {i+1}/{units_target} 冷却中")
+            break
+        elif result is None:
+            log_to_server(f"[GCC-0244][DISPATCH] {symbol} {direction} unit {i+1}/{units_target} 门控拦截")
+            break
+        else:
+            log_to_server(f"[GCC-0244][DISPATCH] {symbol} {direction} unit {i+1}/{units_target} 失败")
+            break
+        if i < units_target - 1:
+            _t.sleep(2)  # 2秒间隔避免rate-limit
+
+    log_to_server(f"[GCC-0244][ANCHOR] {symbol} {direction} 发送完成: {units_sent}/{units_target} units")
+    return units_sent
+
+
+# =========================================================
 # KEY-001 Human Anchor 冲突检查层
 # gcc-evo anchor calibrate 写入 .GCC/human_anchors.json
 # =========================================================
@@ -25426,7 +25710,7 @@ def _check_human_anchor_gate(symbol: str, final_action: str, signal_type: str) -
 # =========================================================
 # 3Commas Webhook 下单（加密货币）
 # =========================================================
-def send_3commas_signal(final_action: str, last_close: float, symbol: str, signal_type: str = ""):
+def send_3commas_signal(final_action: str, last_close: float, symbol: str, signal_type: str = "", bypass_cooldown: bool = False):
     """v21.18: 补request_id+60s冷却+连续失败熔断; GCC-0194: 去掉重复过滤(已在扫描引擎统一处理)
     返回: True=成功, False=API发送失败, None=被门控/过滤拦截"""
     if final_action not in ["BUY", "SELL"]:
@@ -25624,7 +25908,7 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
     last_signal_time = state.get(last_signal_key, 0)
     time_since_last = current_time - last_signal_time
 
-    if time_since_last < SIGNAL_COOLDOWN_SECONDS:
+    if time_since_last < SIGNAL_COOLDOWN_SECONDS and not bypass_cooldown:
         remaining = SIGNAL_COOLDOWN_SECONDS - time_since_last
         log_to_server(f"[3Commas] {symbol} {final_action} 冷却中，剩余{remaining:.0f}s")
         return "COOLDOWN"
@@ -42854,6 +43138,29 @@ def llm_decide():
     bars = ohlcv_window.get_bars()
     dow_trend_details = {}
 
+    # ── GCC-0244: Crypto Anchor Detection (人类模式) ──
+    if CRYPTO_ANCHOR_ENABLED and symbol in _CRYPTO_ANCHOR_SYMBOLS:
+        try:
+            _ca_tv_pos = tv_pos_in_channel if 'tv_pos_in_channel' in locals() else None
+            _ca_result = _detect_crypto_anchor(symbol, bars, _ca_tv_pos)
+            if _ca_result:
+                _write_crypto_anchor(
+                    symbol, _ca_result["direction"],
+                    _ca_result["pos_in_channel"], _ca_result["trigger_price"]
+                )
+                log_to_server(
+                    f"[GCC-0244] {symbol} 锚定触发: {_ca_result['direction']} "
+                    f"DC={_ca_result['pos_in_channel']:.1%} price={_ca_result['trigger_price']:.2f} → 后台发送units=3"
+                )
+                import threading
+                threading.Thread(
+                    target=_dispatch_crypto_anchor_signal,
+                    args=(symbol, _ca_result["direction"], _ca_result["trigger_price"]),
+                    daemon=True,
+                ).start()
+        except Exception as _ca_e:
+            log_to_server(f"[GCC-0244][ERROR] {symbol} anchor detection: {_ca_e}")
+
     # v3.510: 尝试使用预计算缓存
     _precomp_cache_hit = False
     _precomp_cache = get_precomputed_cache(symbol, timeframe_int)
@@ -47158,7 +47465,7 @@ def llm_decide():
                         if _matched:
                             _cb_sf_matched += 1
                             log_to_server(
-                                f"[CARD-BRIDGE][SF][{symbol}] {final_action} 匹配过滤规则: "
+                                f"[GCC-0174][CARD-BRIDGE][SF] {symbol} {final_action} 匹配过滤规则: "
                                 f"{_cb_sf['card_id']} \"{_cb_sf['title'][:30]}\" "
                                 f"conf={_cb_sf['confidence']:.1f}")
                             _card_bridge.record_activation(
@@ -47167,15 +47474,23 @@ def llm_decide():
                                 context=_cb_sig_ctx)
                             break
                 if _cb_sf_matched > 0:
-                    log_to_server(f"[CARD-BRIDGE][SF][{symbol}] {final_action} 共匹配{_cb_sf_matched}条过滤规则")
+                    log_to_server(
+                        f"[GCC-0174][CARD-BRIDGE][SF] {symbol} {final_action} 共匹配{_cb_sf_matched}条过滤规则"
+                    )
+                else:
+                    log_to_server(
+                        f"[GCC-0174][CARD-BRIDGE][SF] {symbol} {final_action} 无过滤规则匹配"
+                    )
 
                 # DP3: ExitEngine — SELL信号匹配退出规则
                 if final_action == "SELL":
                     _cb_ex_rules = _card_bridge.query(module="ExitEngine", min_confidence=0.3)
+                    _cb_ex_matched = 0
                     for _cb_ex in _cb_ex_rules[:3]:
                         for _ri, _rule in enumerate(_cb_ex.get("rules", [])[:2]):
+                            _cb_ex_matched += 1
                             log_to_server(
-                                f"[CARD-BRIDGE][EX][{symbol}] SELL匹配退出规则: "
+                                f"[GCC-0174][CARD-BRIDGE][EX] {symbol} SELL匹配退出规则: "
                                 f"{_cb_ex['card_id']} \"{_cb_ex['title'][:30]}\" "
                                 f"conf={_cb_ex['confidence']:.1f}")
                             _card_bridge.record_activation(
@@ -47183,6 +47498,10 @@ def llm_decide():
                                 last_close if 'last_close' in locals() else 0,
                                 context=_cb_sig_ctx)
                             break
+                    if _cb_ex_matched == 0:
+                        log_to_server(
+                            f"[GCC-0174][CARD-BRIDGE][EX] {symbol} SELL 无退出规则匹配"
+                        )
         except Exception:
             pass  # Phase1: 静默
         # ========= GCC-0174 Phase1 END =========
@@ -49097,6 +49416,10 @@ def llm_decide():
     except Exception as e:
         print(f"[v3.588] {symbol} Vision同步异常(不影响交易): {e}")
 
+    # S49: KEY-011 GCC交易决策模块 Phase1观察 (一行接入，不影响主流程)
+    if _HAS_GCC_TM:
+        _gcc_observe(symbol, bars, decision.get("final_action", "HOLD"))
+
     return app.response_class(
         response=json.dumps({"input": user_payload, "decision": decision}, default=str),
         status=200,
@@ -50453,9 +50776,20 @@ def handle_p0_signal():
                     timestamp=_dt_sf.now(_tz_sf.utc).isoformat(),
                     direction=signal.lower(),
                     source=signal_type,
+                    symbol=symbol,
+                    price=float(price or 0),
                 ))
             except Exception as _sf_e:
                 log_to_server(f"[SignalFilter] 记录有效信号失败: {_sf_e}")
+
+        # KEY-010 S14: lazy backfill — 4H反事实价格回填（每次P0信号入口触发）
+        if signal_filter and price and symbol:
+            try:
+                _bf_count = signal_filter.backfill_outcomes({symbol: float(price)})
+                if _bf_count:
+                    log_to_server(f"[SignalFilter] 4H回填: {_bf_count}条记录已判定")
+            except Exception as _bf_e:
+                log_to_server(f"[SignalFilter] 4H回填失败: {_bf_e}")
 
         # P0信号去重检查
         import time
@@ -50594,6 +50928,8 @@ def handle_p0_signal():
                                     timestamp=datetime.now().isoformat(),
                                     direction="buy",
                                     source=signal_type,
+                                    symbol=symbol,
+                                    price=float(price or 0),
                                 ),
                                 direction_result
                             )
@@ -50728,6 +51064,8 @@ def handle_p0_signal():
                                     timestamp=datetime.now().isoformat(),
                                     direction="sell",
                                     source=signal_type,
+                                    symbol=symbol,
+                                    price=float(price or 0),
                                 ),
                                 direction_result
                             )

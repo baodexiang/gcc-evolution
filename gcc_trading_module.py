@@ -913,6 +913,206 @@ class GCCTradingModule:
 
 
 # ══════════════════════════════════════════════════════════════
+# S43  KNNExperience dataclass
+# S44  特征向量 9 维: vision/scan/n_gate/filter_chain/
+#      win_rate/vol_ratio/topology/geometry/algebra
+# ══════════════════════════════════════════════════════════════
+@dataclass
+class KNNExperience:
+    symbol:    str
+    action:    str               # "BUY" | "SELL" | "HOLD"
+    features:  List[float]       # 9 维特征向量 (S44)
+    outcome:   Optional[bool]    # None=待回填, True=盈利, False=亏损
+    ts:        str               # ISO 时间戳
+    price:     float = 0.0       # 决策时价格
+    ref_price: float = 0.0       # 回填比较基准价
+
+    def as_dict(self) -> dict:
+        return {
+            "symbol":    self.symbol,
+            "action":    self.action,
+            "features":  self.features,
+            "outcome":   self.outcome,
+            "ts":        self.ts,
+            "price":     self.price,
+            "ref_price": self.ref_price,
+        }
+
+    @staticmethod
+    def feature_names() -> List[str]:
+        """S44: 9 维特征名称（顺序与 features 对应）。"""
+        return [
+            "vision_conf",      # 0: Vision 置信度 [0,1]
+            "scan_conf",        # 1: 扫描信号置信度 [0,1]
+            "n_gate_buy",       # 2: N-Gate BUY 状态 (0=INACTIVE,0.5=OBSERVE,1=BLOCK)
+            "filter_passed",    # 3: 过滤链通过 (0/1)
+            "filter_vol_score", # 4: 量价评分 [0,1]
+            "win_rate",         # 5: 历史胜率 [0,1]
+            "vol_ratio",        # 6: 量比 (clamp 0~3)
+            "topology_score",   # 7: Topology 验证得分 [0,1]
+            "geometry_score",   # 8: Geometry 验证得分 [0,1]
+        ]
+
+
+def _build_knn_features(context: dict, ver_results: List[VerifierResult]) -> List[float]:
+    """S44: 从 context + verifier_results 提取 9 维特征向量。"""
+    vision_bias, vision_conf = context.get("vision", ("HOLD", 0.5))
+    _, scan_conf             = context.get("scan",   ("NONE", 0.0))
+    n_gate_buy               = context.get("n_gate_buy", "INACTIVE")
+    filter_buy               = context.get("filter_buy", {})
+    win_rate                 = context.get("win_rate_buy", 0.5)
+    vol_ratio                = context.get("vol_ratio", 1.0)
+
+    n_gate_val = {"INACTIVE": 0.0, "OBSERVE": 0.5, "BLOCK": 1.0}.get(n_gate_buy, 0.0)
+    filter_passed = 1.0 if filter_buy.get("passed") else 0.0
+    filter_vol    = float(filter_buy.get("volume_score") or 0.5)
+
+    # verifier results by perspective
+    topo_score = next((r.score for r in ver_results if r.perspective == "topology"), 0.5)
+    geo_score  = next((r.score for r in ver_results if r.perspective == "geometry"), 0.5)
+
+    return [
+        round(float(vision_conf), 4),
+        round(float(scan_conf), 4),
+        round(n_gate_val, 4),
+        round(filter_passed, 4),
+        round(min(float(filter_vol), 1.0), 4),
+        round(float(win_rate), 4),
+        round(min(float(vol_ratio), 3.0), 4),
+        round(float(topo_score), 4),
+        round(float(geo_score), 4),
+    ]
+
+
+# ══════════════════════════════════════════════════════════════
+# S45-S46  KNN 经验写入 + 回填
+# 集成到 GCCTradingModule 作为方法
+# ══════════════════════════════════════════════════════════════
+_KNN_EXP_FILE = _STATE_DIR / "gcc_knn_experience.jsonl"
+_KNN_BACKFILL_LOOKBACK = 8   # S46: 8 根 K 线后回填
+
+
+def _write_knn_experience(exp: KNNExperience) -> None:
+    """S45: 追加 KNN 经验到 jsonl。"""
+    try:
+        _KNN_EXP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(_KNN_EXP_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(exp.as_dict(), ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.warning("[GCC-TRADE] write_knn_experience: %s", e)
+
+
+def _backfill_outcome(symbol: str, current_price: float, lookback: int = _KNN_BACKFILL_LOOKBACK) -> None:
+    """
+    S46: 回填最近未填 outcome 的经验条目。
+    规则: 当前价格 > ref_price * 1.005 → BUY经验=True / SELL经验=False
+          当前价格 < ref_price * 0.995 → BUY经验=False / SELL经验=True
+          否则 → neutral (outcome 保持 None)
+    lookback: 最多回填最近 N 条未填条目。
+    """
+    if not _KNN_EXP_FILE.exists() or current_price <= 0:
+        return
+    try:
+        lines = _KNN_EXP_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
+        updated = []
+        fill_count = 0
+        for line in lines:
+            if not line.strip():
+                updated.append(line)
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                updated.append(line)
+                continue
+
+            # 只回填本 symbol、outcome=None、且未超过 lookback 限额
+            if (rec.get("symbol") == symbol
+                    and rec.get("outcome") is None
+                    and fill_count < lookback):
+                ref = float(rec.get("ref_price") or rec.get("price") or 0)
+                if ref > 0:
+                    move = (current_price - ref) / ref
+                    action = rec.get("action", "HOLD")
+                    if move > 0.005:
+                        rec["outcome"] = (action == "BUY")
+                        fill_count += 1
+                    elif move < -0.005:
+                        rec["outcome"] = (action == "SELL")
+                        fill_count += 1
+                    # |move| <= 0.5% → 保持 None（neutral，不算）
+            updated.append(json.dumps(rec, ensure_ascii=False))
+
+        _KNN_EXP_FILE.write_text("\n".join(updated) + "\n", encoding="utf-8")
+        if fill_count:
+            logger.info("[GCC-TRADE] backfill %s: %d outcomes filled", symbol, fill_count)
+    except Exception as e:
+        logger.warning("[GCC-TRADE] backfill_outcome %s: %s", symbol, e)
+
+
+# ══════════════════════════════════════════════════════════════
+# S47  模块单例 — 启动时按品种初始化
+# ══════════════════════════════════════════════════════════════
+_gcc_modules: dict = {}   # {symbol: GCCTradingModule}
+
+
+def _get_gcc_module(symbol: str) -> "GCCTradingModule":
+    """懒加载单例：每个品种一个 GCCTradingModule 实例。"""
+    if symbol not in _gcc_modules:
+        _gcc_modules[symbol] = GCCTradingModule(symbol, phase=PHASE_OBSERVE)
+        logger.info("[GCC-TM] init module for %s", symbol)
+    return _gcc_modules[symbol]
+
+
+# ══════════════════════════════════════════════════════════════
+# S48-S49  llm_server 接入入口
+# 在 llm_decide() 末尾 return 前调用此函数（一行接入）
+# ══════════════════════════════════════════════════════════════
+def gcc_observe(symbol: str, bars: list, main_decision: str) -> None:
+    """
+    S49: llm_decide() 末尾一行接入。
+    Phase1 observe 模式：读数据 → 树搜索 → 三视角验证 → 写日志 → KNN经验。
+    捕获所有异常，保证不影响主程序。
+    """
+    try:
+        mod = _get_gcc_module(symbol)
+        result = mod.process(bars, main_decision=main_decision)
+
+        # 写 KNN 经验
+        if result.get("best_node") and result["best_node"].get("action") != "HOLD":
+            ver_results_raw = result.get("verifier_results", [])
+            ver_results = [
+                VerifierResult(
+                    perspective=r["perspective"], ok=r["ok"],
+                    score=r["score"], reasoning=r.get("reasoning", "")
+                )
+                for r in ver_results_raw
+            ]
+            ctx = mod._build_context(bars)
+            features = _build_knn_features(ctx, ver_results)
+            closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
+            exp = KNNExperience(
+                symbol=symbol,
+                action=result["final_action"],
+                features=features,
+                outcome=None,
+                ts=result["ts"],
+                price=result.get("current_price", 0.0),
+                ref_price=closes[-1] if closes else 0.0,
+            )
+            _write_knn_experience(exp)
+            # 尝试回填历史 outcome
+            _backfill_outcome(symbol, closes[-1] if closes else 0.0)
+
+        logger.info(
+            "[GCC-TM] %s gcc=%s main=%s verdict=%s",
+            symbol, result.get("final_action"), main_decision, result.get("verdict"),
+        )
+    except Exception as e:
+        logger.warning("[GCC-TM] gcc_observe %s: %s", symbol, e)
+
+
+# ══════════════════════════════════════════════════════════════
 # 自测 (直接运行时)
 # ══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
@@ -1034,3 +1234,33 @@ if __name__ == "__main__":
         import json as _j
         acc = _j.loads(mod_obs._accuracy_file.read_text())
         print(f"  BTCUSDC accuracy: {acc.get('BTCUSDC', {})}")
+
+    print(f"\n=== S43-S50 KNN经验层 + gcc_observe 自测 ===")
+    import math as _m2
+    bars50 = [{"close": 100 * _m2.exp(0.002*i), "volume": 500+i*30} for i in range(30)]
+
+    # S43-S44: KNNExperience + 特征向量
+    print(f"S44 feature_names: {KNNExperience.feature_names()}")
+
+    # S47-S49: gcc_observe 接入测试
+    gcc_observe("BTCUSDC", bars50, main_decision="BUY")
+    print(f"S45 knn_experience file exists: {_KNN_EXP_FILE.exists()}")
+    if _KNN_EXP_FILE.exists():
+        last = _KNN_EXP_FILE.read_text().strip().split('\n')[-1]
+        import json as _jj
+        exp_rec = _jj.loads(last)
+        print(f"  last entry: action={exp_rec['action']} features={exp_rec['features'][:3]}... outcome={exp_rec['outcome']}")
+
+    # S46: backfill 测试
+    _backfill_outcome("BTCUSDC", 110.0)   # 10% 涨 → BUY经验=True
+    if _KNN_EXP_FILE.exists():
+        last2 = _KNN_EXP_FILE.read_text().strip().split('\n')[-1]
+        exp_rec2 = _jj.loads(last2)
+        print(f"S46 backfill: outcome={exp_rec2['outcome']} (expected True for BUY+price up)")
+
+    # S50: 验证 decisions.jsonl 写入
+    mod50 = _get_gcc_module("ETHUSDC")
+    r50 = mod50.process(bars50)
+    print(f"S50 decisions.jsonl exists: {mod50._decision_log.exists()}")
+    print(f"  ETHUSDC action={r50['final_action']} verdict={r50['verdict']}")
+    print(f"\n✅ 全部 S01-S50 自测完成")
