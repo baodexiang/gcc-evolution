@@ -50130,12 +50130,14 @@ def key009_dashboard():
     # 优先读缓存(后台线程每5分钟刷新)
     _cache_path = os.path.join("state", "key009_audit.json")
     multi_data = None
+    stale_multi_data = None
     try:
         if os.path.exists(_cache_path):
+            stale_multi_data = json.loads(open(_cache_path, "r", encoding="utf-8").read())
             _mtime = os.path.getmtime(_cache_path)
             import time as _t_k9d
             if (_t_k9d.time() - _mtime) < 600:  # 10分钟内有效
-                multi_data = json.loads(open(_cache_path, "r", encoding="utf-8").read())
+                multi_data = stale_multi_data
     except Exception:
         pass
 
@@ -50168,11 +50170,18 @@ def key009_dashboard():
                     t.pop("recent", None)
                 multi_data[label] = d
         except Exception as e:
-            data = {"error": str(e), "tasks": {}, "metrics": {}, "issues": [],
-                    "total_events": 0, "total_errors": 0, "hours": 24,
-                    "generated_at": "error", "plugins": {}, "macd": {},
-                    "brooks_vision": {}, "gates": {}}
-            multi_data = {"24h": data, "1w": data, "1m": data}
+            if isinstance(stale_multi_data, dict) and stale_multi_data.get("24h"):
+                multi_data = stale_multi_data
+                for _rk in ("24h", "1w", "1m"):
+                    if isinstance(multi_data.get(_rk), dict):
+                        multi_data[_rk]["cache_fallback"] = True
+                        multi_data[_rk]["cache_fallback_reason"] = str(e)
+            else:
+                data = {"error": str(e), "tasks": {}, "metrics": {}, "issues": [],
+                        "total_events": 0, "total_errors": 0, "hours": 24,
+                        "generated_at": "error", "plugins": {}, "macd": {},
+                        "brooks_vision": {}, "gates": {}}
+                multi_data = {"24h": data, "1w": data, "1m": data}
 
     # 附加Claude复查状态
     try:
@@ -50283,7 +50292,15 @@ def key009_json():
         data["data_source_health"] = _get_data_source_health_snapshot()
         return jsonify(data)
     except Exception as e:
-        return jsonify({"error": str(e)})
+        try:
+            _cache = json.loads(open(os.path.join("state", "key009_audit.json"), "r", encoding="utf-8").read())
+            data = _cache.get("24h", _cache) if isinstance(_cache, dict) else {}
+            if isinstance(data, dict):
+                data["cache_fallback"] = True
+                data["cache_fallback_reason"] = str(e)
+            return jsonify(data)
+        except Exception:
+            return jsonify({"error": str(e)})
 
 
 @app.route("/key009/rule-transition", methods=["POST"])
@@ -50358,7 +50375,7 @@ def key009_gcctm():
             for task in all_tasks:
                 if task.get("key") != "KEY-011":
                     continue
-                if task.get("task_id") not in ("GCC-0244", "GCC-0251"):
+                if task.get("task_id") not in ("GCC-0244", "GCC-0251", "GCC-0252"):
                     continue
                 steps = task.get("steps", []) if isinstance(task.get("steps"), list) else []
                 layer_counts = {"L1": 0, "L2": 0, "L3": 0}

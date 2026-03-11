@@ -400,15 +400,34 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 
 <!-- Tab: GCC交易决策模块 (KEY-011) -->
 <div class="tab-content" id="tab-gcctm">
-<h2>GCC-TM 决策记录 (Phase1 观察)</h2>
-<div id="gcctm-summary" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
+
+<!-- 美股执行区域 -->
+<h2>🟢 美股 GCC-TM 执行</h2>
+<div id="gcctm-us-status" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
 <table>
 <thead><tr>
-  <th>时间</th><th>品种</th><th>裁决</th><th>GCC动作</th><th>共识</th>
-  <th>最强信号源</th><th>树搜索分</th><th>拓扑</th><th>几何</th><th>代数</th>
+  <th>时间</th><th>品种</th><th>GCC裁决</th><th>主程序</th><th>一致</th>
+  <th>买票</th><th>卖票</th><th>最强信号源</th><th>树搜索</th><th>共识</th>
 </tr></thead>
-<tbody id="gcctm-dec-body"></tbody>
+<tbody id="gcctm-us-body"></tbody>
 </table>
+
+<!-- 加密观察区域 -->
+<h2 style="margin-top:24px">🔍 加密货币 GCC-TM 观察</h2>
+<div id="gcctm-crypto-status" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
+<table>
+<thead><tr>
+  <th>时间</th><th>品种</th><th>GCC裁决</th><th>主程序</th><th>一致</th>
+  <th>买票</th><th>卖票</th><th>最强信号源</th><th>树搜索</th><th>共识</th>
+</tr></thead>
+<tbody id="gcctm-crypto-body"></tbody>
+</table>
+
+<!-- Pipeline 任务 -->
+<h2 style="margin-top:24px">Pipeline 任务</h2>
+<div id="gcctm-summary" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
+<div id="gcctm-pipeline" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:18px"></div>
+
 <h2 style="margin-top:20px">KNN经验卡片</h2>
 <div id="gcctm-knn-cards" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px"></div>
 </div>
@@ -787,6 +806,22 @@ function _doRender() {
     for (const pd of Object.values(sp)) {
         for (const [r,c] of Object.entries(pd.block_reasons || {})) {
             allReasons[r] = (allReasons[r]||0) + c;
+            if (false) sigaccSummary.insertAdjacentHTML('beforeend', `
+                <div class="card"><div class="label">最强外挂</div><div class="value" style="color:${best && best.accRaw != null && best.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${bestText}</div><div class="sub">${bestSub}</div></div>
+                <div class="card"><div class="label">第二名</div><div class="value" style="color:${second && second.accRaw != null && second.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${secondText}</div><div class="sub">${secondSub}</div></div>`);
+        }
+        if (false && sigaccSummary) {
+            sigaccSummary.insertAdjacentHTML('beforeend', `
+                <div class="card"><div class="label">æœ€å¼ºå¤–æŒ‚</div><div class="value" style="color:${best && best.accRaw != null && best.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${bestText}</div><div class="sub">${bestSub}</div></div>
+                <div class="card"><div class="label">ç¬¬äºŒå</div><div class="value" style="color:${second && second.accRaw != null && second.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${secondText}</div><div class="sub">${secondSub}</div></div>`);
+        }
+        if (false && sigaccSummary) {
+            sigaccSummary.insertAdjacentHTML('beforeend', `
+                <div class="card"><div class="label">最强外挂</div><div class="value" style="color:${best && best.accRaw != null && best.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${bestText}</div><div class="sub">${bestSub}</div></div>
+                <div class="card"><div class="label">第二名</div><div class="value" style="color:${second && second.accRaw != null && second.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${secondText}</div><div class="sub">${secondSub}</div></div>`);
+            sigaccSummary.insertAdjacentHTML('beforeend', `
+                <div class="card"><div class="label">最强外挂</div><div class="value" style="color:${best && best.accRaw != null && best.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${bestText}</div><div class="sub">${bestSub}</div></div>
+                <div class="card"><div class="label">第二名</div><div class="value" style="color:${second && second.accRaw != null && second.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${secondText}</div><div class="sub">${secondSub}</div></div>`);
         }
     }
     const reasonEntries = Object.entries(allReasons).sort((a,b)=>b[1]-a[1]);
@@ -1323,6 +1358,7 @@ function _doRender() {
     if (sigaccBody) {
         const srcs = Object.keys(paAcc).sort();
         let totalDecisive = 0, totalCorrect = 0, downgraded = 0;
+        const pluginRank = [];
         const rows = srcs.map(src => {
             const syms = paAcc[src] || {};
             const ov = syms._overall || {};
@@ -1348,6 +1384,7 @@ function _doRender() {
             totalDecisive += (srcTotal || 0);
             totalCorrect += (srcCorrect || 0);
             if (phase === 'DOWNGRADED') downgraded++;
+            pluginRank.push({ src, total: srcTotal || 0, correct: srcCorrect || 0, accRaw: srcAccRaw, phase });
             // 按品种明细
             const symRows = Object.keys(syms).filter(s => s !== '_overall').map(sym => {
                 const d = syms[sym] || {};
@@ -1358,6 +1395,18 @@ function _doRender() {
         sigaccBody.innerHTML = rows || '<tr><td colspan="8" style="color:#656d76">暂无信号数据 (需scan engine重启后积累)</td></tr>';
         const overallAcc = totalDecisive > 0 ? (totalCorrect / totalDecisive * 100).toFixed(0) : 'N/A';
         const overallAccText = overallAcc === 'N/A' ? 'N/A' : `${overallAcc}%`;
+        const ranked = pluginRank.sort((a, b) => {
+            const aAcc = a.accRaw == null ? -1 : a.accRaw;
+            const bAcc = b.accRaw == null ? -1 : b.accRaw;
+            if (bAcc !== aAcc) return bAcc - aAcc;
+            return (b.total || 0) - (a.total || 0);
+        });
+        const best = ranked[0] || null;
+        const second = ranked[1] || null;
+        const bestText = best && best.accRaw != null ? `${best.src} ${(best.accRaw * 100).toFixed(1)}%` : 'N/A';
+        const bestSub = best ? `${best.total} decisive${best.phase === 'DOWNGRADED' ? ' · DOWNGRADED' : ''}` : 'æ— æ ·æœ¬';
+        const secondText = second && second.accRaw != null ? `${second.src} ${(second.accRaw * 100).toFixed(1)}%` : 'N/A';
+        const secondSub = second ? `${second.total} decisive${second.phase === 'DOWNGRADED' ? ' · DOWNGRADED' : ''}` : 'æ— ç¬¬äºŒå';
         if (sigaccSummary) {
             sigaccSummary.innerHTML = `
                 <div class="card"><div class="label">总样本</div><div class="value">${totalDecisive}</div></div>
@@ -1368,6 +1417,12 @@ function _doRender() {
     }
 
     // ── 仓位控制 Tab ──
+    if (false && sigaccSummary) {
+        sigaccSummary.insertAdjacentHTML('beforeend', `
+            <div class="card"><div class="label">最强外挂</div><div class="value" style="color:${best && best.accRaw != null && best.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${bestText}</div><div class="sub">${bestSub}</div></div>
+            <div class="card"><div class="label">第二名</div><div class="value" style="color:${second && second.accRaw != null && second.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${secondText}</div><div class="sub">${secondSub}</div></div>`);
+    }
+
     const bl = DATA.baseline || {};
     const blStats = bl.stats || {};
     const blState = bl.state || {};
@@ -1760,6 +1815,100 @@ function loadGccTm() {
     // KNN 9维特征名称 (与 gcc_trading_module.py KNNExperience.feature_names 对齐)
     const FEAT_NAMES = ['vision_conf','scan_conf','n_gate_buy','filter_passed',
         'filter_vol_score','win_rate','vol_ratio','topology_score','geometry_score'];
+    const CRYPTO_SYMS = new Set(['BTCUSDC','ETHUSDC','SOLUSDC','ZECUSDC','DOGEUSDC','BNBUSDC','XRPUSDC','ADAUSDC','DOTUSDC']);
+    const US_EXECUTE = new Set(['TSLA','CRWV','NBIS','ONDS','OPEN']);
+
+    const renderDecisionRow = (dec) => {
+        const ts = (dec.ts || '').slice(0, 16);
+        const gcc = dec.gcc_action || dec.final_action || '-';
+        const main = dec.main_action || '-';
+        const match = dec.match;
+        const matchIcon = match === true ? '✅' : match === false ? '❌' : '-';
+        const gccColor = gcc === 'BUY' ? '#3fb950' : gcc === 'SELL' ? '#f85149' : '#656d76';
+        const bv = dec.buy_votes != null ? dec.buy_votes : '-';
+        const sv = dec.sell_votes != null ? dec.sell_votes : '-';
+        const src = dec.strongest_source || '-';
+        const tree = dec.tree_score != null ? Number(dec.tree_score).toFixed(3) : (dec.best_node && dec.best_node.aggregate != null ? dec.best_node.aggregate.toFixed(3) : '-');
+        const con = dec.consensus != null ? `${dec.consensus}/3` : '-';
+        return `<tr>
+            <td style="font-size:0.85em;color:#656d76">${ts}</td>
+            <td>${dec.symbol||'-'}</td>
+            <td style="color:${gccColor};font-weight:600">${gcc}</td>
+            <td>${main}</td>
+            <td>${matchIcon}</td>
+            <td>${bv}</td><td>${sv}</td>
+            <td style="font-size:0.85em">${src}</td>
+            <td>${tree}</td><td>${con}</td>
+        </tr>`;
+    };
+
+    const renderPipelineTasks = (tasks) => {
+        const container = $('gcctm-pipeline');
+        if (!container) return;
+        if (!tasks.length) {
+            container.innerHTML = '<div style="border:1px solid #eaeef2;border-radius:10px;padding:14px;color:#656d76">暂无 KEY-011 pipeline 任务</div>';
+            return;
+        }
+        // 自动检测分组: L1/L2/L3 或 A/B/C
+        const groupConfig = {
+            'L1': {title: 'L1 决策输入与状态层', match: (sid, t) => sid.startsWith('L1-') || t.includes('[L1]')},
+            'L2': {title: 'L2 树状搜索与候选裁剪层', match: (sid, t) => sid.startsWith('L2-') || t.includes('[L2]')},
+            'L3': {title: 'L3 三视角验证与 GCC-TM 接口层', match: (sid, t) => sid.startsWith('L3-') || t.includes('[L3]')},
+            'A':  {title: 'A 加密方向锁', match: (sid, t) => sid.startsWith('A') || t.includes('[加密方向锁]')},
+            'B':  {title: 'B 美股 GCC-TM 执行', match: (sid, t) => sid.startsWith('B') || t.includes('[美股gcc-tm]')},
+            'C':  {title: 'C 共用 / Dashboard', match: (sid, t) => sid.startsWith('C') || t.includes('[共用]') || t.includes('[dashboard]')},
+        };
+        container.innerHTML = tasks.map(task => {
+            const steps = task.steps || [];
+            // 检测用哪套分组
+            const hasABC = steps.some(s => /^[ABC]/.test(s.id || ''));
+            const activeGroups = hasABC ? ['A','B','C'] : ['L1','L2','L3'];
+            const groups = {};
+            activeGroups.forEach(g => groups[g] = []);
+            groups.OTHER = [];
+            steps.forEach(step => {
+                const sid = step.id || '';
+                const title = step.title || '';
+                let placed = false;
+                for (const g of activeGroups) {
+                    if (groupConfig[g].match(sid, title)) { groups[g].push(step); placed = true; break; }
+                }
+                if (!placed) groups.OTHER.push(step);
+            });
+            const layerHtml = activeGroups.map(g => {
+                const items = groups[g];
+                const done = items.filter(x => x.status === 'done').length;
+                const total = items.length;
+                const body = items.length
+                    ? items.map(step => {
+                        const doneFlag = step.status === 'done';
+                        const color = doneFlag ? '#238636' : '#d29922';
+                        const marker = doneFlag ? '✅ 完成' : '⏳ 待做';
+                        return `<div style="padding:8px 10px;border-top:1px solid #eaeef2">
+                            <div style="font-size:0.9em;font-weight:600">${step.title}</div>
+                            <div style="font-size:0.8em;color:#656d76;margin-top:2px">${step.note || ''}</div>
+                            <div style="font-size:0.78em;color:${color};margin-top:4px">${marker}</div>
+                        </div>`;
+                    }).join('')
+                    : '<div style="padding:8px 10px;border-top:1px solid #eaeef2;color:#656d76;font-size:0.85em">暂无步骤</div>';
+                return `<div style="border:1px solid #eaeef2;border-radius:8px;overflow:hidden;background:#fff">
+                    <div style="padding:8px 10px;background:#f6f8fa;font-weight:700;font-size:0.9em">${groupConfig[g].title} <span style="float:right;color:#656d76;font-weight:600">${done}/${total}</span></div>
+                    ${body}
+                </div>`;
+            }).join('');
+            return `<div style="border:1px solid #d0d7de;border-radius:12px;padding:14px;background:#ffffff">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+                    <div>
+                        <div style="font-size:0.78em;color:#656d76">${task.task_id} · ${task.priority || 'P?'} · ${task.stage || '-'}</div>
+                        <div style="font-size:1em;font-weight:700;margin-top:4px">${task.title}</div>
+                    </div>
+                    <div style="font-size:0.8em;color:#656d76">${task.updated_at || ''}</div>
+                </div>
+                <div style="font-size:0.85em;color:#656d76;margin:8px 0 12px 0">${task.description || ''}</div>
+                ${layerHtml}
+            </div>`;
+        }).join('');
+    };
     fetch('/key009/gcctm').then(r => {
         const ct = r.headers.get('content-type') || '';
         if (!ct.includes('json')) throw new Error('API未就绪(需重启服务器加载/key009/gcctm路由)');
@@ -1767,58 +1916,41 @@ function loadGccTm() {
     }).then(d => {
         const decisions = d.decisions || [];
         const knn = d.knn_entries || [];
+        const pipelineTasks = d.pipeline_tasks || [];
+
+        // 分离美股 vs 加密决策（同时支持 gcc_trading_decisions 和 process() 两种数据源）
+        const usDec = decisions.filter(x => US_EXECUTE.has(x.symbol));
+        const cryptoDec = decisions.filter(x => CRYPTO_SYMS.has(x.symbol));
+        const otherDec = decisions.filter(x => !US_EXECUTE.has(x.symbol) && !CRYPTO_SYMS.has(x.symbol));
+
+        // 美股执行区域
+        const usStatus = $('gcctm-us-status');
+        const usBuys = usDec.filter(x => (x.gcc_action||x.final_action) === 'BUY').length;
+        const usSells = usDec.filter(x => (x.gcc_action||x.final_action) === 'SELL').length;
+        usStatus.textContent = `执行品种: ${[...US_EXECUTE].join(', ')} | 共 ${usDec.length} 条 | BUY:${usBuys} SELL:${usSells}`;
+        const usBody = $('gcctm-us-body');
+        if (!usDec.length) {
+            usBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">暂无美股执行数据 (等待4H K线结束)</td></tr>';
+        } else {
+            usBody.innerHTML = usDec.map(renderDecisionRow).join('');
+        }
+
+        // 加密观察区域
+        const cryptoStatus = $('gcctm-crypto-status');
+        const crBuys = cryptoDec.filter(x => (x.gcc_action||x.final_action) === 'BUY').length;
+        const crSells = cryptoDec.filter(x => (x.gcc_action||x.final_action) === 'SELL').length;
+        cryptoStatus.textContent = `观察品种: ${[...CRYPTO_SYMS].filter(s => cryptoDec.some(d => d.symbol === s)).join(', ') || '全部'} | 共 ${cryptoDec.length} 条 | BUY:${crBuys} SELL:${crSells}`;
+        const cryptoBody = $('gcctm-crypto-body');
+        if (!cryptoDec.length) {
+            cryptoBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">暂无加密观察数据</td></tr>';
+        } else {
+            cryptoBody.innerHTML = cryptoDec.map(renderDecisionRow).join('');
+        }
+
         // Summary
         const summary = $('gcctm-summary');
-        const buys = decisions.filter(x => x.final_action === 'BUY').length;
-        const sells = decisions.filter(x => x.final_action === 'SELL').length;
-        const holds = decisions.filter(x => x.final_action === 'HOLD').length;
-        summary.textContent = `共 ${decisions.length} 条决策 | BUY:${buys} SELL:${sells} HOLD:${holds} | KNN经验:${knn.length} 条`;
-        // Decision table
-        const tbody = $('gcctm-dec-body');
-        if (!decisions.length) {
-            tbody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">暂无数据 (等待gcc_observe()写入)</td></tr>';
-        } else {
-            tbody.innerHTML = decisions.map(dec => {
-                const ts = (dec.ts||'').replace('T',' ').slice(0,16);
-                const action = dec.final_action || '-';
-                const verdict = dec.verdict || '-';
-                // consensus 是整数 0-3 (3个验证器通过数)
-                const consensus = dec.consensus;
-                const bn = dec.best_node || {};
-                const treeScore = bn.aggregate != null ? bn.aggregate.toFixed(3) : '-';
-                // best source: 从 best_node.scores_by_source 找最高分来源
-                let bestSrc = '-';
-                const scores = bn.scores_by_source;
-                if (scores && typeof scores === 'object') {
-                    const keys = Object.keys(scores);
-                    if (keys.length) {
-                        bestSrc = keys.reduce((a, b) => (scores[a]||0) > (scores[b]||0) ? a : b);
-                    }
-                }
-                // verifier_results: [{perspective,ok,score,reasoning},...]
-                const vrs = dec.verifier_results || [];
-                const getVR = (name) => { const v = vrs.find(x => x.perspective === name); return v && v.score != null ? v.score.toFixed(3) : '-'; };
-                const topo = getVR('topology');
-                const geo = getVR('geometry');
-                const alg = getVR('algebra');
-                const actionColor = action === 'BUY' ? '#3fb950' : action === 'SELL' ? '#f85149' : '#656d76';
-                const conLabel = consensus != null
-                    ? `<span style="color:${consensus >= 2 ? '#3fb950' : consensus >= 1 ? '#d29922' : '#f85149'}">${consensus}/3</span>`
-                    : '-';
-                return `<tr>
-                    <td style="font-size:0.85em;color:#656d76">${ts}</td>
-                    <td>${dec.symbol||'-'}</td>
-                    <td style="color:#656d76">${verdict}</td>
-                    <td style="color:${actionColor};font-weight:600">${action}</td>
-                    <td>${conLabel}</td>
-                    <td style="font-size:0.85em">${bestSrc}</td>
-                    <td>${treeScore}</td>
-                    <td>${topo}</td>
-                    <td>${geo}</td>
-                    <td>${alg}</td>
-                </tr>`;
-            }).join('');
-        }
+        summary.textContent = `共 ${decisions.length} 条决策 | 美股执行:${usDec.length} | 加密观察:${cryptoDec.length} | 其他:${otherDec.length} | KNN:${knn.length} | 任务:${pipelineTasks.length}`;
+        renderPipelineTasks(pipelineTasks);
         // KNN cards — features 是 List[float] 长度9, outcome 是 bool|null
         const cardsEl = $('gcctm-knn-cards');
         if (!knn.length) {
@@ -1851,6 +1983,10 @@ function loadGccTm() {
             }).join('');
         }
     }).catch(err => {
+        const pipeline = $('gcctm-pipeline');
+        if (pipeline) {
+            pipeline.innerHTML = `<div style="border:1px solid #eaeef2;border-radius:10px;padding:14px;color:#f85149">任务清单加载失败: ${err}</div>`;
+        }
         $('gcctm-dec-body').innerHTML = `<tr><td colspan="10" style="color:#f85149">加载失败: ${err}</td></tr>`;
     });
 }
