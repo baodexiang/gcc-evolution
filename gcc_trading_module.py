@@ -500,25 +500,34 @@ class TopologyVerifier:
             )
 
         vals = list(scores.values())
-        n = len(vals)
         positive = sum(1 for v in vals if v > 0)
         negative = sum(1 for v in vals if v < 0)
+        neutral  = sum(1 for v in vals if v == 0)
 
-        # 超图平衡度: 多数方向比例
+        # 只考虑有信号(非零)的节点做连通性判断
+        active = positive + negative
+        if active < 2:
+            # 有效信号不足2个，无法判断连通性，fallback放行
+            return VerifierResult(
+                perspective="topology", ok=True, score=0.5,
+                reasoning=f"fallback: active={active} (pos={positive} neg={negative} neutral={neutral})"
+            )
+
+        # 超图平衡度: 多数方向占有效信号的比例
         majority = max(positive, negative)
-        balance = majority / n  # [0.5, 1.0]
+        minority = active - majority
+        balance = majority / active  # [0.5, 1.0]
 
-        # Cheeger 近似: 少数边 / 总节点 (越小越连通)
-        minority = n - majority
-        cheeger_approx = minority / n   # 0=完全连通, 0.5=最不连通
+        # Cheeger 近似: 少数方 / 有效节点 (越小越连通)
+        cheeger_approx = minority / active  # 0=完全一致, 0.5=对半分
 
-        ok = cheeger_approx <= 0.34    # 允许最多 1/3 节点不一致
+        ok = cheeger_approx <= 0.34    # 允许最多 1/3 有效节点不一致
         score = round(balance, 4)
 
         return VerifierResult(
             perspective="topology", ok=ok, score=score,
-            reasoning=(f"pos={positive} neg={negative} minority={minority}/{n} "
-                       f"cheeger={cheeger_approx:.2f}")
+            reasoning=(f"pos={positive} neg={negative} neutral={neutral} "
+                       f"active={active} cheeger={cheeger_approx:.2f}")
         )
 
 
@@ -551,39 +560,54 @@ class GeometryVerifier:
         if len(self._price_buf) > self.MAX_BUFFER:
             self._price_buf = self._price_buf[-self.MAX_BUFFER:]
 
-    def _geodesic_curvature(self) -> float:
-        """计算近期收益率序列的测地线曲率（二阶差分均值）。"""
+    def _geodesic_curvature(self) -> tuple:
+        """
+        计算近期收益率序列的测地线曲率（二阶差分）和斜率（一阶差分）。
+        返回: (curvature, slope)
+        """
         buf = self._price_buf
         if len(buf) < 10:
-            return 0.0
+            return 0.0, 0.0
         recent = buf[-20:]
-        # 一阶差分（速度）
+        # 一阶差分（速度/斜率）
         d1 = [recent[i] - recent[i - 1] for i in range(1, len(recent))]
-        # 二阶差分（曲率）
+        slope = sum(d1) / len(d1) if d1 else 0.0
+        # 二阶差分（曲率/加速度）
         d2 = [d1[i] - d1[i - 1] for i in range(1, len(d1))]
-        return sum(d2) / len(d2) if d2 else 0.0
+        curvature = sum(d2) / len(d2) if d2 else 0.0
+        return curvature, slope
 
     def verify(self, node: TreeNode, close_prices: Optional[List[float]] = None) -> VerifierResult:
         if close_prices:
             self.update(close_prices)
 
-        curvature = self._geodesic_curvature()
+        curvature, slope = self._geodesic_curvature()
 
-        # 动量方向判断
-        momentum_up = curvature >= 0    # 正曲率=加速向上
-        action_up   = node.action == "BUY"
+        # 动量方向: 优先看曲率(加速度)，曲率接近零时用斜率(速度)
+        # 对数收益率量级 ~0.001，二阶差分 ~0.00001，需大倍率放大
+        if abs(curvature) > 1e-6:
+            momentum_up = curvature > 0
+            signal_strength = abs(curvature) * 10000
+        elif abs(slope) > 1e-6:
+            momentum_up = slope > 0
+            signal_strength = abs(slope) * 500  # 斜率权重低于曲率
+        else:
+            # 真的没信号
+            momentum_up = True  # 中性偏保守
+            signal_strength = 0.0
 
+        action_up = node.action == "BUY"
         aligned = (momentum_up == action_up) or node.action == "HOLD"
 
-        # S28: 以曲率量级作为 IC 修正，clamp 到 ±0.15
-        raw_ic = min(abs(curvature) * 100, self.IC_CORRECT)
+        # S28: IC 修正，clamp 到 ±0.15
+        raw_ic = min(signal_strength, self.IC_CORRECT)
         score = 0.5 + (raw_ic if aligned else -raw_ic)
         score = max(0.0, min(1.0, score))
 
         return VerifierResult(
             perspective="geometry", ok=aligned, score=round(score, 4),
-            reasoning=(f"curvature={curvature:.6f} momentum_up={momentum_up} "
-                       f"action={node.action} aligned={aligned}")
+            reasoning=(f"curvature={curvature:.6f} slope={slope:.6f} "
+                       f"momentum_up={momentum_up} action={node.action} aligned={aligned}")
         )
 
 
