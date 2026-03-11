@@ -11,7 +11,7 @@ TEMPLATE = SCRIPT_DIR / ".GCC" / "gcc_dashboard.html"
 
 # ── Dashboard 格式锁 (2026-03-07 确认为最佳格式) ──────────────────────────
 # 修改模板前必须经用户明确同意，确认后更新此 hash
-TEMPLATE_HASH_LOCK = "52af7362726092a241069ac1d4d502707d3c7372c8c49293e123a3e11d0b1cbe"
+TEMPLATE_HASH_LOCK = "1548b12e983c4e9dfb5ada2d94cf3aa71c7a64bad95ca2580df38bba156cf182"
 
 if not TEMPLATE.exists():
     print(f"错误：找不到 {TEMPLATE}")
@@ -235,7 +235,7 @@ if pipe.exists():
         raw_tasks = pd2.get("tasks", []) if isinstance(pd2, dict) else pd2
         for t in raw_tasks:
             if not isinstance(t, dict): continue
-            pipeline_raw.append({
+            _pe = {
                 "task_id": t.get("task_id", ""),
                 "title": t.get("title", ""),
                 "description": (t.get("description") or "")[:200],
@@ -249,7 +249,15 @@ if pipe.exists():
                     {"stage": g.get("stage",""), "result": g.get("result",""), "pass_rate": g.get("pass_rate",0)}
                     for g in (t.get("gate_results") or [])
                 ],
-            })
+            }
+            _raw_steps = t.get("steps")
+            if _raw_steps and isinstance(_raw_steps, list):
+                _pe["steps"] = [
+                    {"id": s.get("id",""), "title": s.get("title") or s.get("step",""),
+                     "status": s.get("status","pending"), "note": (s.get("note") or "")[:120]}
+                    for s in _raw_steps if isinstance(s, dict)
+                ]
+            pipeline_raw.append(_pe)
     except: pass
 
 if pipeline_raw:
@@ -399,6 +407,9 @@ if _pa_path.exists():
 
 # ⑫ GCC-0197: 外挂Phase状态
 _load_state_json("plugin_phase_state.json", "plugin_phases", "plugin_phases")
+
+# ⑬ GCC-0252: 方向锁 Leader
+_load_state_json("plugin_direction_leader.json", "direction_leaders", "direction_leaders")
 
 # inject + render
 if inject_lines:

@@ -340,6 +340,47 @@ def _read_schwab_vwap(symbol: str) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════
+# Phase B2: Coinbase OBI + CVD 读取 — 加密品种数据源
+# ══════════════════════════════════════════════════════════════
+_CB_CACHE: Dict[str, dict] = {}
+_CB_CACHE_TS: Dict[str, float] = {}
+_CB_CACHE_TTL = 30  # 30秒缓存
+
+def _read_coinbase_obi_cvd(symbol: str) -> dict:
+    """
+    读取 Coinbase OBI + CVD。
+    股票品种直接返回 UNKNOWN。
+    返回: {"obi": float, "obi_bias": str, "cvd": float, "cvd_bias": str}
+    """
+    import time as _time
+    # 股票品种跳过
+    if symbol not in _CRYPTO_SYMBOLS:
+        return {"obi": 0.0, "obi_bias": "UNKNOWN", "cvd": 0.0, "cvd_bias": "UNKNOWN"}
+
+    cached_ts = _CB_CACHE_TS.get(symbol, 0)
+    if _time.time() - cached_ts < _CB_CACHE_TTL and symbol in _CB_CACHE:
+        return _CB_CACHE[symbol]
+
+    try:
+        from coinbase_data_provider import get_market_data
+        data = get_market_data(symbol)
+        obi = data.get("obi", {})
+        cvd = data.get("cvd", {})
+        result = {
+            "obi": obi.get("obi", 0.0),
+            "obi_bias": obi.get("obi_bias", "UNKNOWN"),
+            "cvd": cvd.get("cvd", 0.0),
+            "cvd_bias": cvd.get("cvd_bias", "UNKNOWN"),
+        }
+        _CB_CACHE[symbol] = result
+        _CB_CACHE_TS[symbol] = _time.time()
+        return result
+    except Exception as e:
+        logger.debug("[GCC-TRADE] _read_coinbase_obi_cvd %s: %s", symbol, e)
+        return {"obi": 0.0, "obi_bias": "UNKNOWN", "cvd": 0.0, "cvd_bias": "UNKNOWN"}
+
+
+# ══════════════════════════════════════════════════════════════
 # L1-S03  DecisionContext — 标准化决策上下文快照
 # 统一所有输入源为一个 dataclass，落盘供回放/dashboard/回填复用
 # ══════════════════════════════════════════════════════════════
@@ -497,6 +538,25 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
     else:
         scores["vwap"] = 0.0
 
+    # Phase B2: Coinbase OBI — 买压支持BUY，卖压反对
+    coinbase = context.get("coinbase", {})
+    obi_bias = coinbase.get("obi", {}).get("obi_bias", "UNKNOWN")
+    if obi_bias == "BUY_PRESSURE":
+        scores["obi"] = +0.08
+    elif obi_bias == "SELL_PRESSURE":
+        scores["obi"] = -0.06
+    else:
+        scores["obi"] = 0.0
+
+    # Phase B2: Coinbase CVD — 主买支持BUY，主卖反对
+    cvd_bias = coinbase.get("cvd", {}).get("cvd_bias", "UNKNOWN")
+    if cvd_bias == "BUY_DOMINANT":
+        scores["cvd"] = +0.08
+    elif cvd_bias == "SELL_DOMINANT":
+        scores["cvd"] = -0.06
+    else:
+        scores["cvd"] = 0.0
+
     return scores
 
 
@@ -558,6 +618,25 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
     else:
         scores["vwap"] = 0.0
 
+    # Phase B2: Coinbase OBI — 卖压支持SELL，买压反对
+    coinbase = context.get("coinbase", {})
+    obi_bias = coinbase.get("obi", {}).get("obi_bias", "UNKNOWN")
+    if obi_bias == "SELL_PRESSURE":
+        scores["obi"] = +0.08
+    elif obi_bias == "BUY_PRESSURE":
+        scores["obi"] = -0.06
+    else:
+        scores["obi"] = 0.0
+
+    # Phase B2: Coinbase CVD — 主卖支持SELL，主买反对
+    cvd_bias = coinbase.get("cvd", {}).get("cvd_bias", "UNKNOWN")
+    if cvd_bias == "SELL_DOMINANT":
+        scores["cvd"] = +0.08
+    elif cvd_bias == "BUY_DOMINANT":
+        scores["cvd"] = -0.06
+    else:
+        scores["cvd"] = 0.0
+
     return scores
 
 
@@ -567,7 +646,8 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
 def _score_hold_candidate() -> dict:
     """HOLD 路径固定中性分 0.0，作为基线竞争者。"""
     return {"vision": 0.0, "scan": 0.0, "filter": 0.0,
-            "win_rate": 0.0, "volume": 0.0, "vwap": 0.0}
+            "win_rate": 0.0, "volume": 0.0, "vwap": 0.0,
+            "obi": 0.0, "cvd": 0.0}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1195,7 +1275,7 @@ class GCCTradingModule:
         self._verifier = BeyondEuclidVerifier()
         self._decision_log  = self.log_dir / "gcc_trading_decisions.jsonl"
         self._accuracy_file = self.log_dir / "gcc_trading_accuracy.json"
-        self._pending_file  = self.state_dir / "gcc_pending_order.json"
+        self._pending_file  = self.state_dir / f"gcc_pending_order_{symbol}.json"
 
         logger.info("[GCC-TRADE] init symbol=%s phase=%s", symbol, phase)
 
@@ -1307,8 +1387,11 @@ class GCCTradingModule:
             regime=_read_regime(sym),
             governor=_read_plugin_governor(sym),
             risk_budget=_read_risk_budget(),
-            # Phase B1: Schwab VWAP
-            extended={"schwab_vwap": _read_schwab_vwap(sym)},
+            # Phase B1: Schwab VWAP + Phase B2: Coinbase OBI/CVD
+            extended={
+                "schwab_vwap": _read_schwab_vwap(sym),
+                "coinbase": _read_coinbase_obi_cvd(sym),
+            },
         )
         # L1-S03 快照落盘
         ctx.snapshot()
@@ -1325,6 +1408,7 @@ class GCCTradingModule:
             "regime": ctx.regime, "governor": ctx.governor,
             "risk_budget": ctx.risk_budget,
             "schwab_vwap": ctx.extended.get("schwab_vwap", {}),
+            "coinbase": ctx.extended.get("coinbase", {}),
         }
 
     # ── L2-S03: 树搜索 + rejected_nodes 收集 ────────────────────
@@ -1767,16 +1851,212 @@ def _load_algebra_history(mod: "GCCTradingModule") -> int:
     return count
 
 
+# B1: 品种级 phase 配置 — 加密 OBSERVE / 美股 EXECUTE
+# 安全开关：只有在此集合中的美股品种才会走 EXECUTE 模式
+_GCC_TM_EXECUTE_SYMBOLS: frozenset = frozenset({
+    "TSLA", "CRWV", "NBIS", "ONDS", "OPEN",
+})  # B4: 逐品种开启，随时可关
+
+
+def _get_symbol_phase(symbol: str) -> str:
+    """按品种决定 phase：加密 → OBSERVE，美股且在白名单 → EXECUTE，否则 OBSERVE。"""
+    if symbol in _CRYPTO_SYMBOLS:
+        return PHASE_OBSERVE
+    if symbol in _GCC_TM_EXECUTE_SYMBOLS:
+        return PHASE_EXECUTE
+    return PHASE_OBSERVE
+
+
 def _get_gcc_module(symbol: str) -> "GCCTradingModule":
     """懒加载单例：每个品种一个 GCCTradingModule 实例。"""
     if symbol not in _gcc_modules:
-        mod = GCCTradingModule(symbol, phase=PHASE_OBSERVE)
+        phase = _get_symbol_phase(symbol)
+        mod = GCCTradingModule(symbol, phase=phase)
         # 从 KNN 经验加载已回填历史 → Algebra verifier 冷启动
         n = _load_algebra_history(mod)
         if n:
             logger.info("[GCC-TM] init %s: loaded %d algebra history records", symbol, n)
         _gcc_modules[symbol] = mod
     return _gcc_modules[symbol]
+
+
+# ══════════════════════════════════════════════════════════════
+# A1: 方向锁 Leader 排名器
+# 读 plugin_signal_accuracy.json，按品种选准确率最高(样本>=10)的外挂
+# ══════════════════════════════════════════════════════════════
+_LEADER_FILE = _STATE_DIR / "plugin_direction_leader.json"
+_LEADER_MIN_SAMPLE = 10
+
+
+def compute_direction_leaders() -> dict:
+    """按品种计算最强外挂 leader，仅加密品种，样本<10不输出。
+
+    读取 state/plugin_signal_accuracy.json，输出 state/plugin_direction_leader.json。
+    由 key009_audit 每周调用。
+    返回: {symbol: {leader, acc, sample_n, updated}}
+    """
+    acc_path = _STATE_DIR / "plugin_signal_accuracy.json"
+    if not acc_path.exists():
+        logger.info("[GCC-TM][LEADER] plugin_signal_accuracy.json not found")
+        return {}
+
+    try:
+        raw = json.loads(acc_path.read_text(encoding="utf-8"))
+        accuracy = raw.get("accuracy", {})
+    except Exception as e:
+        logger.warning("[GCC-TM][LEADER] read accuracy: %s", e)
+        return {}
+
+    # 构建 {symbol: {plugin_name: {total, correct, acc}}}
+    sym_plugins: Dict[str, dict] = {}
+    for plugin_name, plugin_data in accuracy.items():
+        for sym, sym_data in plugin_data.items():
+            if sym == "_overall":
+                continue
+            total = sym_data.get("total", 0)
+            correct = sym_data.get("correct", 0)
+            acc_val = sym_data.get("acc", 0) or 0
+            if sym not in sym_plugins:
+                sym_plugins[sym] = {}
+            sym_plugins[sym][plugin_name] = {
+                "total": total, "correct": correct, "acc": acc_val,
+            }
+
+    # 每个加密品种选 leader（准确率最高 + 样本 >= 10）
+    leaders = {}
+    for sym, plugins in sym_plugins.items():
+        if sym not in _CRYPTO_SYMBOLS:
+            continue
+        best_name, best_acc, best_n = None, -1.0, 0
+        for pname, pdata in plugins.items():
+            if pdata["total"] < _LEADER_MIN_SAMPLE:
+                continue
+            if pdata["acc"] > best_acc:
+                best_name = pname
+                best_acc = pdata["acc"]
+                best_n = pdata["total"]
+        if best_name:
+            leaders[sym] = {
+                "leader": best_name,
+                "acc": round(best_acc, 4),
+                "sample_n": best_n,
+                "updated": datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+
+    # 写入
+    try:
+        _LEADER_FILE.write_text(
+            json.dumps(leaders, indent=2, ensure_ascii=False), encoding="utf-8",
+        )
+        logger.info(
+            "[GCC-TM][LEADER] updated: %s",
+            {s: v["leader"] for s, v in leaders.items()},
+        )
+    except Exception as e:
+        logger.warning("[GCC-TM][LEADER] write: %s", e)
+
+    return leaders
+
+
+# ══════════════════════════════════════════════════════════════
+# A2-A3: 方向锁 — leader 激活时锁定品种方向，2h 过期
+# ══════════════════════════════════════════════════════════════
+# {symbol: {"dir": "BUY"/"SELL", "source": str, "lock_ts": float, "expire_ts": float}}
+_direction_lock: Dict[str, dict] = {}
+_LOCK_DURATION = 2 * 3600  # 2小时过期
+
+# 缓存 leader 配置（启动时 / 每周更新时刷新）
+_direction_leaders: Dict[str, dict] = {}
+_direction_leaders_ts: float = 0.0
+_LEADER_RELOAD_INTERVAL = 300  # 5分钟重新读文件
+
+
+def _load_direction_leaders() -> Dict[str, dict]:
+    """从 plugin_direction_leader.json 加载 leader 配置，5分钟缓存。"""
+    global _direction_leaders, _direction_leaders_ts
+    now = time.time()
+    if now - _direction_leaders_ts < _LEADER_RELOAD_INTERVAL and _direction_leaders:
+        return _direction_leaders
+    if _LEADER_FILE.exists():
+        try:
+            _direction_leaders = json.loads(
+                _LEADER_FILE.read_text(encoding="utf-8")
+            )
+            _direction_leaders_ts = now
+        except Exception:
+            pass
+    return _direction_leaders
+
+
+def _set_direction_lock(symbol: str, direction: str, source: str) -> None:
+    """Leader 外挂激活时锁定方向。"""
+    now = time.time()
+    _direction_lock[symbol] = {
+        "dir": direction,
+        "source": source,
+        "lock_ts": now,
+        "expire_ts": now + _LOCK_DURATION,
+    }
+    logger.info(
+        "[GCC-TM][DIRECTION_LOCK] %s locked %s by %s (expires 2h)",
+        symbol, direction, source,
+    )
+
+
+def check_direction_lock(symbol: str, source: str, action: str) -> dict:
+    """检查方向锁。
+
+    返回: {"allowed": bool, "reason": str, "lock_dir": str|None, "leader": str|None}
+    - leader 激活: 设置锁 + 放行
+    - 非 leader 同向: 放行
+    - 非 leader 反向: Phase1 记 log / Phase2 拦截
+    - 无锁: 放行
+    - 非加密: 放行
+    """
+    # 非加密品种不用方向锁
+    if symbol not in _CRYPTO_SYMBOLS:
+        return {"allowed": True, "reason": "not_crypto", "lock_dir": None, "leader": None}
+
+    leaders = _load_direction_leaders()
+    leader_info = leaders.get(symbol)
+
+    # 该品种没有 leader（样本不足）
+    if not leader_info:
+        return {"allowed": True, "reason": "no_leader", "lock_dir": None, "leader": None}
+
+    leader_name = leader_info["leader"]
+
+    # 检查现有锁是否过期
+    lock = _direction_lock.get(symbol)
+    if lock and time.time() > lock["expire_ts"]:
+        del _direction_lock[symbol]
+        lock = None
+        logger.debug("[GCC-TM][DIRECTION_LOCK] %s lock expired", symbol)
+
+    # 是 leader 外挂激活 → 设置/更新锁
+    if source == leader_name:
+        _set_direction_lock(symbol, action, source)
+        return {"allowed": True, "reason": "leader_sets_lock", "lock_dir": action, "leader": leader_name}
+
+    # 非 leader，当前无锁 → 放行
+    if not lock:
+        return {"allowed": True, "reason": "no_lock", "lock_dir": None, "leader": leader_name}
+
+    # 非 leader，锁方向一致 → 放行
+    if action == lock["dir"]:
+        return {"allowed": True, "reason": "same_direction", "lock_dir": lock["dir"], "leader": leader_name}
+
+    # 非 leader，反向 → Phase1 只记 log 不拦截
+    logger.info(
+        "[GCC-TM][DIRECTION_LOCK] %s BLOCKED %s %s (lock=%s by %s) — Phase1 log only",
+        symbol, source, action, lock["dir"], lock["source"],
+    )
+    return {
+        "allowed": False,  # Phase2 时改为实际拦截
+        "reason": f"opposite_to_lock({lock['dir']})",
+        "lock_dir": lock["dir"],
+        "leader": leader_name,
+    }
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1791,9 +2071,23 @@ _signal_pool_lock = _threading.Lock()
 
 def gcc_push_signal(symbol: str, source: str, action: str,
                     confidence: float = 0.5) -> None:
-    """外挂产生BUY/SELL时调用，收集到信号池。"""
+    """外挂产生BUY/SELL时调用，收集到信号池。
+
+    加密品种会检查方向锁：反向信号 Phase1 记 log 但仍入池，Phase2 拦截不入池。
+    """
     if action not in ("BUY", "SELL"):
         return
+
+    # A3: 方向锁检查
+    lock_result = check_direction_lock(symbol, source, action)
+    if not lock_result["allowed"]:
+        # Phase1: 记日志但仍然入池（观察模式）
+        # Phase2: 改为 return 直接丢弃（拦截模式）
+        logger.info(
+            "[GCC-TM][DIRECTION_LOCK] %s %s %s → %s (Phase1: still pushed)",
+            symbol, source, action, lock_result["reason"],
+        )
+
     ts = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
     with _signal_pool_lock:
         if symbol not in _signal_pool:
@@ -1801,6 +2095,7 @@ def gcc_push_signal(symbol: str, source: str, action: str,
         _signal_pool[symbol].append({
             "source": source, "action": action,
             "confidence": confidence, "ts": ts,
+            "lock_status": lock_result["reason"],
         })
     logger.debug("[GCC-TM] push %s %s %s conf=%.2f", symbol, source, action, confidence)
 
@@ -1810,6 +2105,44 @@ def _drain_signals(symbol: str) -> list:
     with _signal_pool_lock:
         signals = _signal_pool.pop(symbol, [])
     return signals
+
+
+# ══════════════════════════════════════════════════════════════
+# B2: pending_order 消费器 — 主程序每根 K 线开头调用
+# ══════════════════════════════════════════════════════════════
+def gcc_consume_pending_order(symbol: str) -> Optional[dict]:
+    """读取并消费 pending_order（如有）。
+
+    返回: {"action": "BUY"/"SELL", "price_ref": float, ...} 或 None。
+    消费后标记 consumed=True 并重写文件。
+    由 llm_server 在每根 K 线开头调用。
+    """
+    pending_file = _STATE_DIR / f"gcc_pending_order_{symbol}.json"
+    if not pending_file.exists():
+        return None
+    try:
+        order = json.loads(pending_file.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    if order.get("consumed"):
+        return None
+
+    # 标记已消费
+    order["consumed"] = True
+    order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        pending_file.write_text(
+            json.dumps(order, ensure_ascii=False, indent=2), encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+    logger.info(
+        "[GCC-TM][CONSUME] %s %s price_ref=%.2f",
+        symbol, order.get("action"), order.get("price_ref", 0),
+    )
+    return order
 
 
 # ══════════════════════════════════════════════════════════════

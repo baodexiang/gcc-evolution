@@ -81,6 +81,11 @@ TASK_TAGS = {
         "tags": ["[KEY-005][NC]"],
         "expect_per_4h": 0,
     },
+    "KEY-011": {
+        "name": "GCC交易决策模块 (PUCT树搜索)",
+        "tags": ["[GCC-TRADE]", "[GCC-TM]"],
+        "expect_per_4h": 0,
+    },
 }
 
 # 关键数字提取 (GCC任务)
@@ -91,6 +96,9 @@ METRIC_PATTERNS = [
     (r"\[CARD-BRIDGE\]\[DISTILL\].*(\d+)卡.*validated=(\d+).*flagged=(\d+)", "card_distill"),
     (r"\[KEY-007\]\[BACKFILL\].*?(\d+)条", "knn_backfill"),
     (r"\[KEY-005\]\[NC\].*scored=(\d+).*hit_rate=([0-9.]+|N/A)", "nc_result"),
+    (r"\[GCC-TRADE\]\s+\S+\s+action=(\w+)\s+verdict=(\w+)\s+consensus=(\d)/3", "gcctm_decision"),
+    (r"\[GCC-TM\]\s+\S+\s+gcc=(\w+)\s+main=(\w+)\s+verdict=(\w+)", "gcctm_observe"),
+    (r"\[GCC-TRADE\]\s+backfill\s+\S+:\s+(\d+)\s+outcomes filled", "gcctm_backfill"),
 ]
 
 # ============================================================
@@ -651,6 +659,30 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
           except OSError:
               continue  # 单行读取异常→跳过此行
 
+    # ── SignalFilter 拦截数据 (GCC-0236 S15) ──
+    try:
+        _sf_path = Path(".GCC/signal_filter/filtered_signals.jsonl")
+        if _sf_path.exists():
+            gates["SignalFilter"] = defaultdict(int)
+            for _sf_line in _sf_path.read_text(encoding="utf-8").strip().splitlines():
+                try:
+                    _sf = json.loads(_sf_line)
+                    # 时间窗口过滤
+                    _sf_ts_str = _sf.get("timestamp", "")
+                    if _sf_ts_str:
+                        _sf_ts = datetime.fromisoformat(_sf_ts_str).replace(tzinfo=None)
+                        if _sf_ts < cutoff:
+                            continue
+                    # 只计入实际拦截或would_block
+                    if not (_sf.get("blocked") or _sf.get("would_block")):
+                        continue
+                    _sf_source = _sf.get("source", "unknown")
+                    gates["SignalFilter"][_sf_source] += 1
+                    gate_totals["SignalFilter"] += 1
+                except (json.JSONDecodeError, ValueError):
+                    continue
+    except Exception:
+        pass  # SF数据读取失败不影响主审计
     # ── 计算GCC任务状态 ──
     for task_id, t in tasks.items():
         if t["errors"] > 0:
@@ -863,7 +895,11 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
             pass
 
     # GCC-0172: 按形态准确率检测低质量形态
+    # GCC-0243: 已在黑名单的形态不再报RISK (避免历史数据干扰)
+    _bv_blacklist = {"BEAR_FLAG"}  # 同步 brooks_vision.py / filter_chain_worker.py
     for pat_name, pat_data in bv_accuracy.get("patterns", {}).items():
+        if pat_name in _bv_blacklist:
+            continue
         dec = pat_data.get("decisive", 0)
         acc = pat_data.get("accuracy", 0)
         if dec >= 10 and acc < 0.4:
@@ -926,6 +962,14 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
 
     # ── GCC-0197 S3: 外挂Phase升降级 ──
     plugin_phases = _plugin_phase_update(plugin_accuracy)
+
+    # ── GCC-0252 A4: 方向锁 leader 每周更新 ──
+    try:
+        from gcc_trading_module import compute_direction_leaders
+        _dir_leaders = compute_direction_leaders()
+        logger.info("[KEY-009] direction leaders updated: %d symbols", len(_dir_leaders))
+    except Exception as _e:
+        logger.warning("[KEY-009] direction leaders update failed: %s", _e)
 
     # ── KEY-009 券商对账 ──
     broker_match = _match_broker_trades(hours)
@@ -1056,9 +1100,19 @@ def _build_pipeline_analysis(scan_plugins: dict, trade_analysis: dict,
 
     # 外挂→配置文件映射 (用于具体建议)
     PLUGIN_CONFIG = {
-        "ChanBS":        {"file": "chan_bs_plugin.py", "params": "min_level/min_bars"},
-        "SuperTrend":    {"file": "supertrend_av2_plugin.py", "params": "atr_period/atr_mult"},
-        "RobHoffman":    {"file": "rob_hoffman_plugin.py", "params": "er_threshold/kama_period"},
+        "ChanBS":        {
+            "file": "chan_bs_plugin.py",
+            "params": "min_strength（process_for_scan默认0.15；symbol默认: crypto=0.25 / stock=0.35）",
+        },
+        "SuperTrend":    {
+            "file": "supertrend_av2_plugin.py",
+            "params": "atr_period=9 / atr_multiplier=3.9",
+            "trigger_hint": "先确认 price_scan_engine_v21.py 中 _scan_supertrend_av2() 已启用；若已启用，再调整 supertrend_av2_plugin.py 当前 atr_period=9 / atr_multiplier=3.9",
+        },
+        "RobHoffman":    {
+            "file": "rob_hoffman_plugin.py",
+            "params": "KAMA_ER_TANGLED_THRESHOLD=0.22 / KAMA_ER_PERIOD=10 / IRB_WICK_PCT=0.38",
+        },
         "BrooksVision":  {"file": "brooks_vision.py", "params": "confidence阈值/形态过滤"},
         "Chandelier":    {"file": "chandelier_zlsma_plugin.py", "params": "atr_period/atr_mult"},
         "Feiyun":        {"file": "feiyun_plugin.py", "params": "ma_period/threshold"},
@@ -1117,9 +1171,13 @@ def _build_pipeline_analysis(scan_plugins: dict, trade_analysis: dict,
 
         # --- 诊断1: 触发率 ---
         if scan >= 20 and trigger == 0:
+            trigger_hint = pcfg.get("trigger_hint")
+            action = (f"扫描{scan}次0触发 → {trigger_hint}"
+                      if trigger_hint else
+                      f"扫描{scan}次0触发 → 修改 {pcfg['file']} 中 {pcfg['params']}，降低触发阈值")
             recommendations.append({
                 "target": "外挂参数",
-                "action": f"扫描{scan}次0触发 → 修改 {pcfg['file']} 中 {pcfg['params']}，降低触发阈值",
+                "action": action,
                 "priority": "HIGH"
             })
         elif trigger_rate is not None and trigger_rate > 0.5 and scan >= 20:
@@ -2351,15 +2409,38 @@ def _plugin_phase_update(plugin_accuracy: dict) -> dict:
 def _get_current_price_safe(symbol: str) -> float:
     """安全获取品种当前价格 (从tracking state JSON)。"""
     # 先尝试tracking state (由llm_server持续更新)
+    candidates = [symbol]
+    if symbol.endswith("USDC"):
+        base = symbol[:-4]
+        candidates.extend([f"{base}-USD", f"{base}USD"])
+    elif symbol.endswith("-USD"):
+        base = symbol[:-4]
+        candidates.extend([f"{base}USDC", f"{base}USD"])
+    elif symbol.endswith("USD"):
+        base = symbol[:-3]
+        candidates.extend([f"{base}USDC", f"{base}-USD"])
+    candidates = list(dict.fromkeys(candidates))
+
     for suffix in ["", "-BaoPCS", "-MSI"]:
         ts_path = ROOT / f"l2_10m_state{suffix}.json"
         try:
             if ts_path.exists():
                 data = json.loads(ts_path.read_text(encoding="utf-8"))
-                sym_data = data.get(symbol, {})
-                price = sym_data.get("last_price", 0) or sym_data.get("current_price", 0)
-                if price and price > 0:
-                    return float(price)
+                symbol_maps = [data]
+                if isinstance(data, dict) and isinstance(data.get("symbols"), dict):
+                    symbol_maps.append(data["symbols"])
+                for symbol_map in symbol_maps:
+                    for candidate in candidates:
+                        sym_data = symbol_map.get(candidate, {})
+                        if not isinstance(sym_data, dict):
+                            continue
+                        price = (
+                            sym_data.get("last_price", 0)
+                            or sym_data.get("current_price", 0)
+                            or sym_data.get("last_close", 0)
+                        )
+                        if price and price > 0:
+                            return float(price)
         except Exception:
             continue
 
@@ -2368,9 +2449,20 @@ def _get_current_price_safe(symbol: str) -> float:
     try:
         if pp_path.exists():
             data = json.loads(pp_path.read_text(encoding="utf-8"))
+            open_entries = data.get("open_entries", {})
+            if isinstance(open_entries, dict):
+                for candidate in candidates:
+                    for pos in open_entries.get(candidate, []):
+                        if not isinstance(pos, dict):
+                            continue
+                        price = pos.get("current_price", 0) or pos.get("price", 0)
+                        if price and price > 0:
+                            return float(price)
             for pos in data.get("open_positions", []):
-                if pos.get("symbol") == symbol:
-                    return float(pos.get("current_price", 0) or 0)
+                if pos.get("symbol") in candidates:
+                    price = pos.get("current_price", 0) or pos.get("price", 0)
+                    if price and price > 0:
+                        return float(price)
     except Exception:
         pass
 
@@ -3055,7 +3147,10 @@ def main():
             try:
                 _ha_raw = json.loads(_ha_path.read_text(encoding="utf-8"))
                 _raw_list = _ha_raw if isinstance(_ha_raw, list) else _ha_raw.get("anchors", [])
-                _raw_list = sorted(_raw_list, key=lambda x: x.get("created_at", ""), reverse=True)[:8]
+                # Separate strategy anchors from direction anchors
+                _strategies_raw = [a for a in _raw_list if a.get("type") == "strategy"]
+                _anchors_raw = [a for a in _raw_list if a.get("type") != "strategy"]
+                _anchors_raw = sorted(_anchors_raw, key=lambda x: x.get("created_at", ""), reverse=True)[:8]
                 _dir_map = {"LONG": "bullish", "SHORT": "bearish", "NEUTRAL": "neutral",
                             "BULLISH": "bullish", "BEARISH": "bearish"}
                 anchors = [{
@@ -3065,13 +3160,30 @@ def main():
                     "concern":      a.get("main_concern", a.get("concern", "")),
                     "expires_after": a.get("expires_after", ""),
                     "created_at":   (a.get("created_at", "") or "")[:10],
-                } for a in _raw_list]
+                } for a in _anchors_raw]
+                strategies = [{
+                    "anchor_id":  s.get("anchor_id", ""),
+                    "name":       s.get("name", ""),
+                    "scope":      s.get("scope", ""),
+                    "description": s.get("description", ""),
+                    "rules":      s.get("rules", {}),
+                    "applies_to": s.get("applies_to", []),
+                    "timeframe":  s.get("timeframe", ""),
+                    "validated":  s.get("validated", False),
+                    "validation_note": s.get("validation_note", ""),
+                    "created_at": (s.get("created_at", "") or "")[:10],
+                    "expires_after": s.get("expires_after", ""),
+                    "tracking_status": s.get("tracking_status", ""),
+                    "priority":  s.get("priority", "normal"),
+                    "main_concern": s.get("main_concern", ""),
+                } for s in _strategies_raw]
                 multi["human_guidance"] = {
                     "loop_running": False,
                     "loop_last": "",
                     "loop_round": 0,
                     "loop_steps": {},
                     "anchors": anchors,
+                    "strategies": strategies,
                 }
             except Exception:
                 pass

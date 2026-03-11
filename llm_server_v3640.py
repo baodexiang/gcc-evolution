@@ -67,12 +67,17 @@ except ImportError:
 
 # S48: KEY-011 GCC交易决策模块 (Phase1 observe, 不影响主流程)
 try:
-    from gcc_trading_module import gcc_observe as _gcc_observe, gcc_push_signal as _gcc_push
+    from gcc_trading_module import (
+        gcc_observe as _gcc_observe,
+        gcc_push_signal as _gcc_push,
+        gcc_consume_pending_order as _gcc_consume,
+    )
     _HAS_GCC_TM = True
 except ImportError:
     _HAS_GCC_TM = False
     def _gcc_observe(*a, **kw): pass
     def _gcc_push(*a, **kw): pass
+    def _gcc_consume(*a, **kw): return None
 ValidSignal = None
 try:
     from modules.behavior_finance import evaluate_behavior_finance  # KEY-005: 行为金融增强层
@@ -42697,6 +42702,40 @@ def llm_decide():
         return jsonify({"status": "ignored", "reason": "market_closed", "symbol": symbol})
 
     print(f"[DEBUG] {symbol}: === START llm_decide ===", flush=True)
+
+    # ── B3: GCC-TM 美股执行 — 消费 pending_order ──
+    if _HAS_GCC_TM and is_us_stock(symbol):
+        _gcc_order = _gcc_consume(symbol)
+        if _gcc_order:
+            _gcc_act = _gcc_order.get("action", "HOLD")
+            _gcc_price = float(_gcc_order.get("price_ref", 0))
+            _cp_list = data.get("close_prices", [])
+            _gcc_cur_price = float(_cp_list[-1]) if _cp_list else _gcc_price
+            log_to_server(
+                f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} "
+                f"price_ref={_gcc_price:.2f} cur={_gcc_cur_price:.2f} "
+                f"source={_gcc_order.get('source','')}"
+            )
+            if _gcc_act in ("BUY", "SELL"):
+                send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol)
+                if send_ok:
+                    log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单成功")
+                    try:
+                        send_email_notification(
+                            f"[GCC-TM] {symbol} {_gcc_act}",
+                            f"GCC-TM 统一裁决执行\n"
+                            f"品种: {symbol}\n"
+                            f"方向: {_gcc_act}\n"
+                            f"参考价: {_gcc_price:.2f}\n"
+                            f"当前价: {_gcc_cur_price:.2f}\n"
+                            f"来源: gcc_trading_module\n"
+                            f"时间: {_gcc_order.get('ts', '')}"
+                        )
+                    except Exception as _em_err:
+                        log_to_server(f"[GCC-TM][EXECUTE] {symbol}: 邮件发送失败 - {_em_err}")
+                else:
+                    log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单失败")
+            # pending_order 已消费，不影响后续正常流程
 
     trade_mode = str(data.get("trade_mode", "live")).lower().strip()
     if trade_mode not in ["live", "paper"]:
