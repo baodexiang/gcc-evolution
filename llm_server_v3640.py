@@ -67,11 +67,12 @@ except ImportError:
 
 # S48: KEY-011 GCC交易决策模块 (Phase1 observe, 不影响主流程)
 try:
-    from gcc_trading_module import gcc_observe as _gcc_observe
+    from gcc_trading_module import gcc_observe as _gcc_observe, gcc_push_signal as _gcc_push
     _HAS_GCC_TM = True
 except ImportError:
     _HAS_GCC_TM = False
     def _gcc_observe(*a, **kw): pass
+    def _gcc_push(*a, **kw): pass
 ValidSignal = None
 try:
     from modules.behavior_finance import evaluate_behavior_finance  # KEY-005: 行为金融增强层
@@ -44479,6 +44480,14 @@ def llm_decide():
         plugin_bypass_l2 = True
         print(f"[v3.510] ⚡ {symbol}: 选择执行 [{selected_plugin_name}] → {plugin_exec_bias}")
 
+        # GCC-TM: 所有激活外挂信号推入信号池（4H结束时统一裁决）
+        if _HAS_GCC_TM:
+            for _ap_name, _ap_bias, _ap_res in activated_plugins:
+                _ap_dir = "BUY" if "BUY" in _ap_bias else ("SELL" if "SELL" in _ap_bias else "")
+                _ap_conf = getattr(_ap_res, 'confidence', 0.5) if _ap_res else 0.5
+                if _ap_dir:
+                    _gcc_push(symbol, _ap_name, _ap_dir, float(_ap_conf))
+
         # v3.530: 记录L1外挂触发状态（供监控程序显示）
         try:
             record_l1_plugin_trigger(symbol, selected_plugin_name, plugin_exec_bias, freeze_hours=1.0)
@@ -46858,6 +46867,10 @@ def llm_decide():
             }
             
             print(f"[v2.970] P0扫描引擎覆盖: {final_action_before_p0} → {final_action}")
+            # GCC-TM: P0信号推入信号池
+            if _HAS_GCC_TM and final_action in ("BUY", "SELL"):
+                _p0_src = p0_scan_signal.get("signal_details", {}).get("signal_type", "P0-Scan")
+                _gcc_push(symbol, f"P0_{_p0_src}", final_action, float(p0_scan_signal.get("confidence", 0.7)))
         else:
             decision["p0_scan_engine"] = {"triggered": False}
     except Exception as e:
@@ -49416,9 +49429,13 @@ def llm_decide():
     except Exception as e:
         print(f"[v3.588] {symbol} Vision同步异常(不影响交易): {e}")
 
-    # S49: KEY-011 GCC交易决策模块 Phase1观察 (一行接入，不影响主流程)
+    # S49: KEY-011 GCC交易决策模块 — 4H结束时整合裁决（observe模式）
+    # L1信号也作为一票推入信号池
     if _HAS_GCC_TM:
-        _gcc_observe(symbol, bars, decision.get("final_action", "HOLD"))
+        _l1_action = decision.get("final_action", "HOLD")
+        if _l1_action in ("BUY", "SELL"):
+            _gcc_push(symbol, "L1_decision", _l1_action, float(decision.get("confidence", 0.5)))
+        _gcc_observe(symbol, bars, _l1_action)
 
     return app.response_class(
         response=json.dumps({"input": user_payload, "decision": decision}, default=str),

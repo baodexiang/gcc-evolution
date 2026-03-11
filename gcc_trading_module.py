@@ -1662,10 +1662,15 @@ _KNN_BACKFILL_LOOKBACK = 8   # S46: 8 根 K 线后回填
 
 def _write_knn_experience(exp: KNNExperience) -> None:
     """S45: 追加 KNN 经验到 jsonl。"""
+    _write_knn_experience_dict(exp.as_dict())
+
+
+def _write_knn_experience_dict(exp_dict: dict) -> None:
+    """追加 KNN 经验dict到 jsonl（支持额外字段如归因信息）。"""
     try:
         _KNN_EXP_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(_KNN_EXP_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(exp.as_dict(), ensure_ascii=False) + "\n")
+            f.write(json.dumps(exp_dict, ensure_ascii=False) + "\n")
     except Exception as e:
         logger.warning("[GCC-TRADE] write_knn_experience: %s", e)
 
@@ -1775,21 +1780,209 @@ def _get_gcc_module(symbol: str) -> "GCCTradingModule":
 
 
 # ══════════════════════════════════════════════════════════════
+# 信号收集器 — 4H K线内收集所有外挂 BUY/SELL 信号
+# ══════════════════════════════════════════════════════════════
+import threading as _threading
+
+# {symbol: [{"source": str, "action": "BUY"/"SELL", "confidence": float, "ts": str}, ...]}
+_signal_pool: Dict[str, list] = {}
+_signal_pool_lock = _threading.Lock()
+
+
+def gcc_push_signal(symbol: str, source: str, action: str,
+                    confidence: float = 0.5) -> None:
+    """外挂产生BUY/SELL时调用，收集到信号池。"""
+    if action not in ("BUY", "SELL"):
+        return
+    ts = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    with _signal_pool_lock:
+        if symbol not in _signal_pool:
+            _signal_pool[symbol] = []
+        _signal_pool[symbol].append({
+            "source": source, "action": action,
+            "confidence": confidence, "ts": ts,
+        })
+    logger.debug("[GCC-TM] push %s %s %s conf=%.2f", symbol, source, action, confidence)
+
+
+def _drain_signals(symbol: str) -> list:
+    """取出并清空某品种的信号池。"""
+    with _signal_pool_lock:
+        signals = _signal_pool.pop(symbol, [])
+    return signals
+
+
+# ══════════════════════════════════════════════════════════════
+# 模拟交易回填 — 用下一K线收盘价验证上一次裁决是否盈利
+# ══════════════════════════════════════════════════════════════
+def _backfill_sim_trades(symbol: str, bars: list) -> None:
+    """回填 gcc_sim_trades.jsonl 中 outcome=None 的记录。"""
+    sim_path = _STATE_DIR / "gcc_sim_trades.jsonl"
+    if not sim_path.exists():
+        return
+    closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
+    if not closes:
+        return
+    cur_price = closes[-1]
+
+    try:
+        lines = sim_path.read_text(encoding="utf-8").strip().split("\n")
+        updated = False
+        new_lines = []
+        for line in lines:
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            if rec.get("symbol") == symbol and rec.get("outcome") is None:
+                entry = rec.get("entry_price", 0)
+                if entry > 0:
+                    if rec["action"] == "BUY":
+                        rec["outcome"] = cur_price > entry
+                    elif rec["action"] == "SELL":
+                        rec["outcome"] = cur_price < entry
+                    rec["exit_price"] = cur_price
+                    rec["pnl_pct"] = round((cur_price - entry) / entry * 100, 3)
+                    if rec["action"] == "SELL":
+                        rec["pnl_pct"] = -rec["pnl_pct"]
+                    updated = True
+            new_lines.append(json.dumps(rec, ensure_ascii=False))
+        if updated:
+            sim_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    except Exception as e:
+        logger.debug("[GCC-TM] backfill_sim: %s", e)
+
+
+# ══════════════════════════════════════════════════════════════
 # S48-S49  llm_server 接入入口
-# 在 llm_decide() 末尾 return 前调用此函数（一行接入）
+# 4H K线结束时调用 — 收集信号 → 整合过滤 → 裁决 BUY/SELL/HOLD
 # ══════════════════════════════════════════════════════════════
 def gcc_observe(symbol: str, bars: list, main_decision: str) -> None:
     """
-    S49: llm_decide() 末尾一行接入。
-    Phase1 observe 模式：读数据 → 树搜索 → 三视角验证 → 写日志 → KNN经验。
-    捕获所有异常，保证不影响主程序。
+    4H K线结束时由 llm_decide() 调用。
+    1. 取出本周期收集的所有外挂信号
+    2. 结合数据源(FilterChain/VWAP/regime等)整合分析
+    3. 投票裁决 BUY / SELL / HOLD
+    4. 写日志 + KNN经验卡（observe模式，不干预实际交易）
     """
     try:
+        signals = _drain_signals(symbol)
         mod = _get_gcc_module(symbol)
+
+        # 回填上一次模拟交易的outcome（用当前K线收盘价）
+        _backfill_sim_trades(symbol, bars)
+
+        # 统计投票
+        buy_votes = sum(1 for s in signals if s["action"] == "BUY")
+        sell_votes = sum(1 for s in signals if s["action"] == "SELL")
+        buy_weight = sum(s["confidence"] for s in signals if s["action"] == "BUY")
+        sell_weight = sum(s["confidence"] for s in signals if s["action"] == "SELL")
+
+        # 信号归因：记录各外挂的投票
+        vote_detail = {}
+        for s in signals:
+            src = s["source"]
+            if src not in vote_detail:
+                vote_detail[src] = {"BUY": 0, "SELL": 0}
+            vote_detail[src][s["action"]] += 1
+
+        # 找出最强信号源（投票最多的外挂）
+        strongest_source = ""
+        if vote_detail:
+            strongest_source = max(
+                vote_detail.keys(),
+                key=lambda k: vote_detail[k]["BUY"] + vote_detail[k]["SELL"]
+            )
+
+        # 树搜索 + 三视角验证（使用已有逻辑）
         result = mod.process(bars, main_decision=main_decision)
 
+        # 整合裁决：信号池投票 + 树搜索结果
+        tree_action = result.get("final_action", "HOLD")
+        tree_verdict = result.get("verdict", "SKIP")
+
+        # GCC-TM 最终裁决逻辑：
+        # 1. 无信号 → HOLD
+        # 2. 有信号 → 以投票多数方向为候选
+        # 3. 树搜索+三视角作为确认/否决
+        if not signals:
+            gcc_action = "HOLD"
+            gcc_reason = "no_signals"
+        elif buy_votes > sell_votes:
+            # 多数投BUY
+            if tree_action in ("BUY", "HOLD") and tree_verdict != "HOLD_ONLY":
+                gcc_action = "BUY"
+                gcc_reason = f"buy_votes={buy_votes}(w={buy_weight:.2f}) tree={tree_action}"
+            else:
+                gcc_action = "HOLD"
+                gcc_reason = f"buy_votes={buy_votes} but tree={tree_action}/{tree_verdict}"
+        elif sell_votes > buy_votes:
+            # 多数投SELL
+            if tree_action in ("SELL", "HOLD") and tree_verdict != "HOLD_ONLY":
+                gcc_action = "SELL"
+                gcc_reason = f"sell_votes={sell_votes}(w={sell_weight:.2f}) tree={tree_action}"
+            else:
+                gcc_action = "HOLD"
+                gcc_reason = f"sell_votes={sell_votes} but tree={tree_action}/{tree_verdict}"
+        else:
+            # 平票 → HOLD
+            gcc_action = "HOLD"
+            gcc_reason = f"tie buy={buy_votes} sell={sell_votes}"
+
+        # 当前价格（用于模拟执行基准）
+        closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
+        current_price = closes[-1] if closes else 0.0
+
+        # 写决策日志（追加到 gcc_trading_decisions.jsonl）
+        ts_now = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        dec_record = {
+            "ts": ts_now,
+            "symbol": symbol,
+            "gcc_action": gcc_action,
+            "main_action": main_decision,
+            "verdict": tree_verdict,
+            "reason": gcc_reason,
+            "buy_votes": buy_votes,
+            "sell_votes": sell_votes,
+            "buy_weight": round(buy_weight, 3),
+            "sell_weight": round(sell_weight, 3),
+            "strongest_source": strongest_source,
+            "vote_detail": vote_detail,
+            "tree_action": tree_action,
+            "tree_score": result.get("tree_score", 0),
+            "consensus": result.get("consensus", 0),
+            "topology": result.get("topology"),
+            "geometry": result.get("geometry"),
+            "algebra": result.get("algebra"),
+            "signals_count": len(signals),
+            "price": current_price,
+            "match": gcc_action == main_decision,
+        }
+        _dec_path = _STATE_DIR / "gcc_trading_decisions.jsonl"
+        try:
+            with open(_dec_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(dec_record, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+        # 模拟执行记录 — 下一K线验证用
+        # 记录 gcc_action + 当前价格，回填时用下一K线价格计算盈亏
+        if gcc_action != "HOLD":
+            _sim_path = _STATE_DIR / "gcc_sim_trades.jsonl"
+            sim_record = {
+                "ts": ts_now, "symbol": symbol,
+                "action": gcc_action, "entry_price": current_price,
+                "strongest_source": strongest_source,
+                "buy_votes": buy_votes, "sell_votes": sell_votes,
+                "outcome": None,  # 下一K线回填
+            }
+            try:
+                with open(_sim_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(sim_record, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+
         # 写 KNN 经验
-        if result.get("best_node") and result["best_node"].get("action") != "HOLD":
+        if gcc_action != "HOLD":
             ver_results_raw = result.get("verifier_results", [])
             ver_results = [
                 VerifierResult(
@@ -1800,28 +1993,32 @@ def gcc_observe(symbol: str, bars: list, main_decision: str) -> None:
             ]
             ctx = mod._build_context(bars)
             features = _build_knn_features(ctx, ver_results)
-            closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
             exp = KNNExperience(
                 symbol=symbol,
-                action=result["final_action"],
+                action=gcc_action,
                 features=features,
                 outcome=None,
-                ts=result["ts"],
-                price=result.get("current_price", 0.0),
-                ref_price=closes[-1] if closes else 0.0,
+                ts=ts_now,
+                price=current_price,
+                ref_price=current_price,
             )
-            _write_knn_experience(exp)
-            # 尝试回填历史 outcome → 结果喂给 Algebra verifier
-            cur_price = closes[-1] if closes else 0.0
-            filled = _backfill_outcome(symbol, cur_price)
+            # KNN经验卡追加信号池归因（写入jsonl时额外字段）
+            exp_dict = exp.as_dict()
+            exp_dict["buy_votes"] = buy_votes
+            exp_dict["sell_votes"] = sell_votes
+            exp_dict["strongest_source"] = strongest_source
+            exp_dict["vote_detail"] = vote_detail
+            _write_knn_experience_dict(exp_dict)
+            filled = _backfill_outcome(symbol, current_price)
             for fr in filled:
                 mod._verifier.algebra.record_outcome(
                     fr["price"], fr["action"], fr["outcome"]
                 )
 
         logger.info(
-            "[GCC-TM] %s gcc=%s main=%s verdict=%s",
-            symbol, result.get("final_action"), main_decision, result.get("verdict"),
+            "[GCC-TM] %s gcc=%s main=%s signals=%d (B%d/S%d) src=%s reason=%s",
+            symbol, gcc_action, main_decision, len(signals),
+            buy_votes, sell_votes, strongest_source, gcc_reason,
         )
     except Exception as e:
         logger.warning("[GCC-TM] gcc_observe %s: %s", symbol, e)
