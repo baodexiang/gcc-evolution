@@ -243,6 +243,229 @@ def _read_signal_direction() -> str:
 
 
 # ══════════════════════════════════════════════════════════════
+# S13  TreeNode — 树搜索候选路径节点
+# action: "BUY" | "SELL" | "HOLD"
+# scores_by_source: 各数据源打分 {source: float}
+# aggregate: 综合分数 [-1, 1]
+# pruned: 是否被剪枝
+# prune_reason: 剪枝原因
+# ══════════════════════════════════════════════════════════════
+@dataclass
+class TreeNode:
+    action: str                              # "BUY" | "SELL" | "HOLD"
+    scores_by_source: dict = field(default_factory=dict)
+    aggregate: float = 0.0                   # [-1, 1]
+    pruned: bool = False
+    prune_reason: str = ""
+
+    def as_dict(self) -> dict:
+        return {
+            "action":           self.action,
+            "scores_by_source": self.scores_by_source,
+            "aggregate":        round(self.aggregate, 4),
+            "pruned":           self.pruned,
+            "prune_reason":     self.prune_reason,
+        }
+
+
+# ══════════════════════════════════════════════════════════════
+# S14  _score_buy_candidate — BUY 路径各数据源打分
+# 返回 scores_by_source dict，每个 key 对应一个数据源贡献值
+# 权重设计 (总和不超过 1.0，便于 aggregate 归一化到 [-1,1]):
+#   vision    0.35  — 形态识别主信号
+#   scan      0.25  — 扫描引擎方向
+#   filter    0.20  — 过滤链通过情况
+#   win_rate  0.12  — 历史胜率偏置
+#   volume    0.08  — 量比确认
+# ══════════════════════════════════════════════════════════════
+def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
+    """为 BUY 候选路径打分，返回各数据源得分 (正=支持BUY, 负=反对)。"""
+    vision_bias, vision_conf = context.get("vision", ("HOLD", 0.5))
+    scan_dir,    scan_conf   = context.get("scan",   ("NONE", 0.0))
+    filter_res               = context.get("filter_buy", {})
+    win_rate                 = context.get("win_rate_buy", 0.5)
+    vol_ratio                = context.get("vol_ratio", 1.0)
+
+    scores = {}
+
+    # vision: BUY支持+full, SELL反对-full, HOLD中性0
+    if vision_bias == "BUY":
+        scores["vision"] = +vision_conf * 0.35
+    elif vision_bias == "SELL":
+        scores["vision"] = -vision_conf * 0.35
+    else:
+        scores["vision"] = 0.0
+
+    # scan: 方向一致为正，相反为负
+    if scan_dir == "BUY":
+        scores["scan"] = +scan_conf * 0.25
+    elif scan_dir == "SELL":
+        scores["scan"] = -scan_conf * 0.25
+    else:
+        scores["scan"] = 0.0
+
+    # filter chain: passed=+0.20, failed=-0.20, None=0
+    if filter_res.get("passed") is True:
+        scores["filter"] = +0.20
+    elif filter_res.get("passed") is False:
+        scores["filter"] = -0.20
+    else:
+        scores["filter"] = 0.0
+
+    # win_rate 偏置: 中性=0, 胜率越高越正
+    scores["win_rate"] = (win_rate - 0.5) * 0.24   # 0.5→0, 1.0→+0.12, 0.0→-0.12
+
+    # volume: 量比>1.5 轻微加分，<0.5 轻微减分
+    if vol_ratio >= 1.5:
+        scores["volume"] = +0.08
+    elif vol_ratio <= 0.5:
+        scores["volume"] = -0.04
+    else:
+        scores["volume"] = 0.0
+
+    return scores
+
+
+# ══════════════════════════════════════════════════════════════
+# S15  _score_sell_candidate — SELL 路径各数据源打分
+# 镜像 BUY 打分，方向相反
+# ══════════════════════════════════════════════════════════════
+def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
+    """为 SELL 候选路径打分。"""
+    vision_bias, vision_conf = context.get("vision", ("HOLD", 0.5))
+    scan_dir,    scan_conf   = context.get("scan",   ("NONE", 0.0))
+    filter_res               = context.get("filter_sell", {})
+    win_rate                 = context.get("win_rate_sell", 0.5)
+    vol_ratio                = context.get("vol_ratio", 1.0)
+
+    scores = {}
+
+    # vision: SELL支持, BUY反对
+    if vision_bias == "SELL":
+        scores["vision"] = +vision_conf * 0.35
+    elif vision_bias == "BUY":
+        scores["vision"] = -vision_conf * 0.35
+    else:
+        scores["vision"] = 0.0
+
+    # scan: SELL方向一致为正
+    if scan_dir == "SELL":
+        scores["scan"] = +scan_conf * 0.25
+    elif scan_dir == "BUY":
+        scores["scan"] = -scan_conf * 0.25
+    else:
+        scores["scan"] = 0.0
+
+    # filter chain
+    if filter_res.get("passed") is True:
+        scores["filter"] = +0.20
+    elif filter_res.get("passed") is False:
+        scores["filter"] = -0.20
+    else:
+        scores["filter"] = 0.0
+
+    # win_rate
+    scores["win_rate"] = (win_rate - 0.5) * 0.24
+
+    # volume
+    if vol_ratio >= 1.5:
+        scores["volume"] = +0.08
+    elif vol_ratio <= 0.5:
+        scores["volume"] = -0.04
+    else:
+        scores["volume"] = 0.0
+
+    return scores
+
+
+# ══════════════════════════════════════════════════════════════
+# S16  _score_hold_candidate — HOLD 路径中性分
+# ══════════════════════════════════════════════════════════════
+def _score_hold_candidate() -> dict:
+    """HOLD 路径固定中性分 0.0，作为基线竞争者。"""
+    return {"vision": 0.0, "scan": 0.0, "filter": 0.0,
+            "win_rate": 0.0, "volume": 0.0}
+
+
+# ══════════════════════════════════════════════════════════════
+# S17  _aggregate_candidate_score(scores_dict) → float [-1, 1]
+# 各数据源分数加总后 clamp 到 [-1, 1]
+# ══════════════════════════════════════════════════════════════
+def _aggregate_candidate_score(scores: dict) -> float:
+    """合并各数据源得分 → 归一化到 [-1, 1]。"""
+    total = sum(scores.values())
+    return max(-1.0, min(1.0, total))
+
+
+# ══════════════════════════════════════════════════════════════
+# S18-S21  剪枝规则
+# ══════════════════════════════════════════════════════════════
+_CRYPTO_SYMBOLS = frozenset({
+    "BTCUSDC", "ETHUSDC", "SOLUSDC", "ZECUSDC", "DOGEUSDC",
+    "BNBUSDC", "XRPUSDC", "ADAUSDC", "DOTUSDC",
+})
+
+def _apply_pruning(nodes: List[TreeNode], symbol: str,
+                   context: dict) -> List[TreeNode]:
+    """
+    对三个候选节点依次应用剪枝规则 P1-P4。
+    修改 node.pruned / node.prune_reason 并返回同一列表。
+    """
+    for node in nodes:
+        if node.pruned:
+            continue
+
+        # P1: N-Gate BLOCK → 剪掉加密 BUY 路径
+        if node.action == "BUY" and symbol in _CRYPTO_SYMBOLS:
+            if context.get(f"n_gate_buy") == "BLOCK":
+                node.pruned = True
+                node.prune_reason = "P1:N-Gate BLOCK(crypto BUY)"
+                continue
+
+        # P2: FilterChain 三道门全失败 → 剪掉对应方向
+        if node.action in ("BUY", "SELL"):
+            fc_key = f"filter_{node.action.lower()}"
+            fc = context.get(fc_key, {})
+            # passed=False 且 blocked_by 非空 → 明确被拒
+            if fc.get("passed") is False and fc.get("blocked_by"):
+                node.pruned = True
+                node.prune_reason = f"P2:FilterChain blocked_by={fc['blocked_by']}"
+                continue
+
+        # P3: aggregate 绝对值 < 0.15 → 信号太弱，剪枝
+        if abs(node.aggregate) < 0.15 and node.action != "HOLD":
+            node.pruned = True
+            node.prune_reason = f"P3:aggregate={node.aggregate:.3f}<0.15"
+            continue
+
+        # P4: 扫描引擎方向相反 → 惩罚分数 × 0.5（不剪枝，只降权）
+        scan_dir = context.get("scan", ("NONE", 0.0))[0]
+        if node.action == "BUY" and scan_dir == "SELL":
+            node.aggregate *= 0.5
+            node.scores_by_source["_p4_penalty"] = "scan_opposite"
+        elif node.action == "SELL" and scan_dir == "BUY":
+            node.aggregate *= 0.5
+            node.scores_by_source["_p4_penalty"] = "scan_opposite"
+
+    return nodes
+
+
+# ══════════════════════════════════════════════════════════════
+# S22  _select_best_candidate — 从存活节点中选最优
+# 规则: aggregate 最大的存活节点；全部被剪枝则返回 HOLD
+# ══════════════════════════════════════════════════════════════
+def _select_best_candidate(nodes: List[TreeNode]) -> TreeNode:
+    """从存活候选节点中选 aggregate 最高的；全剪枝时返回 HOLD。"""
+    surviving = [n for n in nodes if not n.pruned]
+    if not surviving:
+        hold = TreeNode(action="HOLD", prune_reason="all_candidates_pruned")
+        hold.scores_by_source = _score_hold_candidate()
+        hold.aggregate = 0.0
+        return hold
+    return max(surviving, key=lambda n: n.aggregate)
+
+
+# ══════════════════════════════════════════════════════════════
 # 自测 (直接运行时)
 # ══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
@@ -258,3 +481,50 @@ if __name__ == "__main__":
     bars_mock = [{"volume": 100 + i * 10} for i in range(22)]
     print(f"S11 VolRatio:       {_read_volume(bars_mock)}")
     print(f"S12 GCC Mode:       {_read_signal_direction()}")
+
+    print(f"\n=== S13-S22 树搜索层自测 ===")
+    ctx = {
+        "vision":          ("BUY", 0.82),
+        "scan":            ("BUY", 0.6),
+        "filter_buy":      {"passed": True,  "blocked_by": ""},
+        "filter_sell":     {"passed": False, "blocked_by": "vision"},
+        "win_rate_buy":    0.62,
+        "win_rate_sell":   0.44,
+        "vol_ratio":       1.8,
+        "n_gate_buy":      "INACTIVE",
+        "n_gate_sell":     "INACTIVE",
+    }
+
+    # 打分
+    buy_scores  = _score_buy_candidate(sym, bars_mock, ctx)
+    sell_scores = _score_sell_candidate(sym, bars_mock, ctx)
+    hold_scores = _score_hold_candidate()
+
+    # 构建节点
+    buy_node  = TreeNode("BUY",  buy_scores,  _aggregate_candidate_score(buy_scores))
+    sell_node = TreeNode("SELL", sell_scores, _aggregate_candidate_score(sell_scores))
+    hold_node = TreeNode("HOLD", hold_scores, _aggregate_candidate_score(hold_scores))
+
+    print(f"S14 BUY  scores: {buy_scores}  agg={buy_node.aggregate:.4f}")
+    print(f"S15 SELL scores: {sell_scores}  agg={sell_node.aggregate:.4f}")
+    print(f"S16 HOLD scores: {hold_scores}  agg={hold_node.aggregate:.4f}")
+
+    # 剪枝
+    nodes = _apply_pruning([buy_node, sell_node, hold_node], sym, ctx)
+    for n in nodes:
+        print(f"  {n.action}: pruned={n.pruned} reason={n.prune_reason}")
+
+    # 选最优
+    best = _select_best_candidate(nodes)
+    print(f"S22 Best candidate: {best.action}  aggregate={best.aggregate:.4f}")
+
+    # P1 测试: crypto BUY + BLOCK
+    print(f"\n--- P1 剪枝测试 (N-Gate BLOCK) ---")
+    ctx2 = dict(ctx, n_gate_buy="BLOCK")
+    b2 = TreeNode("BUY", buy_scores, buy_node.aggregate)
+    s2 = TreeNode("SELL", sell_scores, sell_node.aggregate)
+    h2 = TreeNode("HOLD", hold_scores, 0.0)
+    _apply_pruning([b2, s2, h2], sym, ctx2)
+    best2 = _select_best_candidate([b2, s2, h2])
+    print(f"  BUY pruned={b2.pruned} ({b2.prune_reason})")
+    print(f"  Best: {best2.action}")
