@@ -709,6 +709,210 @@ class BeyondEuclidVerifier:
 
 
 # ══════════════════════════════════════════════════════════════
+# S35  PHASE 常量
+# ══════════════════════════════════════════════════════════════
+PHASE_OBSERVE = "observe"   # Phase1: 只记录，不发单
+PHASE_EXECUTE = "execute"   # Phase2: 写 pending_order.json
+
+
+# ══════════════════════════════════════════════════════════════
+# S36-S42  GCCTradingModule — 主类
+# ══════════════════════════════════════════════════════════════
+class GCCTradingModule:
+    """
+    GCC 交易决策主模块。
+    Phase1(observe): 只记录 decisions.jsonl，不干扰主程序。
+    Phase2(execute): 写 pending_order.json，下一K线市价执行。
+    """
+
+    # S36: __init__
+    def __init__(
+        self,
+        symbol: str,
+        phase: str = PHASE_OBSERVE,
+        log_dir: Optional[Path] = None,
+        state_dir: Optional[Path] = None,
+    ):
+        self.symbol    = symbol
+        self.phase     = phase
+        self.log_dir   = Path(log_dir) if log_dir else _STATE_DIR
+        self.state_dir = Path(state_dir) if state_dir else _STATE_DIR
+
+        self._verifier = BeyondEuclidVerifier()
+        self._decision_log  = self.log_dir / "gcc_trading_decisions.jsonl"
+        self._accuracy_file = self.log_dir / "gcc_trading_accuracy.json"
+        self._pending_file  = self.state_dir / "gcc_pending_order.json"
+
+        logger.info("[GCC-TRADE] init symbol=%s phase=%s", symbol, phase)
+
+    # ── S37: process() 主流程 ─────────────────────────────────
+    def process(
+        self,
+        bars: list,
+        main_decision: Optional[str] = None,
+    ) -> dict:
+        """
+        主流程入口。
+        bars: OHLCV list，最新在末尾，至少含 volume/close 字段。
+        main_decision: 主程序决策 ("BUY"/"SELL"/"HOLD"/None)，用于一致率统计。
+        返回: result dict，含 action/verdict/consensus 等字段。
+        """
+        import datetime
+        ts = datetime.datetime.utcnow().isoformat() + "Z"
+
+        # 提取收盘价与当前价
+        closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
+        current_price = closes[-1] if closes else 0.0
+
+        # 组装上下文（读所有数据源）
+        context = self._build_context(bars)
+
+        # S38: 树搜索
+        best_node = self._run_tree_search(bars, context)
+
+        # S39: 三视角验证
+        final_action, consensus, verdict, ver_results = self._run_verification(
+            best_node, closes, current_price
+        )
+
+        result = {
+            "ts":           ts,
+            "symbol":       self.symbol,
+            "phase":        self.phase,
+            "best_node":    best_node.as_dict() if best_node else None,
+            "final_action": final_action,
+            "verdict":      verdict,
+            "consensus":    consensus,
+            "verifier_results": [
+                {"perspective": r.perspective, "ok": r.ok,
+                 "score": r.score, "reasoning": r.reasoning}
+                for r in ver_results
+            ],
+            "current_price": current_price,
+        }
+
+        # S40: observe 模式只记录日志
+        if self.phase == PHASE_OBSERVE:
+            self._write_decision_log(result)
+
+        # S41: execute 模式写 pending_order
+        elif self.phase == PHASE_EXECUTE and verdict == "EXECUTE":
+            self._write_pending_order(final_action, current_price, ts)
+            self._write_decision_log(result)
+
+        # S42: 记录与主程序一致率
+        if main_decision is not None:
+            self._compare_with_main(final_action, main_decision, ts)
+
+        logger.info(
+            "[GCC-TRADE] %s action=%s verdict=%s consensus=%s/3",
+            self.symbol, final_action, verdict, consensus,
+        )
+        return result
+
+    # ── 内部: 组装上下文 ───────────────────────────────────────
+    def _build_context(self, bars: list) -> dict:
+        sym = self.symbol
+        return {
+            "vision":          _read_vision(sym),
+            "scan":            _read_scan_signal(sym),
+            "filter_buy":      _read_filter_chain(sym, "BUY"),
+            "filter_sell":     _read_filter_chain(sym, "SELL"),
+            "win_rate_buy":    _read_win_rate(sym, "BUY"),
+            "win_rate_sell":   _read_win_rate(sym, "SELL"),
+            "vol_ratio":       _read_volume(bars),
+            "n_gate_buy":      _read_n_gate(sym, "BUY"),
+            "n_gate_sell":     _read_n_gate(sym, "SELL"),
+        }
+
+    # ── S38: 树搜索 ────────────────────────────────────────────
+    def _run_tree_search(self, bars: list, context: dict) -> TreeNode:
+        sym = self.symbol
+        buy_scores  = _score_buy_candidate(sym, bars, context)
+        sell_scores = _score_sell_candidate(sym, bars, context)
+        hold_scores = _score_hold_candidate()
+
+        nodes = [
+            TreeNode("BUY",  buy_scores,  _aggregate_candidate_score(buy_scores)),
+            TreeNode("SELL", sell_scores, _aggregate_candidate_score(sell_scores)),
+            TreeNode("HOLD", hold_scores, 0.0),
+        ]
+        _apply_pruning(nodes, sym, context)
+        return _select_best_candidate(nodes)
+
+    # ── S39: 三视角验证 ────────────────────────────────────────
+    def _run_verification(
+        self,
+        best_node: TreeNode,
+        closes: List[float],
+        current_price: float,
+    ) -> Tuple[str, int, str, List[VerifierResult]]:
+        consensus, ver_results, verdict = self._verifier.verify(
+            best_node, closes, current_price
+        )
+        # 验证通过才执行候选动作，否则 HOLD
+        final_action = best_node.action if verdict == "EXECUTE" else "HOLD"
+        return final_action, consensus, verdict, ver_results
+
+    # ── S40: 写决策日志 ────────────────────────────────────────
+    def _write_decision_log(self, result: dict) -> None:
+        try:
+            self._decision_log.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._decision_log, "a", encoding="utf-8") as f:
+                f.write(json.dumps(result, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.warning("[GCC-TRADE] write_decision_log: %s", e)
+
+    # ── S41: 写 pending_order ──────────────────────────────────
+    def _write_pending_order(
+        self, action: str, price: float, ts: str
+    ) -> None:
+        """Phase2: 写待执行订单，下一K线由主程序消费。"""
+        order = {
+            "symbol":    self.symbol,
+            "action":    action,
+            "price_ref": price,
+            "ts":        ts,
+            "source":    "gcc_trading_module",
+            "consumed":  False,
+        }
+        try:
+            self._pending_file.parent.mkdir(parents=True, exist_ok=True)
+            self._pending_file.write_text(
+                json.dumps(order, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            logger.info("[GCC-TRADE] pending_order written: %s %s", action, self.symbol)
+        except Exception as e:
+            logger.warning("[GCC-TRADE] write_pending_order: %s", e)
+
+    # ── S42: 与主程序决策对比 ──────────────────────────────────
+    def _compare_with_main(
+        self, gcc_action: str, main_action: str, ts: str
+    ) -> None:
+        """记录 GCC 模块与主程序决策一致率到 accuracy.json。"""
+        match = gcc_action == main_action
+        try:
+            acc: dict = {}
+            if self._accuracy_file.exists():
+                acc = json.loads(self._accuracy_file.read_text(encoding="utf-8"))
+
+            sym_acc = acc.setdefault(self.symbol, {"total": 0, "match": 0, "rate": 0.0})
+            sym_acc["total"] += 1
+            if match:
+                sym_acc["match"] += 1
+            sym_acc["rate"] = round(sym_acc["match"] / sym_acc["total"], 4)
+            sym_acc["last_ts"] = ts
+            sym_acc["last_gcc"]  = gcc_action
+            sym_acc["last_main"] = main_action
+
+            self._accuracy_file.write_text(
+                json.dumps(acc, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception as e:
+            logger.warning("[GCC-TRADE] compare_with_main: %s", e)
+
+
+# ══════════════════════════════════════════════════════════════
 # 自测 (直接运行时)
 # ══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
@@ -798,3 +1002,35 @@ if __name__ == "__main__":
     # S34: None 节点直接 SKIP
     _, _, v3 = verifier.verify(None)
     print(f"S34 None → verdict={v3} (expected SKIP)")
+
+    print(f"\n=== S35-S42 GCCTradingModule 主类自测 ===")
+    import math as _math
+    # 构造 bars (含 close/volume)
+    test_bars = [
+        {"close": 100.0 * _math.exp(0.003 * i), "volume": 1000 + i * 50}
+        for i in range(30)
+    ]
+
+    # observe 模式
+    mod_obs = GCCTradingModule("BTCUSDC", phase=PHASE_OBSERVE)
+    r_obs = mod_obs.process(test_bars, main_decision="HOLD")
+    print(f"S37 observe: action={r_obs['final_action']} verdict={r_obs['verdict']} consensus={r_obs['consensus']}/3")
+    print(f"  best_node: {r_obs['best_node']}")
+    print(f"  log_file exists: {mod_obs._decision_log.exists()}")
+
+    # execute 模式 (verdict=EXECUTE 才写 pending_order)
+    mod_exe = GCCTradingModule("BTCUSDC", phase=PHASE_EXECUTE)
+    # 预先喂历史给 Algebra 以获得有效胜率
+    for i in range(5):
+        mod_exe._verifier.algebra.record_outcome(100.0 + i, "BUY", True)
+    r_exe = mod_exe.process(test_bars, main_decision="BUY")
+    print(f"S41 execute: action={r_exe['final_action']} verdict={r_exe['verdict']}")
+    if r_exe["verdict"] == "EXECUTE":
+        print(f"  pending_order exists: {mod_exe._pending_file.exists()}")
+
+    # S42 一致率
+    print(f"S42 accuracy file exists: {mod_obs._accuracy_file.exists()}")
+    if mod_obs._accuracy_file.exists():
+        import json as _j
+        acc = _j.loads(mod_obs._accuracy_file.read_text())
+        print(f"  BTCUSDC accuracy: {acc.get('BTCUSDC', {})}")
