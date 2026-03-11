@@ -50137,9 +50137,109 @@ def health():
 # KEY-009: 审计Dashboard
 # =========================================================
 ROOT = Path(__file__).resolve().parent  # KEY-009路径基准（固定到主程序目录）
+
+
+def _read_key009_cache():
+    _candidates = [ROOT / "state" / "key009_audit.json", ROOT / "state" / "key009_audit.latest.json"]
+    _best = None
+    _best_mtime = -1
+    for _path in _candidates:
+        try:
+            if _path.exists():
+                _mtime = _path.stat().st_mtime
+                if _mtime > _best_mtime:
+                    _best = _path
+                    _best_mtime = _mtime
+        except Exception:
+            pass
+    if not _best:
+        return None, None
+    try:
+        return json.loads(_best.read_text(encoding="utf-8")), _best
+    except Exception:
+        return None, _best
+
+
 @app.route("/key009", methods=["GET"])
 def key009_dashboard():
     """KEY-009审计dashboard — 优先用缓存数据(后台5分钟刷新)，fallback实时计算"""
+    def _repair_text_mojibake(value):
+        if not isinstance(value, str) or not value:
+            return value
+        cp1252_map = {
+            0x20AC: 0x80, 0x201A: 0x82, 0x0192: 0x83, 0x201E: 0x84, 0x2026: 0x85,
+            0x2020: 0x86, 0x2021: 0x87, 0x02C6: 0x88, 0x2030: 0x89, 0x0160: 0x8A,
+            0x2039: 0x8B, 0x0152: 0x8C, 0x017D: 0x8E, 0x2018: 0x91, 0x2019: 0x92,
+            0x201C: 0x93, 0x201D: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97,
+            0x02DC: 0x98, 0x2122: 0x99, 0x0161: 0x9A, 0x203A: 0x9B, 0x0153: 0x9C,
+            0x017E: 0x9E, 0x0178: 0x9F,
+        }
+        def _score(s):
+            _cjk = len(re.findall(r"[\u3400-\u9fff]", s))
+            _bad = len(re.findall(r"[ÃÂâ€œâ€â€™â€”çåäéèêëï¼½œ™]", s))
+            return _cjk * 2 - _bad * 3
+        def _to_cp1252_bytes(s):
+            out = bytearray()
+            for ch in s:
+                cp = ord(ch)
+                if cp <= 0xFF:
+                    out.append(cp)
+                elif cp in cp1252_map:
+                    out.append(cp1252_map[cp])
+                else:
+                    out.append(0x3F)
+            return bytes(out)
+        best = value
+        best_score = _score(value)
+        current = value
+        for _ in range(2):
+            try:
+                candidate = _to_cp1252_bytes(current).decode("utf-8", errors="ignore").replace("\x00", "").strip()
+            except Exception:
+                break
+            if not candidate or candidate == current:
+                break
+            cand_score = _score(candidate)
+            if cand_score > best_score:
+                best = candidate
+                best_score = cand_score
+            current = candidate
+        return best
+
+    def _repair_key009_evo_memory(payload):
+        try:
+            _fresh_memory = None
+            try:
+                from key009_audit import _parse_evolution_memory as _parse_fresh_evolution_memory
+                _fresh_memory = _parse_fresh_evolution_memory()
+            except Exception:
+                _fresh_memory = None
+            for _rk in ("24h", "1w", "1m"):
+                _d = payload.get(_rk)
+                if not isinstance(_d, dict):
+                    continue
+                _evo = _d.get("system_evo")
+                if not isinstance(_evo, dict):
+                    continue
+                if isinstance(_fresh_memory, list) and _fresh_memory:
+                    _evo["memory_history"] = [dict(_m) for _m in _fresh_memory]
+                _mems = _evo.get("memory_history")
+                if not isinstance(_mems, list):
+                    continue
+                for _m in _mems:
+                    if not isinstance(_m, dict):
+                        continue
+                    _m["title"] = _repair_text_mojibake(_m.get("title", ""))
+                    _fields = _m.get("fields")
+                    if isinstance(_fields, dict):
+                        _m["fields"] = {
+                            _repair_text_mojibake(str(k)): _repair_text_mojibake(str(v))
+                            for k, v in _fields.items()
+                        }
+        except Exception:
+            pass
+        return payload
+
     def _get_signal_filter_mode():
         try:
             if not signal_filter:
@@ -50161,13 +50261,12 @@ def key009_dashboard():
             return "OFF"
 
     # 优先读缓存(后台线程每5分钟刷新)
-    _cache_path = os.path.join("state", "key009_audit.json")
     multi_data = None
     stale_multi_data = None
     try:
-        if os.path.exists(_cache_path):
-            stale_multi_data = json.loads(open(_cache_path, "r", encoding="utf-8").read())
-            _mtime = os.path.getmtime(_cache_path)
+        stale_multi_data, _cache_path = _read_key009_cache()
+        if stale_multi_data is not None and _cache_path is not None:
+            _mtime = _cache_path.stat().st_mtime
             import time as _t_k9d
             if (_t_k9d.time() - _mtime) < 600:  # 10分钟内有效
                 multi_data = stale_multi_data
@@ -50235,6 +50334,7 @@ def key009_dashboard():
                 "signal_filter": _sf_mode
             }
             d["data_source_health"] = _ds_health
+    multi_data = _repair_key009_evo_memory(multi_data)
 
     # 读取dashboard HTML模板并注入多范围数据
     try:
@@ -50326,7 +50426,9 @@ def key009_json():
         return jsonify(data)
     except Exception as e:
         try:
-            _cache = json.loads(open(os.path.join("state", "key009_audit.json"), "r", encoding="utf-8").read())
+            _cache, _ = _read_key009_cache()
+            if _cache is None:
+                raise FileNotFoundError("no key009 cache available")
             data = _cache.get("24h", _cache) if isinstance(_cache, dict) else {}
             if isinstance(data, dict):
                 data["cache_fallback"] = True
@@ -50513,9 +50615,8 @@ def key010_dashboard():
     system_evo = {}
     benchmark = {}
     try:
-        _k9_path = os.path.join("state", "key009_audit.json")
-        if os.path.exists(_k9_path) and (_t10.time() - os.path.getmtime(_k9_path)) < 3600:
-            _k9 = json.loads(open(_k9_path, encoding="utf-8").read())
+        _k9, _k9_path = _read_key009_cache()
+        if isinstance(_k9, dict) and _k9_path and (_t10.time() - _k9_path.stat().st_mtime) < 3600:
             system_evo = _k9.get("24h", {}).get("system_evo", {})
     except Exception:
         pass

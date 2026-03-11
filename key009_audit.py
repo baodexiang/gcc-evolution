@@ -42,7 +42,22 @@ NY_TZ = ZoneInfo("America/New_York")
 ROOT = Path(__file__).parent
 STATE_DIR = ROOT / "state"
 EXPORT_FILE = STATE_DIR / "key009_audit.json"
+EXPORT_FALLBACK_FILE = STATE_DIR / "key009_audit.latest.json"
 logger = logging.getLogger(__name__)
+
+
+def _write_key009_cache(payload: dict, *, indent=None):
+    """写 KEY-009 缓存，主文件被占用时自动回退到备用文件。"""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(payload, ensure_ascii=False, indent=indent)
+    errors = []
+    for path in (EXPORT_FILE, EXPORT_FALLBACK_FILE):
+        try:
+            path.write_text(data, encoding="utf-8")
+            return path
+        except Exception as e:
+            errors.append(f"{path.name}: {e}")
+    raise PermissionError(" | ".join(errors))
 
 # ============================================================
 # KEY-009 GCC任务 → 日志标签映射
@@ -1109,11 +1124,12 @@ def _build_pipeline_analysis(scan_plugins: dict, trade_analysis: dict,
         "SuperTrend":    {
             "file": "supertrend_av2_plugin.py",
             "params": "atr_period=9 / atr_multiplier=3.9",
-            "trigger_hint": "先确认 price_scan_engine_v21.py 中 _scan_supertrend_av2() 已启用；若已启用，再调整 supertrend_av2_plugin.py 当前 atr_period=9 / atr_multiplier=3.9",
+            "trigger_hint": "当前 price_scan_engine_v21.py 中 _scan_supertrend_av2() 调用仍被注释，且 crypto/stock 的 supertrend_av2.enabled 都是 False；先恢复扫描入口并启用配置，再评估 atr_period=9 / atr_multiplier=3.9",
         },
         "RobHoffman":    {
             "file": "rob_hoffman_plugin.py",
-            "params": "KAMA_ER_TANGLED_THRESHOLD=0.22 / KAMA_ER_PERIOD=10 / IRB_WICK_PCT=0.38",
+            "params": "KAMA_ER_TANGLED_THRESHOLD=0.18 / KAMA_ER_PERIOD=10 / IRB_WICK_PCT=0.34",
+            "trigger_hint": "当前参数已比旧建议更宽松，且 crypto.rob_hoffman.enabled=True / stock.rob_hoffman.enabled=False；若扫描仍0触发，应优先复查未激活原因而不是继续沿用旧参数建议",
         },
         "BrooksVision":  {"file": "brooks_vision.py", "params": "confidence阈值/形态过滤"},
         "Chandelier":    {"file": "chandelier_zlsma_plugin.py", "params": "atr_period/atr_mult"},
@@ -1563,23 +1579,46 @@ def _fifo_pair_trades(hours: int) -> dict:
 # ============================================================
 
 def _match_broker_trades(hours: int) -> dict:
-    """读取券商CSV (AIPro/XXXX-X306.CSV) 与 trade_history.json 交叉比对。
-    返回匹配度统计: 系统执行率、信号覆盖率、逐笔匹配明细。"""
+    """????CSV (AIPro/XXXX-X306.CSV/.csv) ? trade_history.json ?????
+    ???? state/broker_pnl.json ?? Coinbase fills ?????"""
     result = {
         "enabled": False,
         "sys_signals": 0, "actual_trades": 0,
         "sys_exec_rate": 0.0, "signal_coverage": 0.0,
         "no_signal_count": 0, "not_exec_count": 0,
-        "matches": [],       # 系统信号→实际匹配明细
-        "no_signal": [],     # 实际交易无系统信号
-        "by_source": {},     # 信号来源分布
+        "matches": [],
+        "no_signal": [],
+        "by_source": {},
+        "csv_path": "",
+        "latest_trade_date": "",
+        "latest_file_mtime": "",
+        "coinbase_updated_at": "",
+        "coinbase_products": 0,
+        "coinbase_total_realized": 0.0,
+        "reconcile_updated_at": "",
     }
 
-    # ── CSV路径: AIPro/ 优先 ──
-    csv_path = ROOT / "AIPro" / "XXXX-X306.CSV"
-    if not csv_path.exists():
-        csv_path = ROOT / ".GCC" / "doc" / "XXXX-X306.CSV"
-    if not csv_path.exists():
+    broker_pnl_path = ROOT / "state" / "broker_pnl.json"
+    if broker_pnl_path.exists():
+        try:
+            broker_pnl = json.loads(broker_pnl_path.read_text(encoding="utf-8"))
+            result["reconcile_updated_at"] = str(broker_pnl.get("updated_at", "") or "")
+            cb = broker_pnl.get("coinbase", {}) or {}
+            cb_symbols = cb.get("symbols", {}) or {}
+            result["coinbase_updated_at"] = result["reconcile_updated_at"]
+            result["coinbase_products"] = len(cb_symbols)
+            result["coinbase_total_realized"] = float(cb.get("total_realized", 0.0) or 0.0)
+        except Exception:
+            pass
+
+    csv_candidates = [
+        ROOT / "AIPro" / "XXXX-X306.CSV",
+        ROOT / "AIPro" / "XXXX-X306.csv",
+        ROOT / ".GCC" / "doc" / "XXXX-X306.CSV",
+        ROOT / ".GCC" / "doc" / "XXXX-X306.csv",
+    ]
+    csv_path = next((p for p in csv_candidates if p.exists()), None)
+    if not csv_path:
         return result
 
     th_path = ROOT / "logs" / "trade_history.json"
@@ -1587,39 +1626,53 @@ def _match_broker_trades(hours: int) -> dict:
         return result
 
     result["enabled"] = True
+    result["csv_path"] = str(csv_path)
+    try:
+        result["latest_file_mtime"] = datetime.fromtimestamp(csv_path.stat().st_mtime, NY_TZ).strftime("%Y-%m-%d %H:%M ET")
+    except Exception:
+        pass
     cutoff = datetime.now(NY_TZ) - timedelta(hours=hours)
 
-    # ── 读CSV ──
     import csv as csv_mod
     csv_trades = []
+    all_csv_trades = []
     try:
         with open(csv_path, encoding="utf-8") as f:
             for r in csv_mod.DictReader(f):
                 if r.get("Action") not in ("Buy", "Sell"):
                     continue
-                # 解析日期 MM/DD/YYYY
                 try:
                     dt = datetime.strptime(r["Date"], "%m/%d/%Y")
-                    dt = dt.replace(hour=12, tzinfo=NY_TZ)  # 粗略正午
+                    dt = dt.replace(hour=12, tzinfo=NY_TZ)
                 except Exception:
-                    continue
-                if dt < cutoff:
                     continue
                 price_str = r.get("Price", "0").replace("$", "").replace(",", "")
                 amt_str = r.get("Amount", "0").replace("$", "").replace(",", "")
-                csv_trades.append({
+                try:
+                    qty = int(float(r.get("Quantity", 0) or 0))
+                except Exception:
+                    qty = 0
+                item = {
                     "date": r["Date"], "date_iso": dt.strftime("%Y-%m-%d"),
                     "action": r["Action"].upper(), "symbol": r["Symbol"],
-                    "price": float(price_str), "qty": int(r.get("Quantity", 0)),
-                    "amount": float(amt_str),
-                })
+                    "price": float(price_str or 0), "qty": qty,
+                    "amount": float(amt_str or 0),
+                }
+                all_csv_trades.append(item)
+                if dt >= cutoff:
+                    csv_trades.append(item)
     except Exception:
         return result
+
+    if all_csv_trades:
+        try:
+            result["latest_trade_date"] = max(t["date_iso"] for t in all_csv_trades)
+        except Exception:
+            pass
 
     if not csv_trades:
         return result
 
-    # ── 读系统交易 ──
     try:
         sys_records = json.loads(th_path.read_text(encoding="utf-8"))
     except Exception:
@@ -1642,7 +1695,6 @@ def _match_broker_trades(hours: int) -> dict:
             "price": r.get("price", 0), "source": r.get("source", "?"),
         })
 
-    # ── 匹配: 系统信号→实际 ──
     matches = []
     for s in sys_filtered:
         best_match = None
@@ -1663,7 +1715,6 @@ def _match_broker_trades(hours: int) -> dict:
             "amount": best_match["amount"] if best_match else None,
         })
 
-    # ── 反向: 实际交易→系统覆盖 ──
     no_signal = []
     covered = []
     for c in csv_trades:
@@ -1679,7 +1730,6 @@ def _match_broker_trades(hours: int) -> dict:
         else:
             no_signal.append(c)
 
-    # ── 信号来源分布 ──
     src_count = {}
     for s in sys_filtered:
         src_count[s["source"]] = src_count.get(s["source"], 0) + 1
@@ -1698,11 +1748,6 @@ def _match_broker_trades(hours: int) -> dict:
         "by_source": src_count,
     })
     return result
-
-
-# ============================================================
-# KEY-009 Phase2: 拦截验证 (signal_decisions.jsonl)
-# ============================================================
 
 def _validate_blocks(hours: int) -> dict:
     """验证signal_decisions中被拦截信号事后是否正确。
@@ -2128,13 +2173,24 @@ def _save_rules(rules: list) -> None:
         return
     # ── 写 state JSON (供主程序消费) ──
     out_path = STATE_DIR / "key009_rules.json"
+    fallback_path = STATE_DIR / "key009_rules.latest.json"
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "key": "KEY-009",
         "generated_at": datetime.now(NY_TZ).strftime("%Y-%m-%d %H:%M"),
         "rules": rules,
     }
-    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _raw = json.dumps(payload, ensure_ascii=False, indent=2)
+    _rule_written = False
+    for _path in (out_path, fallback_path):
+        try:
+            _path.write_text(_raw, encoding="utf-8")
+            _rule_written = True
+            break
+        except Exception as e:
+            logger.warning("[KEY009] rules write failed: %s -> %s", _path.name, e)
+    if not _rule_written:
+        return
 
     # ── 写入 RuleRegistry (生命周期管理) ──
     try:
@@ -2622,21 +2678,49 @@ def _parse_evolution_memory() -> list:
     except Exception:
         return []
 
+    def _repair_mojibake_text(value: str) -> str:
+        if not isinstance(value, str) or not value:
+            return value
+
+        def _score(s: str) -> int:
+            cjk = len(re.findall(r"[\u3400-\u9fff]", s))
+            bad = len(re.findall(r"[ÃÂâ€œâ€â€™â€”çåäéèêëï¼½œ™]", s))
+            return cjk * 2 - bad * 3
+
+        best = value
+        best_score = _score(value)
+        for codec in ("cp1252", "latin1"):
+            current = value
+            for _ in range(2):
+                try:
+                    candidate = current.encode(codec, errors="ignore").decode("utf-8", errors="ignore").replace("\x00", "").strip()
+                except Exception:
+                    break
+                if not candidate or candidate == current:
+                    break
+                cand_score = _score(candidate)
+                if cand_score > best_score:
+                    best = candidate
+                    best_score = cand_score
+                current = candidate
+        return best
+
     entries = []
-    pattern = re.compile(r"###\s+\[(\d{4}-\d{2}-\d{2})\]\s+\[([^\]]+)\]\s+(.*)")
+    pattern = re.compile(r"###\s+(?:\[(\d{4}-\d{2}-\d{2})\]|(\d{4}-\d{2}-\d{2}))\s+\[([^\]]+)\]\s+(.*)")
     current = None
     for line in text.splitlines():
         m = pattern.match(line)
         if m:
             if current:
                 entries.append(current)
-            current = {"date": m.group(1), "priority": m.group(2), "title": m.group(3).strip(),
+            entry_date = m.group(1) or m.group(2)
+            current = {"date": entry_date, "priority": m.group(3), "title": _repair_mojibake_text(m.group(4).strip()),
                         "fields": {}}
         elif current and line.startswith("- **") and "**:" in line:
             # 提取 场景/问题/解决方案/代码位置/教训
             key_match = re.match(r"- \*\*(.+?)\*\*:\s*(.*)", line)
             if key_match:
-                current["fields"][key_match.group(1)] = key_match.group(2).strip()
+                current["fields"][_repair_mojibake_text(key_match.group(1))] = _repair_mojibake_text(key_match.group(2).strip())
     if current:
         entries.append(current)
 
@@ -2990,11 +3074,10 @@ def format_text(data: dict) -> str:
 
 def export_json(data: dict):
     """导出JSON供dashboard读取。"""
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
     export = {k: v for k, v in data.items()}
     for t in export.get("tasks", {}).values():
         t.pop("recent", None)
-    EXPORT_FILE.write_text(json.dumps(export, indent=2, ensure_ascii=False), encoding='utf-8')
+    _write_key009_cache(export, indent=2)
 
 
 def run_autofix():
@@ -3158,7 +3241,7 @@ def main():
                 "collect_retries": 0,
                 "signal_filter": _sf_mode,
             }
-        EXPORT_FILE.write_text(json.dumps(multi, ensure_ascii=False), encoding="utf-8")
+        _write_key009_cache(multi)
 
         # ── 闭环: 用1w数据写经验卡+生成规则 (避免三范围重复) ──
         week_data = multi.get("1w", {})
@@ -3259,7 +3342,7 @@ def main():
             except Exception:
                 pass
 
-        EXPORT_FILE.write_text(json.dumps(multi, ensure_ascii=False), encoding="utf-8")
+        _write_key009_cache(multi)
 
         # ── 生成嵌入数据的 dashboard HTML (可直接 file:// 打开) ──
         _tpl_path = ROOT / "key009_dashboard.html"
