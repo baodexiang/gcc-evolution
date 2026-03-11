@@ -1350,14 +1350,12 @@ class GCCTradingModule:
             "context":      ctx.as_dict(),
         }
 
-        # S40: observe 模式只记录日志
-        if self.phase == PHASE_OBSERVE:
-            self._write_decision_log(result)
+        # S40: 所有模式都写决策日志
+        self._write_decision_log(result)
 
-        # S41: execute 模式写 pending_order
-        elif self.phase == PHASE_EXECUTE and verdict == "EXECUTE":
+        # S41: execute 模式额外写 pending_order
+        if self.phase == PHASE_EXECUTE and verdict == "EXECUTE":
             self._write_pending_order(final_action, current_price, ts)
-            self._write_decision_log(result)
 
         # L3-S04: 与主程序对比（含 divergence + takeover_ready）
         if main_decision is not None:
@@ -2189,7 +2187,12 @@ def _backfill_sim_trades(symbol: str, bars: list) -> None:
 # S48-S49  llm_server 接入入口
 # 4H K线结束时调用 — 收集信号 → 整合过滤 → 裁决 BUY/SELL/HOLD
 # ══════════════════════════════════════════════════════════════
-def gcc_observe(symbol: str, bars: list, main_decision: str) -> None:
+def gcc_observe(
+    symbol: str,
+    bars: list,
+    main_decision: str,
+    observe_only: bool = False,
+) -> None:
     """
     4H K线结束时由 llm_decide() 调用。
     1. 取出本周期收集的所有外挂信号
@@ -2200,6 +2203,9 @@ def gcc_observe(symbol: str, bars: list, main_decision: str) -> None:
     try:
         signals = _drain_signals(symbol)
         mod = _get_gcc_module(symbol)
+        original_phase = mod.phase
+        if observe_only and mod.phase != PHASE_OBSERVE:
+            mod.phase = PHASE_OBSERVE
 
         # 回填上一次模拟交易的outcome（用当前K线收盘价）
         _backfill_sim_trades(symbol, bars)
@@ -2270,6 +2276,7 @@ def gcc_observe(symbol: str, bars: list, main_decision: str) -> None:
         dec_record = {
             "ts": ts_now,
             "symbol": symbol,
+            "phase": mod.phase,
             "gcc_action": gcc_action,
             "main_action": main_decision,
             "verdict": tree_verdict,
@@ -2289,6 +2296,7 @@ def gcc_observe(symbol: str, bars: list, main_decision: str) -> None:
             "signals_count": len(signals),
             "price": current_price,
             "match": gcc_action == main_decision,
+            "observe_only": bool(observe_only),
         }
         _dec_path = _STATE_DIR / "gcc_trading_decisions.jsonl"
         try:
@@ -2354,7 +2362,14 @@ def gcc_observe(symbol: str, bars: list, main_decision: str) -> None:
             buy_votes, sell_votes, strongest_source, gcc_reason,
         )
     except Exception as e:
-        logger.warning("[GCC-TM] gcc_observe %s: %s", symbol, e)
+        import traceback
+        logger.warning("[GCC-TM] gcc_observe %s: %s\n%s", symbol, e, traceback.format_exc())
+    finally:
+        try:
+            if 'mod' in locals():
+                mod.phase = original_phase
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════
