@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gcc-evo v5.400 — GCC Evolution Engine with Visual Dashboard"""
+"""gcc-evo v5.401 — GCC Evolution Engine with Visual Dashboard"""
 from __future__ import annotations
 
 import json
@@ -31,7 +31,7 @@ if _GCC_SELF_DIR not in sys.path:
 
 KEYS_FILE = Path(".gcc/keys.yaml")
 
-HELP_TEXT = """  GCC v5.400 — Active Evolution Engine
+HELP_TEXT = """  GCC v5.401 — Active Evolution Engine
   ═══════════════════════════════════════════════════
 
   Daily Use:
@@ -1198,9 +1198,13 @@ def cmd_distill(subcommand, days, max_insights, project, single_card, merge, dry
       gcc-evo distill insights --dry-run
       gcc-evo distill skills
     """
-    from gcc_evolution.experience_store import GlobalMemory
-    from gcc_evolution.distiller import Distiller, InsightCard
-    from gcc_evolution.config import GCCConfig
+    try:
+        from gcc_evolution.experience_store import GlobalMemory
+        from gcc_evolution.distiller import Distiller, InsightCard
+        from gcc_evolution.config import GCCConfig
+    except ImportError as _e:
+        click.echo(f"  ⚠  distill 跳过: 依赖模块未找到 ({_e})")
+        sys.exit(2)  # exit code 2 = skip (不是错误)
     from datetime import datetime, timezone, timedelta
 
     # --merge 等效 --single-card + --max 1
@@ -6544,6 +6548,28 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
                     click.echo(f"       ○ {sid}: {stitle[:45]}")
         return done_steps, total_steps
 
+    # ── loop_state.json 写入 ────────────────────────────────
+    _loop_state_path = Path(__file__).parent / "loop_state.json"
+
+    def _write_loop_state(running, round_num=0, last_start="", last_end="", steps=None):
+        """写入 .GCC/loop_state.json 供 dashboard 读取"""
+        state = {
+            "running": running,
+            "round": round_num,
+            "last_start": last_start,
+            "last_end": last_end,
+            "steps": steps or {},
+        }
+        try:
+            _loop_state_path.write_text(
+                json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+    # ─────────────────────────────────────────────────────
+
+    _loop_round = [0]  # mutable counter
+
     def _run_step(name, cmd, timeout=120):
         """运行子步骤,返回(success, output)"""
         click.echo(f"  ⏳ {name}...", nl=False)
@@ -6556,6 +6582,9 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
             if proc.returncode == 0:
                 click.echo(f" ✓")
                 return True, proc.stdout
+            elif proc.returncode == 2:
+                click.echo(f" — (skip)")
+                return "skip", proc.stdout
             else:
                 click.echo(f" ✗ (rc={proc.returncode})")
                 err = (proc.stderr or "")[:200]
@@ -6574,6 +6603,8 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
 
     def _run_once():
         now = datetime.now(NY)
+        _loop_round[0] += 1
+        ts_start = now.strftime("%Y-%m-%dT%H:%M:%S")
         all_tasks = _load_tasks()
         bound = _find_bound_tasks(all_tasks)
         task_label = ", ".join(task_ids) if task_ids else f"{key} (活跃)"
@@ -6581,21 +6612,27 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
         click.echo(f"  {'═' * 55}")
 
         results = {}
+        _step_status = {}  # 供 loop_state.json 使用
 
         # Step 1: 任务进度
+        _write_loop_state(True, _loop_round[0], ts_start, "", {"tasks": {"status": "running"}, "audit": {"status": "pending"}, "distill": {"status": "pending"}, "rules": {"status": "pending"}, "dashboard": {"status": "pending"}})
         click.echo(f"\n  📋 Step 1/5: 任务进度 ({len(bound)} 个绑定任务)")
         done_s, total_s = _show_task_progress(bound)
         task_pct = f"{done_s}/{total_s}" if total_s else "N/A"
         results["tasks"] = len(bound) > 0
+        _step_status["tasks"] = {"status": "ok" if results["tasks"] else "skip", "detail": task_pct}
 
         # Step 2: Audit (日志分析+经验卡+规则)
+        _write_loop_state(True, _loop_round[0], ts_start, "", {**_step_status, "audit": {"status": "running"}, "distill": {"status": "pending"}, "rules": {"status": "pending"}, "dashboard": {"status": "pending"}})
         ok, out = _run_step(
             "Step 2/5: Audit (分析+经验卡+规则)",
             [sys.executable, "key009_audit.py", "--export"]
         )
         results["audit"] = ok
+        _step_status["audit"] = {"status": "ok" if ok else "error"}
 
         # Step 3: Distill (经验提炼→SkillBank)
+        _write_loop_state(True, _loop_round[0], ts_start, "", {**_step_status, "distill": {"status": "running"}, "rules": {"status": "pending"}, "dashboard": {"status": "pending"}})
         if dry_run:
             click.echo(f"  ⏳ Step 3/5: Distill (提炼)... [dry-run skip]")
             results["distill"] = True
@@ -6605,8 +6642,11 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
                 [sys.executable, str(_gcc_dir() / "gcc_evo.py"), "distill"]
             )
             results["distill"] = ok
+        _distill_st = "ok" if results["distill"] is True else ("skip" if results["distill"] == "skip" else "error")
+        _step_status["distill"] = {"status": _distill_st}
 
         # Step 4: Rules check
+        _write_loop_state(True, _loop_round[0], ts_start, "", {**_step_status, "rules": {"status": "running"}, "dashboard": {"status": "pending"}})
         rules_path = project_root / "state" / "key009_rules.json"
         if rules_path.exists():
             try:
@@ -6618,14 +6658,18 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
                     n_rules = len(rules_data) if isinstance(rules_data, list) else 0
                 click.echo(f"  ✓ Step 4/5: Rules — {n_rules} 条结构化规则")
                 results["rules"] = True
+                _step_status["rules"] = {"status": "ok", "detail": f"{n_rules}条规则"}
             except Exception as _re:
                 click.echo(f"  ✗ Step 4/5: Rules — {_re}")
                 results["rules"] = False
+                _step_status["rules"] = {"status": "error"}
         else:
             click.echo(f"  ○ Step 4/5: Rules — 无规则文件")
             results["rules"] = False
+            _step_status["rules"] = {"status": "skip"}
 
         # Step 5: Dashboard check
+        _write_loop_state(True, _loop_round[0], ts_start, "", {**_step_status, "dashboard": {"status": "running"}})
         export_path = project_root / "state" / "key009_audit.json"
         if export_path.exists():
             try:
@@ -6640,9 +6684,11 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
                     total_fixed += len([i for i in issues if i.get("fixed")])
                 click.echo(f"  ✓ Step 5/5: Dashboard — {ranges}, 问题{total_issues}, 已修复{total_fixed}")
                 results["dashboard"] = True
+                _step_status["dashboard"] = {"status": "ok", "detail": f"问题{total_issues}/修复{total_fixed}"}
             except Exception as _ee:
                 click.echo(f"  ✗ Step 5/5: Dashboard — {_ee}")
                 results["dashboard"] = False
+                _step_status["dashboard"] = {"status": "error"}
         else:
             click.echo(f"  ✗ Step 5/5: Dashboard — 无export文件")
             results["dashboard"] = False
@@ -6651,6 +6697,10 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
         ok_count = sum(1 for v in results.values() if v)
         total = len(results)
         health = "✓ HEALTHY" if ok_count == total else f"⚠ {ok_count}/{total}"
+        # 写入完成状态
+        ts_end = datetime.now(NY).strftime("%Y-%m-%dT%H:%M:%S")
+        _write_loop_state(not once, _loop_round[0], ts_start, ts_end, _step_status)
+
         click.echo(f"\n  {'─' * 55}")
         click.echo(f"  闭环: {health}  |  任务Steps: {task_pct}")
         click.echo(f"  Tasks={_icon(results['tasks'])} Audit={_icon(results['audit'])} "
