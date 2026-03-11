@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 
 logger = logging.getLogger("gcc.trading")
 
@@ -257,6 +258,17 @@ class TreeNode:
     aggregate: float = 0.0                   # [-1, 1]
     pruned: bool = False
     prune_reason: str = ""
+    # PUCT 树搜索扩展 (arXiv:2603.04735)
+    depth: int = 0                           # 树深度 (0=根, 1=L1方向, 2=L2策略)
+    visit_count: int = 0                     # N(s,a) 访问次数
+    total_value: float = 0.0                 # W(s,a) 累积价值
+    children: list = field(default_factory=list)  # 子节点列表
+    strategy: str = ""                       # L2策略标签
+
+    @property
+    def q_value(self) -> float:
+        """PUCT Q值 = 平均价值。"""
+        return self.total_value / self.visit_count if self.visit_count > 0 else 0.0
 
     def as_dict(self) -> dict:
         return {
@@ -265,6 +277,11 @@ class TreeNode:
             "aggregate":        round(self.aggregate, 4),
             "pruned":           self.pruned,
             "prune_reason":     self.prune_reason,
+            "depth":            self.depth,
+            "strategy":         self.strategy,
+            "visit_count":      self.visit_count,
+            "q_value":          round(self.q_value, 4),
+            "children_count":   len(self.children),
         }
 
 
@@ -463,6 +480,143 @@ def _select_best_candidate(nodes: List[TreeNode]) -> TreeNode:
         hold.aggregate = 0.0
         return hold
     return max(surviving, key=lambda n: n.aggregate)
+
+
+# ══════════════════════════════════════════════════════════════
+# S22b  PUCT 树搜索 — arXiv:2603.04735 核心算法
+# Multi-level: L1(方向BUY/SELL/HOLD) → L2(子策略)
+# PUCT: UCB(s,a) = Q(s,a) + c_puct * P(s,a) * sqrt(N_parent) / (1 + N(s,a))
+# 数值反馈: 验证分数回传 → 迭代选择最优路径
+# ══════════════════════════════════════════════════════════════
+
+# PUCT 超参数
+_C_PUCT = 1.5        # 探索-利用平衡系数 (论文推荐 1.0-2.0)
+_PUCT_ITERATIONS = 4  # 搜索迭代次数 (论文~600节点，我们4轮×9节点=36次评估)
+_PRUNE_RATIO = 0.8    # 每轮剪枝比例 (论文~80%剪枝)
+
+# L2 子策略定义 — 每个方向3种策略，强调不同数据源
+_L2_STRATEGIES: Dict[str, List[dict]] = {
+    "BUY": [
+        {"strategy": "momentum",  "emphasis": {"scan": 1.6, "volume": 1.4, "vision": 0.8}},
+        {"strategy": "value",     "emphasis": {"win_rate": 1.8, "filter": 1.5, "scan": 0.7}},
+        {"strategy": "breakout",  "emphasis": {"volume": 2.0, "vision": 1.3, "filter": 0.8}},
+    ],
+    "SELL": [
+        {"strategy": "momentum",  "emphasis": {"scan": 1.6, "volume": 1.4, "vision": 0.8}},
+        {"strategy": "reversal",  "emphasis": {"vision": 1.8, "win_rate": 1.3, "scan": 0.7}},
+        {"strategy": "weakness",  "emphasis": {"filter": 1.8, "win_rate": 1.5, "volume": 0.8}},
+    ],
+    "HOLD": [
+        {"strategy": "neutral",   "emphasis": {}},  # HOLD 只有一个子策略
+    ],
+}
+
+
+def _expand_l2_children(parent: TreeNode, base_scores: dict) -> List[TreeNode]:
+    """
+    arXiv:2603.04735 Expand: L1节点→L2子策略节点。
+    对基础分数应用子策略的emphasis权重，生成不同侧重的候选路径。
+    """
+    strategies = _L2_STRATEGIES.get(parent.action, [])
+    children = []
+    for strat in strategies:
+        # 对每个数据源应用emphasis权重
+        adjusted_scores = {}
+        emphasis = strat["emphasis"]
+        for src, val in base_scores.items():
+            if src.startswith("_"):
+                continue  # 跳过元数据key
+            multiplier = emphasis.get(src, 1.0)
+            adjusted_scores[src] = val * multiplier
+        agg = _aggregate_candidate_score(adjusted_scores)
+        child = TreeNode(
+            action=parent.action,
+            scores_by_source=adjusted_scores,
+            aggregate=agg,
+            depth=2,
+            strategy=strat["strategy"],
+        )
+        children.append(child)
+    return children
+
+
+def _puct_score(child: TreeNode, parent_visits: int, prior: float) -> float:
+    """
+    arXiv:2603.04735 PUCT公式:
+    UCB(s,a) = Q(s,a) + c_puct * P(s,a) * sqrt(N_parent) / (1 + N(s,a))
+
+    Q(s,a)    = 平均价值 (exploitation)
+    P(s,a)    = 先验概率，由 aggregate 归一化得到
+    N_parent  = 父节点总访问次数
+    N(s,a)    = 子节点访问次数
+    c_puct    = 探索常数
+    """
+    q = child.q_value
+    exploration = _C_PUCT * prior * math.sqrt(parent_visits) / (1 + child.visit_count)
+    return q + exploration
+
+
+def _numerical_feedback(node: TreeNode, verifier: "BeyondEuclidVerifier",
+                        closes: List[float], current_price: float) -> float:
+    """
+    arXiv:2603.04735 Verify+Correct: 数值反馈循环。
+    对候选节点做验证 → 返回归一化反馈值 [0, 1]。
+    论文: "propose → code → verify → inject error → correct → expand deeper"
+    我们: 用三视角验证器的共识度作为数值反馈。
+    """
+    if node.action == "HOLD":
+        return 0.3  # HOLD 的基准反馈值（不活跃）
+
+    consensus, results, verdict = verifier.verify(node, closes, current_price)
+    # 反馈值: 基于共识度和各视角得分
+    if not results:
+        return 0.3
+    avg_score = sum(r.score for r in results) / len(results)
+    # consensus 0/3 → 0.1, 1/3 → 0.3, 2/3 → 0.6, 3/3 → 0.9
+    consensus_bonus = consensus * 0.2
+    return min(1.0, avg_score * 0.5 + consensus_bonus + 0.1)
+
+
+# 访问统计持久化 — 跨调用累积经验
+_VISIT_STATS_FILE = _STATE_DIR / "gcc_puct_visits.json"
+
+
+def _load_visit_stats() -> Dict[str, Dict[str, dict]]:
+    """加载 PUCT 访问统计 {symbol: {strategy_key: {visits, total_value}}}。"""
+    if not _VISIT_STATS_FILE.exists():
+        return {}
+    try:
+        return json.loads(_VISIT_STATS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_visit_stats(stats: Dict[str, Dict[str, dict]]) -> None:
+    """保存 PUCT 访问统计。"""
+    try:
+        _VISIT_STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _VISIT_STATS_FILE.write_text(
+            json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception as e:
+        logger.debug("[GCC-TM] save_visit_stats: %s", e)
+
+
+def _apply_visit_history(node: TreeNode, stats: dict) -> None:
+    """将历史访问统计注入节点。"""
+    key = f"{node.action}_{node.strategy}" if node.strategy else node.action
+    hist = stats.get(key, {})
+    node.visit_count = hist.get("visits", 0)
+    node.total_value = hist.get("total_value", 0.0)
+
+
+def _update_visit_stats(stats: dict, node: TreeNode, value: float) -> None:
+    """更新节点的访问统计。"""
+    key = f"{node.action}_{node.strategy}" if node.strategy else node.action
+    if key not in stats:
+        stats[key] = {"visits": 0, "total_value": 0.0}
+    stats[key]["visits"] += 1
+    stats[key]["total_value"] += value
 
 
 # ══════════════════════════════════════════════════════════════
@@ -958,20 +1112,120 @@ class GCCTradingModule:
             "n_gate_sell":     _read_n_gate(sym, "SELL"),
         }
 
-    # ── S38: 树搜索 ────────────────────────────────────────────
+    # ── S38: PUCT 多层树搜索 (arXiv:2603.04735) ────────────────
     def _run_tree_search(self, bars: list, context: dict) -> TreeNode:
+        """
+        arXiv:2603.04735 PUCT 树搜索算法:
+        1. L1展开: 生成 BUY/SELL/HOLD 三个方向节点
+        2. 剪枝: 应用 P1-P4 规则 (~80% 候选被剪)
+        3. L2展开: 存活L1节点 → 子策略节点 (momentum/value/breakout...)
+        4. PUCT迭代: N轮选择→数值反馈→回传值→再选择
+        5. 最终选择: 最高Q值或最多访问次数的L2节点提升为最终候选
+        """
         sym = self.symbol
+        closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
+        current_price = closes[-1] if closes else 0.0
+
+        # ── Step 1: L1 展开 (方向层) ──
         buy_scores  = _score_buy_candidate(sym, bars, context)
         sell_scores = _score_sell_candidate(sym, bars, context)
         hold_scores = _score_hold_candidate()
 
-        nodes = [
-            TreeNode("BUY",  buy_scores,  _aggregate_candidate_score(buy_scores)),
-            TreeNode("SELL", sell_scores, _aggregate_candidate_score(sell_scores)),
-            TreeNode("HOLD", hold_scores, 0.0),
+        l1_nodes = [
+            TreeNode("BUY",  buy_scores,  _aggregate_candidate_score(buy_scores),  depth=1),
+            TreeNode("SELL", sell_scores, _aggregate_candidate_score(sell_scores), depth=1),
+            TreeNode("HOLD", hold_scores, 0.0, depth=1),
         ]
-        _apply_pruning(nodes, sym, context)
-        return _select_best_candidate(nodes)
+
+        # ── Step 2: L1 剪枝 ──
+        _apply_pruning(l1_nodes, sym, context)
+        surviving_l1 = [n for n in l1_nodes if not n.pruned]
+        if not surviving_l1:
+            hold = TreeNode(action="HOLD", prune_reason="all_candidates_pruned")
+            hold.scores_by_source = hold_scores
+            return hold
+
+        # ── Step 3: L2 展开 (子策略层) ──
+        score_map = {"BUY": buy_scores, "SELL": sell_scores, "HOLD": hold_scores}
+        all_l2: List[TreeNode] = []
+        for l1 in surviving_l1:
+            children = _expand_l2_children(l1, score_map[l1.action])
+            l1.children = children
+            all_l2.extend(children)
+
+        if not all_l2:
+            return _select_best_candidate(surviving_l1)
+
+        # ── Step 4: 加载历史访问统计 ──
+        visit_stats = _load_visit_stats()
+        sym_stats = visit_stats.get(sym, {})
+        for child in all_l2:
+            _apply_visit_history(child, sym_stats)
+
+        # ── Step 5: PUCT 迭代选择 + 数值反馈 ──
+        # 计算 L2 先验概率 P(s,a) — 由 aggregate 归一化
+        all_agg = [abs(c.aggregate) for c in all_l2]
+        sum_agg = sum(all_agg) or 1.0
+        priors = {id(c): abs(c.aggregate) / sum_agg for c in all_l2}
+
+        # 创建轻量验证器副本用于反馈（不污染主验证器状态）
+        feedback_verifier = BeyondEuclidVerifier()
+        feedback_verifier.geometry.update(closes)
+
+        for iteration in range(_PUCT_ITERATIONS):
+            # PUCT 选择: 计算每个L2节点的UCB值
+            total_visits = sum(c.visit_count for c in all_l2) + 1
+            best_ucb = -float("inf")
+            selected = all_l2[0]
+            for child in all_l2:
+                if child.pruned:
+                    continue
+                ucb = _puct_score(child, total_visits, priors[id(child)])
+                if ucb > best_ucb:
+                    best_ucb = ucb
+                    selected = child
+
+            # 数值反馈: 验证选中节点
+            feedback_value = _numerical_feedback(
+                selected, feedback_verifier, closes, current_price
+            )
+
+            # 回传值 (backpropagation)
+            selected.visit_count += 1
+            selected.total_value += feedback_value
+            _update_visit_stats(sym_stats, selected, feedback_value)
+
+            # 剪枝低价值分支 (论文: ~80% pruned)
+            if iteration == 1 and len(all_l2) > 3:
+                # 第2轮后剪掉Q值最低的分支
+                ranked = sorted(
+                    [c for c in all_l2 if not c.pruned],
+                    key=lambda c: c.q_value,
+                )
+                n_prune = max(1, int(len(ranked) * (1 - _PRUNE_RATIO)))
+                for c in ranked[:n_prune]:
+                    if c.action != "HOLD":  # 保留HOLD
+                        c.pruned = True
+                        c.prune_reason = f"PUCT:low_q={c.q_value:.3f}"
+
+        # ── Step 6: 保存访问统计 ──
+        visit_stats[sym] = sym_stats
+        _save_visit_stats(visit_stats)
+
+        # ── Step 7: 选择最终候选 — 最高Q值的存活L2节点 ──
+        surviving_l2 = [c for c in all_l2 if not c.pruned]
+        if not surviving_l2:
+            return _select_best_candidate(surviving_l1)
+
+        # 论文: 最终选择基于最多访问次数 (robust) 或最高Q值 (greedy)
+        # 交易场景用Q值 (greedy) — 我们需要最高预期收益
+        best = max(surviving_l2, key=lambda c: c.q_value if c.visit_count > 0 else c.aggregate)
+
+        # 将L2最优提升为最终节点，保留策略信息
+        best.scores_by_source["_puct_strategy"] = best.strategy
+        best.scores_by_source["_puct_visits"] = best.visit_count
+        best.scores_by_source["_puct_q_value"] = round(best.q_value, 4)
+        return best
 
     # ── S39: 三视角验证 ────────────────────────────────────────
     def _run_verification(
