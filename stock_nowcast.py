@@ -57,19 +57,8 @@ CRYPTO_POOL = [
 # ============================================================
 # LLM配置
 # ============================================================
-NC_PROVIDER = os.environ.get("NC_PROVIDER", "deepseek").strip().lower()
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-DEFAULT_MODEL_BY_PROVIDER = {
-    "deepseek": "deepseek-chat",
-    "openai": "gpt-4o-mini",
-}
-DEFAULT_BASE_URL_BY_PROVIDER = {
-    "deepseek": "https://api.deepseek.com/v1",
-    "openai": None,
-}
-NC_MODEL = os.environ.get("NC_MODEL", DEFAULT_MODEL_BY_PROVIDER.get(NC_PROVIDER, "deepseek-chat")).strip()
-NC_API_BASE_URL = os.environ.get("NC_API_BASE_URL", DEFAULT_BASE_URL_BY_PROVIDER.get(NC_PROVIDER) or "").strip()
+NC_MODEL = os.environ.get("NC_MODEL", "gpt-4o-search-preview")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 # ============================================================
 # 邮件配置 (复用主系统)
@@ -99,48 +88,29 @@ def _log(msg: str):
 # ============================================================
 PROMPT_TEMPLATE = """Today is {date}. Evaluate {symbol} ({company}) for a 1-3 day outlook.
 
-Use your market knowledge to judge likely short-term direction. Consider:
-- business quality and typical sector sensitivity
-- likely reaction to macro / crypto / growth conditions
-- whether the name is usually momentum-driven or mean-reverting
-- whether your confidence should be low because fresh information is unavailable
+Search the web for:
+- Latest news, press releases, earnings updates
+- Analyst ratings and price target changes
+- Sector/industry trends affecting this stock
+- Any upcoming catalysts (earnings dates, FDA decisions, product launches)
+- Recent insider trading or institutional flow
+- Reddit sentiment (r/wallstreetbets, r/stocks, r/investing) — retail trader buzz
 
 Rate from -5 (very bearish) to +5 (very bullish).
-0 means neutral or insufficient edge.
+0 means neutral/no clear direction.
 
 Output ONLY a JSON object:
 {{"score": <int -5 to 5>, "confidence": <float 0.0 to 1.0>, "reasoning": "<1-2 sentences>"}}
 """
 
 
-def _resolve_llm_config() -> dict:
-    """Resolve provider-specific API settings for nowcast."""
-    provider = NC_PROVIDER or "deepseek"
-    if provider == "openai":
-        return {
-            "provider": provider,
-            "api_key": OPENAI_API_KEY,
-            "base_url": NC_API_BASE_URL or None,
-            "model": NC_MODEL or DEFAULT_MODEL_BY_PROVIDER["openai"],
-        }
-
-    return {
-        "provider": "deepseek",
-        "api_key": DEEPSEEK_API_KEY,
-        "base_url": NC_API_BASE_URL or DEFAULT_BASE_URL_BY_PROVIDER["deepseek"],
-        "model": NC_MODEL or DEFAULT_MODEL_BY_PROVIDER["deepseek"],
-    }
-
-
 def nowcast_single(symbol: str, company: str, target_date: str = None) -> dict:
     """
     单品种Nowcast评分。
-    默认使用 DeepSeek 文本模型，输出结构化短线打分。
+    使用OpenAI web search模型，让LLM自主搜网评分。
     """
-    llm_cfg = _resolve_llm_config()
-    if not llm_cfg["api_key"]:
-        env_name = "OPENAI_API_KEY" if llm_cfg["provider"] == "openai" else "DEEPSEEK_API_KEY"
-        return {"error": f"{env_name} not set"}
+    if not OPENAI_API_KEY:
+        return {"error": "OPENAI_API_KEY not set"}
 
     if target_date is None:
         target_date = datetime.now(NY_TZ).strftime("%Y-%m-%d")
@@ -150,19 +120,16 @@ def nowcast_single(symbol: str, company: str, target_date: str = None) -> dict:
     try:
         from openai import OpenAI
         import httpx
-        client_kwargs = {
-            "api_key": llm_cfg["api_key"],
-            "timeout": httpx.Timeout(60.0, connect=10.0),
-            "max_retries": 2,
-        }
-        if llm_cfg["base_url"]:
-            client_kwargs["base_url"] = llm_cfg["base_url"]
-        client = OpenAI(**client_kwargs)
+        client = OpenAI(
+            api_key=OPENAI_API_KEY,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+            max_retries=2,
+        )
 
         response = client.chat.completions.create(
-            model=llm_cfg["model"],
+            model=NC_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
+            max_completion_tokens=200,
         )
 
         text = response.choices[0].message.content or ""
@@ -188,7 +155,7 @@ def nowcast_single(symbol: str, company: str, target_date: str = None) -> dict:
             "score": score,
             "confidence": round(confidence, 3),
             "reasoning": reasoning,
-            "model": llm_cfg["model"],
+            "model": NC_MODEL,
             "actual_return": None,
             "backfilled": False,
         }
@@ -421,7 +388,7 @@ def send_nowcast_email(results: list, accuracy: dict = None):
             f"Top5 Avg Return: {accuracy['top5_avg_return']:.4%}",
         ])
 
-    lines.extend(["", f"Provider/Model: {NC_PROVIDER}/{NC_MODEL}", "Phase 1: 仅日志, 不影响交易决策"])
+    lines.extend(["", f"Model: {NC_MODEL}", "Phase 1: 仅日志, 不影响交易决策"])
 
     body = "\n".join(lines)
 
