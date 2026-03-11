@@ -50063,9 +50063,9 @@ L2门卫交易触发
             else:
                 print(f"[v3.460] 🚫 {symbol} 门卫拒绝: {gate_reason}")
 
-        # GCC-TM: 美股旧执行链并行观察
-        # 目标: 5个美股进入 GCC-TM 实盘观察/统一日志，但不接管当前下单模式。
-        if _HAS_GCC_TM and is_us_stock(symbol) and symbol in {"TSLA", "CRWV", "NBIS", "ONDS", "OPEN"} and ohlcv_bars:
+        # GCC-TM: 扫描引擎信号推送 — 美股+加密货币
+        # 美股: observe_only=True（不接管下单）; 加密: 尊重品种配置的phase
+        if _HAS_GCC_TM and (is_crypto_symbol(symbol) or (is_us_stock(symbol) and symbol in {"TSLA", "CRWV", "NBIS", "ONDS", "OPEN"})) and ohlcv_bars:
             try:
                 if macd_triggered and macd_action in ("BUY", "SELL"):
                     _macd_strength_shadow = float(
@@ -50086,11 +50086,12 @@ L2门卫交易触发
                     else trade_action if allow_trade and trade_action in ("BUY", "SELL")
                     else "HOLD"
                 )
-                _gcc_observe(symbol, ohlcv_bars, _gcc_main_action, observe_only=True)
+                _gcc_observe(symbol, ohlcv_bars, _gcc_main_action,
+                             observe_only=not is_crypto_symbol(symbol))
                 log_to_server(
                     f"[GCC-TM][SHADOW] {symbol} main={_gcc_main_action} "
                     f"macd={macd_action or '-'} gate={trade_action or '-'} "
-                    f"allow={allow_trade}"
+                    f"allow={allow_trade} crypto={is_crypto_symbol(symbol)}"
                 )
             except Exception as _gcc_shadow_err:
                 log_to_server(f"[GCC-TM][SHADOW] {symbol} observe失败: {_gcc_shadow_err}")
