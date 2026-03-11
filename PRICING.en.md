@@ -1,6 +1,6 @@
-﻿# GCC-Evo Pricing
+# GCC-Evo Pricing
 
-See also: [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md) for the authoritative v5.330 free/paid 8-layer directory split.
+See also: [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md) for the authoritative v5.400 free/paid 8-layer directory split.
 
 ## Canonical Tier Boundary
 

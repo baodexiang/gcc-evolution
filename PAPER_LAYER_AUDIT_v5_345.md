@@ -1,4 +1,4 @@
-# gcc-evo v5.345 Paper-to-Layer Audit
+# gcc-evo v5.400 Paper-to-Layer Audit
 
 This document summarizes the current local audit baseline for gcc-evo paper usage across the canonical 8-layer model:
 

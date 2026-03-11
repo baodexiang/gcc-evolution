@@ -1,6 +1,6 @@
 ﻿# GCC-Evo 定价
 
-另见: [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md)，该文件是 v5.345 免费/付费 8 层目录边界的权威说明。
+另见: [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md)，该文件是 v5.400 免费/付费 8 层目录边界的权威说明。
 
 ## 权威层级边界
 

@@ -1,6 +1,6 @@
-﻿# gcc-evo v5.345 Canonical 8-Layer Split
+# gcc-evo v5.400 Canonical 8-Layer Split
 
-This file is the authoritative directory split for the v5.300/v5.345 commercial boundary.
+This file is the authoritative directory split for the v5.400 commercial boundary.
 
 ## Canonical Release Model
 

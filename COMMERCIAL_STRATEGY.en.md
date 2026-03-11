@@ -225,19 +225,19 @@ When deciding if a feature is "basic" or "core":
 ```
 Is it in Tier 2 (free BUSL)? Ask:
 
-☑️ Can users build something useful without it?
+ Can users build something useful without it?
    → YES = probably Tier 2 (free)
    → NO = probably Tier 3 (paid)
 
-☑️ Can it be implemented without enterprise infrastructure?
+ Can it be implemented without enterprise infrastructure?
    → YES = probably Tier 2 (free)
    → NO = probably Tier 3 (paid)
 
-☑️ Is it required for the core value proposition?
+ Is it required for the core value proposition?
    → YES = Tier 2 (free)
    → NO = Tier 3 (paid)
 
-☑️ Does it scale to millions of users/records?
+ Does it scale to millions of users/records?
    → YES = might be Tier 3 if requires specialized infra
    → NO = Tier 2 (free)
 ```

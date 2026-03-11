@@ -1,4 +1,4 @@
-﻿# Security Policy
+# Security Policy
 
 ## Reporting Security Vulnerabilities
 
@@ -395,7 +395,7 @@ For security questions or concerns:
 ---
 
 **Last Updated**: 2026-03-05
-**Version**: 5.325
+**Version**: 5.400
 
 
 

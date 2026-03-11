@@ -4,7 +4,7 @@
 
 ---
 
-> Canonical v5.345 commercial boundary: see [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md). Release-facing split is `5 Free + 3 Paid`: free foundation = `UI + L0 + L1 + L2 + L3`, paid core = `L4 + L5 + DA`.
+> Canonical v5.400 commercial boundary: see [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md). Release-facing split is `5 Free + 3 Paid`: free foundation = `UI + L0 + L1 + L2 + L3`, paid core = `L4 + L5 + DA`.
 
 ## Table of Contents
 
@@ -25,23 +25,23 @@
 
 gcc-evo's five-layer architecture is not arbitrary—it systematically addresses these questions:
 
-1. **L1 Memory Layer** — "How does AI remember information across sessions?"
+1. **L1 Memory Layer**  "How does AI remember information across sessions?"
    - Traditional: Concatenate entire history (Token explosion)
    - gcc-evo: Three-tier hierarchical storage with on-demand retrieval
 
-2. **L2 Retrieval Layer** — "How to quickly find relevant information from thousands of records?"
+2. **L2 Retrieval Layer**  "How to quickly find relevant information from thousands of records?"
    - Traditional: Full-text search or random sampling (low accuracy)
    - gcc-evo: Hybrid retrieval combining semantic + temporal + keyword (85%+ hit rate)
 
-3. **L3 Distillation Layer** — "How does AI learn from its own experience?"
+3. **L3 Distillation Layer**  "How does AI learn from its own experience?"
    - Traditional: No distillation mechanism (experience lost)
    - gcc-evo: Automatic rule extraction and skill library (continuous learning)
 
-4. **L4 Decision Layer** — "How to prevent AI hallucinations from polluting memory?"
+4. **L4 Decision Layer**  "How to prevent AI hallucinations from polluting memory?"
    - Traditional: No verification (error propagation)
    - gcc-evo: Skeptic gate + human-in-the-loop validation
 
-5. **L5 Orchestration Layer** — "How to automate the entire improvement process?"
+5. **L5 Orchestration Layer**  "How to automate the entire improvement process?"
    - Traditional: Manual scripts (error-prone)
    - gcc-evo: DAG scheduling + 6-step closure loop (zero-touch automation)
 
