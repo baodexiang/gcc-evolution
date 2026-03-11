@@ -465,10 +465,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <tbody id="gcctm-other-body"></tbody>
 </table>
 
-<!-- Pipeline 任务 -->
-<h2 style="margin-top:24px">Pipeline 任务</h2>
-<div id="gcctm-summary" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
-<div id="gcctm-pipeline" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:18px"></div>
+<div id="gcctm-summary" style="margin-top:16px;margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
 
 <h2 style="margin-top:20px">KNN经验卡片</h2>
 <div id="gcctm-knn-cards" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px"></div>
@@ -1978,73 +1975,6 @@ function loadGccTm() {
         </tr>`;
     };
 
-    const renderPipelineTasks = (tasks) => {
-        const container = $('gcctm-pipeline');
-        if (!container) return;
-        if (!tasks.length) {
-            container.innerHTML = '<div style="border:1px solid #eaeef2;border-radius:10px;padding:14px;color:#656d76">暂无 KEY-011 pipeline 任务</div>';
-            return;
-        }
-        // 自动检测分组: L1/L2/L3 或 A/B/C
-        const groupConfig = {
-            'L1': {title: 'L1 决策输入与状态层', match: (sid, t) => sid.startsWith('L1-') || t.includes('[L1]')},
-            'L2': {title: 'L2 树状搜索与候选裁剪层', match: (sid, t) => sid.startsWith('L2-') || t.includes('[L2]')},
-            'L3': {title: 'L3 三视角验证与 GCC-TM 接口层', match: (sid, t) => sid.startsWith('L3-') || t.includes('[L3]')},
-            'A':  {title: 'A 加密方向锁', match: (sid, t) => sid.startsWith('A') || t.includes('[加密方向锁]')},
-            'B':  {title: 'B 美股 GCC-TM 执行', match: (sid, t) => sid.startsWith('B') || t.includes('[美股gcc-tm]')},
-            'C':  {title: 'C 共用 / Dashboard', match: (sid, t) => sid.startsWith('C') || t.includes('[共用]') || t.includes('[dashboard]')},
-        };
-        container.innerHTML = tasks.map(task => {
-            const steps = task.steps || [];
-            // 检测用哪套分组
-            const hasABC = steps.some(s => /^[ABC]/.test(s.id || ''));
-            const activeGroups = hasABC ? ['A','B','C'] : ['L1','L2','L3'];
-            const groups = {};
-            activeGroups.forEach(g => groups[g] = []);
-            groups.OTHER = [];
-            steps.forEach(step => {
-                const sid = step.id || '';
-                const title = step.title || '';
-                let placed = false;
-                for (const g of activeGroups) {
-                    if (groupConfig[g].match(sid, title)) { groups[g].push(step); placed = true; break; }
-                }
-                if (!placed) groups.OTHER.push(step);
-            });
-            const layerHtml = activeGroups.map(g => {
-                const items = groups[g];
-                const done = items.filter(x => x.status === 'done').length;
-                const total = items.length;
-                const body = items.length
-                    ? items.map(step => {
-                        const doneFlag = step.status === 'done';
-                        const color = doneFlag ? '#238636' : '#d29922';
-                        const marker = doneFlag ? '✅ 完成' : '⏳ 待做';
-                        return `<div style="padding:8px 10px;border-top:1px solid #eaeef2">
-                            <div style="font-size:0.9em;font-weight:600">${step.title}</div>
-                            <div style="font-size:0.8em;color:#656d76;margin-top:2px">${step.note || ''}</div>
-                            <div style="font-size:0.78em;color:${color};margin-top:4px">${marker}</div>
-                        </div>`;
-                    }).join('')
-                    : '<div style="padding:8px 10px;border-top:1px solid #eaeef2;color:#656d76;font-size:0.85em">暂无步骤</div>';
-                return `<div style="border:1px solid #eaeef2;border-radius:8px;overflow:hidden;background:#fff">
-                    <div style="padding:8px 10px;background:#f6f8fa;font-weight:700;font-size:0.9em">${groupConfig[g].title} <span style="float:right;color:#656d76;font-weight:600">${done}/${total}</span></div>
-                    ${body}
-                </div>`;
-            }).join('');
-            return `<div style="border:1px solid #d0d7de;border-radius:12px;padding:14px;background:#ffffff">
-                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
-                    <div>
-                        <div style="font-size:0.78em;color:#656d76">${task.task_id} · ${task.priority || 'P?'} · ${task.stage || '-'}</div>
-                        <div style="font-size:1em;font-weight:700;margin-top:4px">${task.title}</div>
-                    </div>
-                    <div style="font-size:0.8em;color:#656d76">${task.updated_at || ''}</div>
-                </div>
-                <div style="font-size:0.85em;color:#656d76;margin:8px 0 12px 0">${task.description || ''}</div>
-                ${layerHtml}
-            </div>`;
-        }).join('');
-    };
     fetch('/key009/gcctm').then(r => {
         const ct = r.headers.get('content-type') || '';
         if (!ct.includes('json')) throw new Error('API未就绪(需重启服务器加载/key009/gcctm路由)');
@@ -2052,7 +1982,6 @@ function loadGccTm() {
     }).then(d => {
         const decisions = d.decisions || [];
         const knn = d.knn_entries || [];
-        const pipelineTasks = d.pipeline_tasks || [];
 
         // 分离: 执行品种(美股+加密) vs 加密观察 vs 其他美股观察
         const execDec = decisions.filter(x => EXECUTE_SYMS.has(x.symbol));
@@ -2098,8 +2027,7 @@ function loadGccTm() {
 
         // Summary
         const summary = $('gcctm-summary');
-        summary.textContent = `共 ${decisions.length} 条决策 | 执行:${execDec.length} | 美股观察:${otherDec.length} | 加密观察:${cryptoDec.length} | KNN:${knn.length} | 任务:${pipelineTasks.length}`;
-        renderPipelineTasks(pipelineTasks);
+        summary.textContent = `共 ${decisions.length} 条决策 | 执行:${execDec.length} | 美股观察:${otherDec.length} | 加密观察:${cryptoDec.length} | KNN:${knn.length}`;
         // KNN cards — features 是 List[float] 长度9, outcome 是 bool|null
         const cardsEl = $('gcctm-knn-cards');
         if (!knn.length) {
@@ -2218,10 +2146,6 @@ function loadGccTm() {
         }
 
     }).catch(err => {
-        const pipeline = $('gcctm-pipeline');
-        if (pipeline) {
-            pipeline.innerHTML = `<div style="border:1px solid #eaeef2;border-radius:10px;padding:14px;color:#f85149">任务清单加载失败: ${err}</div>`;
-        }
         const errMsg = `<tr><td colspan="10" style="color:#f85149">加载失败: ${err}</td></tr>`;
         ['gcctm-us-body','gcctm-crypto-body','gcctm-other-body'].forEach(id => {
             const el = $(id); if (el) el.innerHTML = errMsg;
