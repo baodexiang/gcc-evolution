@@ -18,8 +18,12 @@ import logging
 import math
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
+from zoneinfo import ZoneInfo
+
+_NY_TZ = ZoneInfo("America/New_York")
 
 logger = logging.getLogger("gcc.trading")
 
@@ -296,6 +300,46 @@ def _read_risk_budget() -> dict:
 
 
 # ══════════════════════════════════════════════════════════════
+# Phase B1: Schwab VWAP 读取 — docx P0 数据源
+# 股票品种从 Schwab API 获取实时 VWAP，加密品种跳过
+# ══════════════════════════════════════════════════════════════
+_SCHWAB_QUOTE_CACHE: Dict[str, dict] = {}
+_SCHWAB_QUOTE_CACHE_TS: Dict[str, float] = {}
+_SCHWAB_QUOTE_TTL = 60  # 缓存60秒
+
+def _read_schwab_vwap(symbol: str) -> dict:
+    """
+    读取 Schwab 实时报价 VWAP。
+    返回: {"vwap": float, "vwap_bias": "ABOVE"/"BELOW"/"AT"/"UNKNOWN", "last": float}
+    加密品种直接返回 UNKNOWN（Schwab 不支持加密货币）。
+    """
+    import time as _time
+    # 加密品种跳过
+    if symbol in _CRYPTO_SYMBOLS:
+        return {"vwap": 0.0, "vwap_bias": "UNKNOWN", "last": 0.0}
+
+    # 缓存检查
+    cached_ts = _SCHWAB_QUOTE_CACHE_TS.get(symbol, 0)
+    if _time.time() - cached_ts < _SCHWAB_QUOTE_TTL and symbol in _SCHWAB_QUOTE_CACHE:
+        return _SCHWAB_QUOTE_CACHE[symbol]
+
+    try:
+        from schwab_data_provider import get_provider
+        quote = get_provider().get_quote(symbol)
+        result = {
+            "vwap": quote.get("vwap", 0.0),
+            "vwap_bias": quote.get("vwap_bias", "UNKNOWN"),
+            "last": quote.get("last", 0.0),
+        }
+        _SCHWAB_QUOTE_CACHE[symbol] = result
+        _SCHWAB_QUOTE_CACHE_TS[symbol] = _time.time()
+        return result
+    except Exception as e:
+        logger.debug("[GCC-TRADE] _read_schwab_vwap %s: %s", symbol, e)
+        return {"vwap": 0.0, "vwap_bias": "UNKNOWN", "last": 0.0}
+
+
+# ══════════════════════════════════════════════════════════════
 # L1-S03  DecisionContext — 标准化决策上下文快照
 # 统一所有输入源为一个 dataclass，落盘供回放/dashboard/回填复用
 # ══════════════════════════════════════════════════════════════
@@ -337,7 +381,7 @@ class DecisionContext:
         try:
             snap_dir = _CONTEXT_SNAP_DIR / self.symbol
             snap_dir.mkdir(parents=True, exist_ok=True)
-            safe_ts = self.ts.replace(":", "-")
+            safe_ts = self.ts.replace(":", "-").replace(" ", "_")
             path = snap_dir / f"{safe_ts}.json"
             path.write_text(
                 json.dumps(self.as_dict(), ensure_ascii=False, indent=2),
@@ -444,6 +488,15 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
     else:
         scores["volume"] = 0.0
 
+    # Phase B1: VWAP — 价格在VWAP上方支持BUY，下方反对
+    vwap_bias = context.get("schwab_vwap", {}).get("vwap_bias", "UNKNOWN")
+    if vwap_bias == "ABOVE":
+        scores["vwap"] = +0.10
+    elif vwap_bias == "BELOW":
+        scores["vwap"] = -0.06
+    else:
+        scores["vwap"] = 0.0
+
     return scores
 
 
@@ -496,6 +549,15 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
     else:
         scores["volume"] = 0.0
 
+    # Phase B1: VWAP — 价格在VWAP下方支持SELL，上方反对
+    vwap_bias = context.get("schwab_vwap", {}).get("vwap_bias", "UNKNOWN")
+    if vwap_bias == "BELOW":
+        scores["vwap"] = +0.10
+    elif vwap_bias == "ABOVE":
+        scores["vwap"] = -0.06
+    else:
+        scores["vwap"] = 0.0
+
     return scores
 
 
@@ -505,7 +567,7 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
 def _score_hold_candidate() -> dict:
     """HOLD 路径固定中性分 0.0，作为基线竞争者。"""
     return {"vision": 0.0, "scan": 0.0, "filter": 0.0,
-            "win_rate": 0.0, "volume": 0.0}
+            "win_rate": 0.0, "volume": 0.0, "vwap": 0.0}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1149,8 +1211,7 @@ class GCCTradingModule:
         main_decision: 主程序决策 ("BUY"/"SELL"/"HOLD"/None)，用于一致率统计。
         返回: result dict，含 action/verdict/consensus 等字段。
         """
-        import datetime
-        ts = datetime.datetime.utcnow().isoformat() + "Z"
+        ts = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
         # 提取收盘价与当前价
         closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
@@ -1246,6 +1307,8 @@ class GCCTradingModule:
             regime=_read_regime(sym),
             governor=_read_plugin_governor(sym),
             risk_budget=_read_risk_budget(),
+            # Phase B1: Schwab VWAP
+            extended={"schwab_vwap": _read_schwab_vwap(sym)},
         )
         # L1-S03 快照落盘
         ctx.snapshot()
@@ -1261,6 +1324,7 @@ class GCCTradingModule:
             "n_gate_buy": ctx.n_gate_buy, "n_gate_sell": ctx.n_gate_sell,
             "regime": ctx.regime, "governor": ctx.governor,
             "risk_budget": ctx.risk_budget,
+            "schwab_vwap": ctx.extended.get("schwab_vwap", {}),
         }
 
     # ── L2-S03: 树搜索 + rejected_nodes 收集 ────────────────────

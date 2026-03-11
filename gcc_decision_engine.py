@@ -49,6 +49,9 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+_NY_TZ = ZoneInfo("America/New_York")
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -148,7 +151,7 @@ class Outcome(Enum):
 # ══════════════════════════════════════════════════════════════════
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
 @dataclass
@@ -695,7 +698,7 @@ class EngineLog:
         self._lock = threading.Lock()
 
     def _path(self) -> Path:
-        return self._dir / f"gcc_{datetime.now(timezone.utc).strftime('%Y%m%d')}.jsonl"
+        return self._dir / f"gcc_{datetime.now(_NY_TZ).strftime('%Y%m%d')}.jsonl"
 
     def _write(self, event: str, payload: Dict[str, Any]) -> None:
         rec = {"event": event, "ts": _now(), **payload}
@@ -1084,7 +1087,7 @@ class SignalBus:
 
     @staticmethod
     def _new_wid() -> str:
-        return f"WIN-{datetime.now(timezone.utc).strftime('%H%M%S')}-{uuid.uuid4().hex[:4]}"
+        return f"WIN-{datetime.now(_NY_TZ).strftime('%H%M%S')}-{uuid.uuid4().hex[:4]}"
 
     def _write_signal_log(self, ext: ExternalSignal) -> None:
         import json
@@ -1201,7 +1204,7 @@ class GCCDecisionEngine:
     def cycle_start(self, cycle_id: Optional[str] = None) -> str:
         """开始新周期。返回 cycle_id。"""
         with self._lock:
-            cid = cycle_id or f"CYC-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:4]}"
+            cid = cycle_id or f"CYC-{datetime.now(_NY_TZ).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:4]}"
             self._current = CycleState(cycle_id=cid, started_at=_now())
             self.log.cycle_start(self._current)
             logger.info("[Engine] Cycle %s started", cid)
