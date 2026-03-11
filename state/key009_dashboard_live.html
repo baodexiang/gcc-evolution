@@ -361,7 +361,29 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <!-- Tab: 信号准确率 (GCC-0197 S6) -->
 <div class="tab-content" id="tab-sigacc">
 <div class="summary" id="sigacc-summary"></div>
-<h2>外挂信号准确率 (4H回填)</h2>
+
+<!-- 管线对比: 原有15min vs GCC-TM 4H -->
+<h2>管线对比: 原有管线 vs GCC-TM</h2>
+<div id="pipeline-compare-summary" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
+<table>
+<thead><tr>
+  <th>品种</th><th>模式</th><th>样本</th><th>一致</th><th>一致率</th>
+  <th>分歧次数</th><th>GCC-TM胜</th><th>分歧胜率</th><th>Takeover</th><th>最后决策</th>
+</tr></thead>
+<tbody id="pipeline-compare-body"></tbody>
+</table>
+
+<!-- GCC-TM 模拟交易 -->
+<h2 style="margin-top:24px">GCC-TM 模拟交易</h2>
+<div id="sim-trades-summary" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
+<table>
+<thead><tr>
+  <th>时间</th><th>品种</th><th>动作</th><th>入场价</th><th>出场价</th><th>P&L%</th><th>结果</th><th>最强信号</th>
+</tr></thead>
+<tbody id="sim-trades-body"></tbody>
+</table>
+
+<h2 style="margin-top:24px">外挂信号准确率 (4H回填)</h2>
 <table><thead><tr><th>外挂</th><th>Decisive</th><th>正确</th><th>错误</th><th>中性</th><th>待定</th><th>准确率</th><th>Phase</th></tr></thead><tbody id="sigacc-body"></tbody></table>
 <h2>按品种×外挂明细</h2>
 <div id="sigacc-detail"></div>
@@ -2109,6 +2131,92 @@ function loadGccTm() {
                 </div>`;
             }).join('');
         }
+
+        // ── 管线对比: accuracy data ──
+        const accuracy = d.accuracy || {};
+        const US_EX = new Set(['TSLA','CRWV','NBIS','ONDS','OPEN']);
+        const CR_SY = new Set(['BTCUSDC','ETHUSDC','SOLUSDC','ZECUSDC']);
+        const compareBody = $('pipeline-compare-body');
+        const compareSummary = $('pipeline-compare-summary');
+        if (compareBody) {
+            const syms = Object.keys(accuracy).sort((a,b) => {
+                // 排序: 执行品种优先, 然后按样本降序
+                const aPri = US_EX.has(a) ? 0 : CR_SY.has(a) ? 2 : 1;
+                const bPri = US_EX.has(b) ? 0 : CR_SY.has(b) ? 2 : 1;
+                if (aPri !== bPri) return aPri - bPri;
+                return (accuracy[b].total||0) - (accuracy[a].total||0);
+            });
+            let totalSamples = 0, totalMatch = 0, totalDiverge = 0, totalGccWin = 0;
+            const rows = syms.map(sym => {
+                const a = accuracy[sym];
+                const total = a.total || 0;
+                const match = a.match || 0;
+                const rate = total > 0 ? (match/total*100).toFixed(1) + '%' : '-';
+                const rateColor = total > 0 ? (match/total >= 0.7 ? '#1a7f37' : match/total < 0.5 ? '#cf222e' : '#9a6700') : '#656d76';
+                const div = a.divergence_count || 0;
+                const gccWin = a.gcc_win_on_diverge || 0;
+                const divRate = div > 0 ? (gccWin/div*100).toFixed(1) + '%' : '-';
+                const divColor = div > 0 ? (gccWin/div > 0.55 ? '#1a7f37' : gccWin/div < 0.45 ? '#cf222e' : '#9a6700') : '#656d76';
+                const mode = US_EX.has(sym) ? '<span style="color:#1a7f37;font-weight:600">EXECUTE</span>' : '<span style="color:#656d76">OBSERVE</span>';
+                const tkover = a.takeover_ready ? '<span style="color:#1a7f37;font-weight:700">READY</span>' : '<span style="color:#656d76">-</span>';
+                const lastGcc = a.last_gcc || '-';
+                const lastMain = a.last_main || '-';
+                const lastMatch = lastGcc === lastMain ? '=' : `GCC:${lastGcc} vs Main:${lastMain}`;
+                totalSamples += total; totalMatch += match; totalDiverge += div; totalGccWin += gccWin;
+                return `<tr>
+                    <td><strong>${sym}</strong></td><td>${mode}</td>
+                    <td>${total}</td><td>${match}</td><td style="color:${rateColor};font-weight:600">${rate}</td>
+                    <td>${div}</td><td>${gccWin}</td><td style="color:${divColor};font-weight:600">${divRate}</td>
+                    <td>${tkover}</td><td style="font-size:0.82em;color:#656d76">${lastMatch}</td>
+                </tr>`;
+            }).join('');
+            compareBody.innerHTML = rows || '<tr><td colspan="10" style="color:#656d76;text-align:center">暂无对比数据 (等待4H周期积累)</td></tr>';
+            const overallRate = totalSamples > 0 ? (totalMatch/totalSamples*100).toFixed(1) : 'N/A';
+            const overallDivRate = totalDiverge > 0 ? (totalGccWin/totalDiverge*100).toFixed(1) : 'N/A';
+            if (compareSummary) {
+                compareSummary.textContent = `总样本:${totalSamples} | 一致率:${overallRate}% | 分歧:${totalDiverge}次 | GCC-TM分歧胜率:${overallDivRate}% | 品种:${syms.length}`;
+            }
+        }
+
+        // ── 模拟交易 ──
+        const simTrades = d.sim_trades || [];
+        const simBody = $('sim-trades-body');
+        const simSummary = $('sim-trades-summary');
+        if (simBody) {
+            if (!simTrades.length) {
+                simBody.innerHTML = '<tr><td colspan="8" style="color:#656d76;text-align:center">暂无模拟交易数据</td></tr>';
+            } else {
+                const wins = simTrades.filter(t => t.outcome === true).length;
+                const losses = simTrades.filter(t => t.outcome === false).length;
+                const pending = simTrades.filter(t => t.outcome == null).length;
+                const winRate = (wins+losses) > 0 ? (wins/(wins+losses)*100).toFixed(1) : 'N/A';
+                const totalPnl = simTrades.filter(t => t.pnl_pct != null).reduce((s,t) => s + t.pnl_pct, 0);
+                if (simSummary) {
+                    simSummary.textContent = `共${simTrades.length}笔 | 盈利:${wins} 亏损:${losses} 待验:${pending} | 胜率:${winRate}% | 累计P&L:${totalPnl.toFixed(2)}%`;
+                }
+                simBody.innerHTML = simTrades.map(t => {
+                    const ts = (t.ts||'').replace('T',' ').slice(0,16);
+                    const act = t.action || '-';
+                    const actColor = act === 'BUY' ? '#3fb950' : act === 'SELL' ? '#f85149' : '#656d76';
+                    const entry = t.entry_price != null ? '$' + Number(t.entry_price).toFixed(2) : '-';
+                    const exit = t.exit_price != null ? '$' + Number(t.exit_price).toFixed(2) : '-';
+                    const pnl = t.pnl_pct != null ? t.pnl_pct.toFixed(3) + '%' : '-';
+                    const pnlColor = t.pnl_pct > 0 ? '#3fb950' : t.pnl_pct < 0 ? '#f85149' : '#656d76';
+                    const outcome = t.outcome === true ? '盈利' : t.outcome === false ? '亏损' : '待验证';
+                    const outcomeColor = t.outcome === true ? '#3fb950' : t.outcome === false ? '#f85149' : '#d29922';
+                    return `<tr>
+                        <td style="font-size:0.85em;color:#656d76">${ts}</td>
+                        <td>${t.symbol||'-'}</td>
+                        <td style="color:${actColor};font-weight:600">${act}</td>
+                        <td>${entry}</td><td>${exit}</td>
+                        <td style="color:${pnlColor};font-weight:600">${pnl}</td>
+                        <td style="color:${outcomeColor};font-weight:600">${outcome}</td>
+                        <td style="font-size:0.85em">${t.strongest_source||'-'}</td>
+                    </tr>`;
+                }).join('');
+            }
+        }
+
     }).catch(err => {
         const pipeline = $('gcctm-pipeline');
         if (pipeline) {

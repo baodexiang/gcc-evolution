@@ -50063,6 +50063,38 @@ L2门卫交易触发
             else:
                 print(f"[v3.460] 🚫 {symbol} 门卫拒绝: {gate_reason}")
 
+        # GCC-TM: 美股旧执行链并行观察
+        # 目标: 5个美股进入 GCC-TM 实盘观察/统一日志，但不接管当前下单模式。
+        if _HAS_GCC_TM and is_us_stock(symbol) and symbol in {"TSLA", "CRWV", "NBIS", "ONDS", "OPEN"} and ohlcv_bars:
+            try:
+                if macd_triggered and macd_action in ("BUY", "SELL"):
+                    _macd_strength_shadow = float(
+                        macd_div_result.divergence.strength_pct
+                        if macd_div_result and macd_div_result.divergence else 50.0
+                    )
+                    _macd_conf_shadow = min(0.95, max(0.55, _macd_strength_shadow / 100.0))
+                    _gcc_push(symbol, "MACD_L2", macd_action, _macd_conf_shadow)
+
+                if allow_trade and trade_action in ("BUY", "SELL"):
+                    _gate_conf_shadow = 0.75 if str(small_decision).startswith("STRONG_") else 0.65
+                    if gate_result.get("breakout_reverse"):
+                        _gate_conf_shadow = max(_gate_conf_shadow, 0.8)
+                    _gcc_push(symbol, "L2_Gate", trade_action, _gate_conf_shadow)
+
+                _gcc_main_action = (
+                    triggered_action if triggered_action in ("BUY", "SELL")
+                    else trade_action if allow_trade and trade_action in ("BUY", "SELL")
+                    else "HOLD"
+                )
+                _gcc_observe(symbol, ohlcv_bars, _gcc_main_action, observe_only=True)
+                log_to_server(
+                    f"[GCC-TM][SHADOW] {symbol} main={_gcc_main_action} "
+                    f"macd={macd_action or '-'} gate={trade_action or '-'} "
+                    f"allow={allow_trade}"
+                )
+            except Exception as _gcc_shadow_err:
+                log_to_server(f"[GCC-TM][SHADOW] {symbol} observe失败: {_gcc_shadow_err}")
+
         # v20.3: 提取MACD背离强度用于返回值
         _macd_strength = 0.0
         if macd_div_result and macd_div_result.divergence:
@@ -50418,14 +50450,39 @@ def key009_gcctm():
             pipeline_tasks.sort(key=lambda x: x.get("task_id", ""))
     except Exception:
         pass
+    # 管线对比: gcc_trading_accuracy.json
+    accuracy = {}
+    acc_path = ROOT / "state" / "gcc_trading_accuracy.json"
+    try:
+        if acc_path.exists():
+            accuracy = json.loads(acc_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+    # 模拟交易: gcc_sim_trades.jsonl
+    sim_trades = []
+    sim_path = ROOT / "state" / "gcc_sim_trades.jsonl"
+    try:
+        if sim_path.exists():
+            for line in sim_path.read_text(encoding="utf-8").splitlines()[-100:]:
+                try:
+                    sim_trades.append(json.loads(line))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     decisions = list(reversed(decisions))
     knn_entries = list(reversed(knn_entries))
+    sim_trades = list(reversed(sim_trades))
     return app.response_class(
         json.dumps(
             {
                 "decisions": decisions,
                 "knn_entries": knn_entries,
                 "pipeline_tasks": pipeline_tasks,
+                "accuracy": accuracy,
+                "sim_trades": sim_trades,
             },
             ensure_ascii=False,
         ),
