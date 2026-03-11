@@ -1,29 +1,36 @@
-"""
-Adaptive DAG Scheduler (Enterprise Only)
+"""Community fallbacks for adaptive DAG helpers."""
 
-Community: returns empty results with upgrade prompt.
-Enterprise: full adaptive DAG with resource-aware scheduling.
-"""
-
-from . import upgrade_prompt
+from . import unavailable_result
 
 
 def AdaptiveDAGScheduler(*args, **kwargs):
     """Dynamic DAG with resource-aware scheduling."""
-    upgrade_prompt("AdaptiveDAGScheduler", tier="Pro", fallback="Using basic sequential pipeline instead")
-    return None
+    return unavailable_result(
+        "AdaptiveDAGScheduler",
+        tier="Pro",
+        fallback="Using basic sequential pipeline instead",
+        value=None,
+    )
 
 
 def dynamic_routing(*args, **kwargs):
     """Route tasks dynamically based on resource availability."""
-    upgrade_prompt("dynamic_routing", tier="Pro", fallback="Using static routing instead")
-    return []
+    return unavailable_result(
+        "dynamic_routing",
+        tier="Pro",
+        fallback="Using static routing instead",
+        value=[],
+    )
 
 
 def priority_queue_scheduler(*args, **kwargs):
     """Priority-based task scheduling."""
-    upgrade_prompt("priority_queue_scheduler", tier="Enterprise", fallback="Using FIFO scheduling instead")
-    return []
+    return unavailable_result(
+        "priority_queue_scheduler",
+        tier="Enterprise",
+        fallback="Using FIFO scheduling instead",
+        value=[],
+    )
 
 
 __all__ = ["AdaptiveDAGScheduler", "dynamic_routing", "priority_queue_scheduler"]

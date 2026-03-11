@@ -10,7 +10,7 @@ from pathlib import Path
 
 # Pin release version for this source package.
 # Do not infer from external files to avoid accidental parse errors.
-version = "5.340"
+version = "5.345"
 
 # Read long description from README
 readme_file = Path(__file__).parent / "README.md"
@@ -69,7 +69,13 @@ setup(
 
     python_requires=">=3.9",
 
-    packages=find_packages(exclude=["tests", "docs", ".github", "examples"]),
+    packages=find_packages(
+        include=["gcc_evolution", "gcc_evolution.*", "gcc", "gcc.*"],
+        exclude=["tests", "docs", ".github", "examples", "*.tests", "*.tests.*"],
+    ),
+    package_data={
+        "gcc_evolution": ["dashboard/*.html"],
+    },
     include_package_data=True,
 
     install_requires=[
@@ -111,8 +117,6 @@ setup(
 
     zip_safe=False,
 )
-
-
 
 
 

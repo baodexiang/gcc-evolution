@@ -1,4 +1,4 @@
-﻿# gcc-evo v5.340
+﻿# gcc-evo v5.345
 
 See also: [FRAMEWORK_BOUNDARY.md](FRAMEWORK_BOUNDARY.md) | [FRAMEWORK_BOUNDARY.en.md](FRAMEWORK_BOUNDARY.en.md) | [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md) | [PRICING.en.md](PRICING.en.md)
 
@@ -72,6 +72,9 @@ gcc-evo init
 gcc-evo setup KEY-001
 gcc-evo l0 scaffold
 gcc-evo l0 check
+gcc-evo l0 set-prereq data_quality --status pass --evidence "acceptance"
+gcc-evo l0 set-prereq deterministic_rules --status pass --evidence "acceptance"
+gcc-evo l0 set-prereq mathematical_filters --status pass --evidence "acceptance"
 gcc-evo pipe task "Improve error handling" -k KEY-001 -m core -p P1
 gcc-evo pipe list
 gcc-evo pipe status GCC-0001
@@ -80,24 +83,21 @@ gcc-evo memory export
 gcc-evo health
 ```
 
-### OCR and Knowledge Cards
+### Community Demo Loop
 
 ```bash
-gcc-evo knowledge ocr-pdf paper.pdf output_cards
-gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine
+gcc-evo loop DEMO-001 --once --dry-run
 ```
 
-If an LLM is configured, you can further refine the extracted cards:
+This community loop is a smoke-test orchestration path. It proves the package
+can run a single end-to-end iteration and write audit artifacts locally.
+It does not replace the full paid-core orchestration model.
 
-```bash
-gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine --llm-refine --llm-repeat 3
-```
+### OCR and Card Utilities
 
-This pipeline produces:
-
-- `page_*.md` page text
-- `page_*.json` structured knowledge cards
-- optional DuckDB card storage
+The `opensource/` tree still includes OCR and paper-processing scripts such as
+`ocr.py`, `ocr_pdf.py`, and `pdf_to_cards_v3.py`, but they are not exposed as
+`gcc-evo` subcommands in the current open-source CLI.
 
 ### Paid Core Flow
 
@@ -105,7 +105,18 @@ This pipeline produces:
 gcc-evo loop GCC-0001 --once
 ```
 
-The paid core flow activates decision evolution and closed-loop orchestration. In the canonical model, `loop` belongs to paid `L5` and depends on paid `L4` controls.
+The paid core flow activates the full governed orchestration model. In the
+canonical model, production `loop` usage belongs to paid `L5` and depends on
+paid `L4` controls.
+
+Before running a non-dry-run loop, make sure the L0 gate is green:
+
+```bash
+gcc-evo l0 check
+gcc-evo l0 set-prereq data_quality --status pass --evidence "acceptance"
+gcc-evo l0 set-prereq deterministic_rules --status pass --evidence "acceptance"
+gcc-evo l0 set-prereq mathematical_filters --status pass --evidence "acceptance"
+```
 
 ## Pricing
 

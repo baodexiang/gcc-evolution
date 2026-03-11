@@ -1,29 +1,36 @@
-"""
-KNN Evolution Framework (Enterprise Only)
+"""Community fallbacks for enterprise KNN evolution helpers."""
 
-Community: returns empty results with upgrade prompt.
-Enterprise: full KNN evolutionary optimizer.
-"""
-
-from . import upgrade_prompt
+from . import unavailable_result
 
 
 def KNNEvolver(*args, **kwargs):
     """K-Nearest Neighbors evolutionary optimizer."""
-    upgrade_prompt("KNNEvolver", tier="Evolve", fallback="Using basic pattern matching instead")
-    return None
+    return unavailable_result(
+        "KNNEvolver",
+        tier="Evolve",
+        fallback="Using basic pattern matching instead",
+        value=None,
+    )
 
 
 def adaptive_knn_search(*args, **kwargs):
     """Adaptive KNN with dynamic distance metrics."""
-    upgrade_prompt("adaptive_knn_search", tier="Evolve", fallback="Using keyword search instead")
-    return []
+    return unavailable_result(
+        "adaptive_knn_search",
+        tier="Evolve",
+        fallback="Using keyword search instead",
+        value=[],
+    )
 
 
 def knn_feature_importance(*args, **kwargs):
     """Extract feature importance from KNN model."""
-    upgrade_prompt("knn_feature_importance", tier="Pro", fallback="No feature importance available")
-    return {}
+    return unavailable_result(
+        "knn_feature_importance",
+        tier="Pro",
+        fallback="No feature importance available",
+        value={},
+    )
 
 
 __all__ = ["KNNEvolver", "adaptive_knn_search", "knn_feature_importance"]

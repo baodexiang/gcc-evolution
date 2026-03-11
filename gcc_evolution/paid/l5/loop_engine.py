@@ -1,8 +1,7 @@
 """Canonical paid L5 program: closed-loop orchestration."""
 from ...L5_orchestration.loop_engine_base import (
-    SelfImprovementLoop as LegacySelfImprovementLoop,
+    CommunitySelfImprovementLoop as LegacySelfImprovementLoop,
     LoopPhase,
-    QueryType,
 )
 from ..common import PaidBoundary
 
@@ -15,6 +14,5 @@ class SelfImprovementLoop(LegacySelfImprovementLoop):
 __all__ = [
     "SelfImprovementLoop",
     "LoopPhase",
-    "QueryType",
     "L5_ADVANCED",
 ]

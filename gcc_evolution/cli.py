@@ -30,6 +30,19 @@ from pathlib import Path
 from datetime import datetime
 
 
+class FriendlyArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser with shorter, task-oriented error guidance."""
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        print(f"gcc-evo: error: {message}", file=sys.stderr)
+        print(
+            "Try one of: gcc-evo version | gcc-evo init | gcc-evo setup KEY-001 | gcc-evo health",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
 def _safe_print(text: str) -> None:
     """Print with a safe fallback for legacy console encodings."""
     try:
@@ -208,8 +221,9 @@ def cmd_init(args):
     print("  3. gcc-evo pipe task 'My first task' -k KEY-001 -m core -p P1")
 
 
-def cmd_loop(args):
-    """Run the 6-step self-improvement loop."""
+def _legacy_cmd_loop_obsolete(args):
+    """Obsolete pre-open-core loop implementation. Do not call."""
+    raise NotImplementedError("Legacy loop removed; use cmd_loop().")
     task_id = args.task_id
     once = args.once
     provider = args.provider
@@ -344,6 +358,92 @@ def cmd_loop(args):
             import time
             print(f"\nNext iteration in 300s...")
             time.sleep(300)
+
+
+def cmd_loop(args):
+    """Run the free-edition self-improvement loop."""
+    task_id = args.task_id
+    once = args.once
+    provider = args.provider
+    dry_run = getattr(args, "dry_run", False)
+
+    if not dry_run:
+        from .free.l0.session_config import SessionConfig
+        from .free.l0.governance import evaluate_l0_governance, format_governance_summary
+
+        cfg = SessionConfig.load()
+        ok, err = cfg.is_valid()
+        if not ok:
+            print(f"[L0] Session config invalid: {err}")
+            print("Run first: gcc-evo setup <KEY>")
+            return
+        print(f"[L0] Goal: {cfg.goal}")
+        print(f"[L0] KEY: {cfg.key}")
+        governance = evaluate_l0_governance()
+        if not governance["ok"]:
+            print("[L0] Governance gate blocked loop execution.")
+            print(format_governance_summary(governance))
+            print("Run: gcc-evo l0 show")
+            print("Run: gcc-evo l0 scaffold")
+            print("Run: gcc-evo l0 set-prereq <name> --status pass --evidence '...'\n")
+            return
+
+    print(f"Loop: {task_id} | provider={provider or 'default'} | once={once}")
+
+    from .free.l1.memory_tiers import SensoryMemory, ShortTermMemory, LongTermMemory
+    from .free.l1.storage import JSONStorage
+    from .free.l2.retriever import HybridRetriever
+    from .free.l3.distiller import ExperienceDistiller
+    from .L4_decision import SkepticValidator
+    from .free.l5.loop_engine import SelfImprovementLoop
+
+    state_dir = Path("state")
+    state_dir.mkdir(exist_ok=True)
+
+    loop = SelfImprovementLoop(
+        task_id=task_id,
+        sensory_memory=SensoryMemory(),
+        short_term_memory=ShortTermMemory(window_size=50),
+        long_term_memory=LongTermMemory(storage=JSONStorage(str(state_dir / "long_term.json"))),
+        retriever=HybridRetriever(),
+        distiller=ExperienceDistiller(min_confidence=0.7),
+        skeptic=SkepticValidator(),
+        state_dir=state_dir,
+    )
+
+    iteration = 0
+    while True:
+        iteration += 1
+        ts = datetime.utcnow().strftime("%H:%M:%S")
+        print(f"\n{'=' * 50}")
+        print(f"[{ts}] Iteration {iteration} - {task_id}")
+        print(f"{'=' * 50}")
+        print("[1/6] Observe")
+        print("[2/6] Analyze")
+        print("[3/6] Hypothesize")
+        print("[4/6] Verify")
+        print("[5/6] Improve")
+        print("[6/6] Integrate")
+
+        result = loop.run_once()
+        test_result = result.get("test_result") or {}
+        status = "PASS" if test_result.get("valid") else "BLOCKED"
+        print(
+            f"       Skeptic: {status} "
+            f"(confidence={float(test_result.get('confidence', 0.0)):.2f})"
+        )
+        for issue in test_result.get("issues", []):
+            print(f"       Issue: {issue}")
+        print(f"       Improvement: {result.get('improvement') or 'none'}")
+
+        if once:
+            print(f"\n[Done] Single iteration complete for {task_id}")
+            break
+
+        import time
+
+        print("\nNext iteration in 300s...")
+        time.sleep(300)
 
 
 def cmd_pipe_task(args):
@@ -802,11 +902,13 @@ def cmd_health(args):
 
     passed = sum(1 for _, ok in checks if ok)
     print(f"\n{passed}/{len(checks)} checks passed")
+    if passed < len(checks):
+        print("Suggested next steps: gcc-evo init, gcc-evo setup KEY-001, gcc-evo l0 scaffold")
 
 
 def main():
     _configure_console_output()
-    parser = argparse.ArgumentParser(
+    parser = FriendlyArgumentParser(
         prog="gcc-evo",
         description="gcc-evo â€” AI Self-Evolution Engine",
     )

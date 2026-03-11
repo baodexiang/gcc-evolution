@@ -1,14 +1,17 @@
 """
-6-Step Self-Improvement Loop
+6-Step self-improvement loop primitives.
 
-The core framework for continuous learning and optimization.
+This module exposes both the abstract orchestration contract and a small
+community-safe implementation that can run the free edition end-to-end.
 """
 
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+import json
 
 
 class LoopPhase(Enum):
@@ -28,7 +31,7 @@ class LoopIteration:
 
     iteration_id: str
     phase: LoopPhase
-    observations: Dict[str, Any]
+    observations: Dict[str, Any] = field(default_factory=dict)
     analysis: Optional[Dict[str, Any]] = None
     hypothesis: Optional[str] = None
     test_result: Optional[Dict[str, Any]] = None
@@ -237,3 +240,134 @@ class SimpleImprovementLoop(SelfImprovementLoop):
         """Deploy to test environment."""
         self.test_environment["last_improvement"] = improvement
         self.test_environment["timestamp"] = datetime.utcnow().isoformat()
+
+
+class CommunitySelfImprovementLoop(SelfImprovementLoop):
+    """
+    Free-edition concrete loop implementation.
+
+    It wires together L1-L4 community-safe components and persists a minimal
+    audit trail so `gcc-evo loop TASK --once` works in a fresh open-source
+    install without paid services.
+    """
+
+    def __init__(
+        self,
+        task_id: str,
+        sensory_memory,
+        short_term_memory,
+        long_term_memory,
+        retriever,
+        distiller,
+        skeptic,
+        state_dir: str | Path = "state",
+    ):
+        super().__init__()
+        self.task_id = task_id
+        self.sensory_memory = sensory_memory
+        self.short_term_memory = short_term_memory
+        self.long_term_memory = long_term_memory
+        self.retriever = retriever
+        self.distiller = distiller
+        self.skeptic = skeptic
+        self.state_dir = Path(state_dir)
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+
+    def observe(self) -> Dict[str, Any]:
+        observation = {
+            "task_id": self.task_id,
+            "iteration": len(self.iteration_history) + 1,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        self.sensory_memory.store("current_observation", observation)
+        self.short_term_memory.store("observations", observation)
+        return observation
+
+    def analyze(self, observations: Dict[str, Any]) -> Dict[str, Any]:
+        documents = [
+            {
+                "id": f"obs-{observations['iteration']}",
+                "text": json.dumps(observations, ensure_ascii=False),
+                "created_at": observations["timestamp"],
+            }
+        ]
+        self.retriever.index(documents)
+        retrieval = self.retriever.retrieve(self.task_id, top_k=3)
+        return {
+            "query": self.task_id,
+            "matches": retrieval,
+            "match_count": len(retrieval),
+        }
+
+    def hypothesize(self, analysis: Dict[str, Any]) -> str:
+        match_count = analysis.get("match_count", 0)
+        return (
+            f"Iteration {len(self.iteration_history) + 1}: "
+            f"continue baseline learning with {match_count} retrieved context items"
+        )
+
+    def test_hypothesis(self, hypothesis: str) -> Dict[str, Any]:
+        decision = {
+            "signal": "IMPROVE",
+            "action": "OPTIMIZE",
+            "confidence": 0.8,
+            "conditions": ["+baseline_learning"],
+            "reasoning": hypothesis,
+        }
+        validation = self.skeptic.validate(decision, context={})
+        return {
+            "valid": validation.is_valid,
+            "confidence": validation.confidence,
+            "soft_score": getattr(validation, "soft_score", validation.confidence),
+            "issues": validation.issues,
+            "suggestions": validation.suggestions,
+            "decision": decision,
+        }
+
+    def improve(self, hypothesis: str) -> str:
+        iteration = len(self.iteration_history) + 1
+        self.distiller.add_experience(
+            {
+                "conditions": {"task": self.task_id, "iteration": iteration},
+                "outcome": {"success": True, "action": "baseline"},
+            }
+        )
+        cards = self.distiller.distill()
+        for card in cards:
+            self.long_term_memory.store(
+                card.card_id,
+                {
+                    "title": card.title,
+                    "confidence": card.confidence,
+                    "summary": card.summary,
+                },
+            )
+        generated = len(cards)
+        return f"Stored {generated} distilled card(s) for {self.task_id}"
+
+    def integrate(self, improvement: str) -> None:
+        audit_dir = self.state_dir / "audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        record = {
+            "task_id": self.task_id,
+            "iteration": len(self.iteration_history) + 1,
+            "improvement": improvement,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        with (audit_dir / f"{self.task_id}_log.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def run_once(self) -> Dict[str, Any]:
+        """Execute a single community-safe loop iteration and return a summary."""
+        iteration = self.run_iteration()
+        return {
+            "iteration_id": iteration.iteration_id,
+            "task_id": self.task_id,
+            "phase": iteration.phase.value,
+            "observation": iteration.observations,
+            "analysis": iteration.analysis,
+            "hypothesis": iteration.hypothesis,
+            "test_result": iteration.test_result,
+            "improvement": iteration.improvement,
+            "summary": self.get_summary(),
+        }

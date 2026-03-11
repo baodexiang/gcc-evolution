@@ -1,15 +1,13 @@
 """
-Enterprise Features - Requires License
-License: BUSL 1.1 (Enterprise license required)
-Commercial: gcc-evo.dev/licensing
+Enterprise feature fallbacks and upgrade messaging.
 
-Canonical free tier: UI + L0 + L1 + L2 + L3.
-Canonical paid core: L4 + L5 + DA.
-Commercial add-ons: paid/l0, paid/l1, paid/l2, paid/l3 enhancement packs.
-Enterprise features degrade gracefully: warning + fallback behavior.
+The open-source package ships community-safe placeholders for enterprise-only
+features. They should warn clearly, return deterministic fallback values, and
+never crash a free installation during import or smoke tests.
 """
 
 import warnings
+from typing import Any
 
 
 def upgrade_prompt(feature: str, tier: str = "Evolve", fallback: str = "") -> str:
@@ -25,6 +23,18 @@ def upgrade_prompt(feature: str, tier: str = "Evolve", fallback: str = "") -> st
         msg += f"\n  Fallback: {fallback}"
     warnings.warn(msg, stacklevel=3)
     return msg
+
+
+def unavailable_result(
+    feature: str,
+    *,
+    tier: str = "Evolve",
+    fallback: str = "",
+    value: Any = None,
+) -> Any:
+    """Warn once and return a deterministic fallback value."""
+    upgrade_prompt(feature, tier=tier, fallback=fallback)
+    return value
 
 
 class EnterpriseRequired(Exception):
@@ -56,6 +66,7 @@ except ImportError:
 __all__ = [
     "EnterpriseRequired",
     "upgrade_prompt",
+    "unavailable_result",
     "knn_evolution",
     "walk_forward",
     "bandit_scheduler",

@@ -1,4 +1,4 @@
-﻿# Quick Start - gcc-evo v5.340
+﻿# Quick Start - gcc-evo v5.345
 
 This guide follows the canonical release model:
 
@@ -27,6 +27,9 @@ gcc-evo init
 gcc-evo setup KEY-001
 gcc-evo l0 scaffold
 gcc-evo l0 check
+gcc-evo l0 set-prereq data_quality --status pass --evidence "acceptance"
+gcc-evo l0 set-prereq deterministic_rules --status pass --evidence "acceptance"
+gcc-evo l0 set-prereq mathematical_filters --status pass --evidence "acceptance"
 ```
 
 ### Step 3: Create a task
@@ -45,18 +48,21 @@ gcc-evo pipe list
 gcc-evo pipe status GCC-0001
 ```
 
-### Step 5: OCR documents and generate knowledge cards
+### Step 5: Run the community smoke loop
 
 ```bash
-gcc-evo knowledge ocr-pdf paper.pdf output_cards
-gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine
+gcc-evo loop DEMO-001 --once --dry-run
 ```
 
-If an LLM is configured, you can continue with:
+This command is the open-source smoke path. It runs one local iteration,
+persists audit output under `state/`, and verifies that the free package is
+installed correctly.
 
-```bash
-gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine --llm-refine --llm-repeat 3
-```
+### Step 6: Optional OCR utilities
+
+The repository includes helper scripts such as `ocr.py`, `ocr_pdf.py`, and
+`pdf_to_cards_v3.py`, but the current open-source `gcc-evo` CLI does not ship a
+`knowledge` command group.
 
 ## 3. Paid Core Workflow
 
@@ -66,11 +72,14 @@ The strongest gcc-evo workflow starts when the paid core is enabled.
 gcc-evo loop GCC-0001 --once
 ```
 
-This is paid-core because it relies on:
+This is paid-core production orchestration because it relies on:
 
 - `L4` decision evolution and skeptic acceptance
 - `L5` closed-loop orchestration and drift-aware execution
 - `DA` constitutional direction control in enterprise deployments
+
+If `gcc-evo l0 check` still reports `BLOCKED`, complete the three
+`gcc-evo l0 set-prereq ... --status pass` steps before running the loop.
 
 ## 4. Pricing Logic
 
