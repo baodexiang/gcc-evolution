@@ -50231,6 +50231,45 @@ def key009_reject():
 
 
 # =========================================================
+# KEY-011: GCC交易决策模块 GCCTM 数据接口
+# =========================================================
+@app.route("/key009/gcctm", methods=["GET"])
+def key009_gcctm():
+    """KEY-011 GCC-TM: 返回最近决策日志 + KNN经验条目"""
+    import itertools as _it
+    decisions = []
+    knn_entries = []
+    dec_path = ROOT / "state" / "gcc_trading_decisions.jsonl"
+    knn_path = ROOT / "state" / "gcc_knn_experience.jsonl"
+    try:
+        if dec_path.exists():
+            lines = dec_path.read_text(encoding="utf-8").splitlines()
+            for line in lines[-100:]:
+                try:
+                    decisions.append(json.loads(line))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    try:
+        if knn_path.exists():
+            lines = knn_path.read_text(encoding="utf-8").splitlines()
+            for line in lines[-50:]:
+                try:
+                    knn_entries.append(json.loads(line))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    decisions = list(reversed(decisions))
+    knn_entries = list(reversed(knn_entries))
+    return app.response_class(
+        json.dumps({"decisions": decisions, "knn_entries": knn_entries}, ensure_ascii=False),
+        mimetype="application/json"
+    )
+
+
+# =========================================================
 # KEY-010: 双层GCC-EVO进化 Dashboard
 # =========================================================
 @app.route("/key010", methods=["GET"])

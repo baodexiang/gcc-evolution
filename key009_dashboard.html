@@ -99,6 +99,28 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 .hg-step{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;color:#656d76}
 .hg-step.ok{color:#1a7f37}.hg-step.running{color:#0969da;font-weight:700}.hg-step.error{color:#cf222e}.hg-step.skip{opacity:0.45}
 .hg-step-sep{color:#d0d7de;margin:0 1px}.hg-step-detail{font-size:0.85em;opacity:0.7;margin-left:2px}
+/* Strategy anchor cards */
+.hg-strategies{margin-top:12px}
+.hg-strat-title{font-size:0.82em;font-weight:600;color:#0969da;margin-bottom:6px}
+.hg-strat{background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:12px 14px;margin-bottom:8px;border-left:4px solid #8250df;position:relative}
+.hg-strat.validated{border-left-color:#1a7f37}
+.hg-strat-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.hg-strat-name{font-size:0.92em;font-weight:700;color:#1f2328}
+.hg-strat-badge{font-size:0.7em;padding:2px 8px;border-radius:10px;font-weight:600}
+.hg-strat-badge.active{background:#dafbe1;color:#1a7f37}
+.hg-strat-badge.expired{background:#fff8c5;color:#9a6700}
+.hg-strat-scope{font-size:0.72em;color:#8250df;background:#f5f0ff;padding:2px 8px;border-radius:10px}
+.hg-strat-desc{font-size:0.82em;color:#1f2328;line-height:1.5;margin-bottom:8px}
+.hg-strat-rules{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.hg-strat-rule{background:#f6f8fa;border-radius:6px;padding:8px 10px;font-size:0.78em}
+.hg-strat-rule-label{font-weight:700;margin-bottom:3px}
+.hg-strat-rule-label.buy{color:#1a7f37}
+.hg-strat-rule-label.sell{color:#cf222e}
+.hg-strat-rule-step{color:#656d76;line-height:1.5}
+.hg-strat-meta{display:flex;gap:12px;flex-wrap:wrap;font-size:0.72em;color:#afb8c1}
+.hg-strat-meta span{white-space:nowrap}
+.hg-strat-applies{font-size:0.75em;color:#656d76;margin-top:4px}
+.hg-strat-applies code{background:#f6f8fa;padding:1px 5px;border-radius:3px;font-size:0.95em}
 </style>
 </head>
 <body>
@@ -158,6 +180,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div class="tab" data-tab="baseline">仓位控制</div>
 <div class="tab" data-tab="broker">券商对账</div>
 <div class="tab" data-tab="evolution">进化</div>
+<div class="tab" data-tab="gcctm">GCC-TM</div>
 </div>
 
 <!-- Tab: 策略排行 -->
@@ -297,6 +320,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
   <span id="hg-s-round" style="margin-left:auto;color:#afb8c1;font-size:0.85em"></span>
 </div>
 <div class="hg-anchors" id="hg-anchor-list"></div>
+<div class="hg-strategies" id="hg-strategy-list"></div>
 </div>
 
 <div class="section" id="issues-box">
@@ -372,6 +396,21 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div id="evo-memory-list" style="margin-bottom:16px"></div>
 <h2>评分趋势</h2>
 <div id="evo-trend-info" style="font-size:0.9em;color:#656d76;margin-bottom:16px"></div>
+</div>
+
+<!-- Tab: GCC交易决策模块 (KEY-011) -->
+<div class="tab-content" id="tab-gcctm">
+<h2>GCC-TM 决策记录 (Phase1 观察)</h2>
+<div id="gcctm-summary" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
+<table>
+<thead><tr>
+  <th>时间</th><th>品种</th><th>主流程</th><th>GCC决定</th><th>共识</th>
+  <th>最强信号源</th><th>树搜索分</th><th>拓扑</th><th>几何</th><th>代数</th>
+</tr></thead>
+<tbody id="gcctm-dec-body"></tbody>
+</table>
+<h2 style="margin-top:20px">KNN经验卡片</h2>
+<div id="gcctm-knn-cards" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px"></div>
 </div>
 
 <footer>Auto-refresh 5 min | <span id="footer-time"></span></footer>
@@ -459,6 +498,7 @@ function deleteHgAnchor(id) {
   const s = _hgDeleted(); s.add(id);
   localStorage.setItem(_HG_DEL_KEY, JSON.stringify([...s]));
   renderHumanGuidance();
+  renderStrategies();
   // Call server if available
   if (location.protocol !== 'file:') {
     fetch('/api/delete_anchor', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({anchor_id:id}) }).catch(()=>{});
@@ -521,6 +561,58 @@ function renderHumanGuidance() {
       </div>
       <div class="hg-anchor-concern">${(a.concern||'').slice(0,70)}${(a.concern||'').length>70?'…':''}</div>
       <div class="hg-anchor-meta">${a.expires_after||''} · ${a.created_at||''}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderStrategies() {
+  const hg = (MULTI_DATA && MULTI_DATA.human_guidance) || {};
+  const strategies = hg.strategies || [];
+  const el = $('hg-strategy-list');
+  if (!el) return;
+  if (!strategies.length) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = '<div class="hg-strat-title">📋 策略锚定</div>' + strategies.map(s => {
+    const validated = s.validated ? 'validated' : '';
+    const statusBadge = s.tracking_status === 'active'
+      ? '<span class="hg-strat-badge active">生效中</span>'
+      : '<span class="hg-strat-badge expired">已过期</span>';
+    const scopeLabel = s.scope === 'crypto' ? '🪙 加密货币' : (s.scope === 'stock' ? '📈 美股' : s.scope);
+    const rules = s.rules || {};
+    const buyRule = rules.buy || {};
+    const sellRule = rules.sell || {};
+    const applies = (s.applies_to || []).map(t => `<code>${t}</code>`).join(' ');
+    return `<div class="hg-strat ${validated}">
+      <div class="hg-strat-header">
+        <span class="hg-strat-name">${s.name || '未命名策略'}</span>
+        ${statusBadge}
+        <span class="hg-strat-scope">${scopeLabel}</span>
+        ${s.timeframe ? '<span class="hg-strat-scope">' + s.timeframe + '</span>' : ''}
+      </div>
+      <div class="hg-strat-desc">${s.description || ''}</div>
+      <div class="hg-strat-rules">
+        <div class="hg-strat-rule">
+          <div class="hg-strat-rule-label buy">🟢 买入规则</div>
+          <div class="hg-strat-rule-step">触发: ${buyRule.trigger || '-'}</div>
+          <div class="hg-strat-rule-step">手动: ${buyRule.manual_action || '-'}</div>
+          <div class="hg-strat-rule-step">自动: ${buyRule.auto_action || '-'}</div>
+        </div>
+        <div class="hg-strat-rule">
+          <div class="hg-strat-rule-label sell">🔴 卖出规则</div>
+          <div class="hg-strat-rule-step">触发: ${sellRule.trigger || '-'}</div>
+          <div class="hg-strat-rule-step">手动: ${sellRule.manual_action || '-'}</div>
+          <div class="hg-strat-rule-step">自动: ${sellRule.auto_action || '-'}</div>
+        </div>
+      </div>
+      ${applies ? '<div class="hg-strat-applies">适用: ' + applies + '</div>' : ''}
+      <div class="hg-strat-meta">
+        <span>⚠️ ${s.main_concern || ''}</span>
+        <span>📅 ${s.created_at || ''}</span>
+        <span>⏳ ${s.expires_after || ''}</span>
+        ${s.validation_note ? '<span>✅ ' + s.validation_note.slice(0,60) + (s.validation_note.length>60?'…':'') + '</span>' : ''}
+      </div>
     </div>`;
   }).join('');
 }
@@ -1047,6 +1139,7 @@ function _doRender() {
     // ── 人类指导 ──
     renderLayers();
     renderHumanGuidance();
+    renderStrategies();
 
     // ── 问题&风险 Tab ──
     const issTimerange = $('issues-timerange');
@@ -1663,8 +1756,96 @@ function _doRender() {
     $('evo-trend-info').textContent = `Current trend: ${evo.trend || 'STABLE'} | Score: ${(evo.score||0).toFixed(1)}/100`;
 }
 
+function loadGccTm() {
+    fetch('/key009/gcctm').then(r => r.json()).then(d => {
+        const decisions = d.decisions || [];
+        const knn = d.knn_entries || [];
+        // Summary
+        const summary = $('gcctm-summary');
+        const buys = decisions.filter(x => x.gcc_action === 'BUY').length;
+        const sells = decisions.filter(x => x.gcc_action === 'SELL').length;
+        const holds = decisions.filter(x => x.gcc_action === 'HOLD').length;
+        summary.textContent = `共 ${decisions.length} 条决策 | BUY:${buys} SELL:${sells} HOLD:${holds} | KNN经验:${knn.length} 条`;
+        // Decision table
+        const tbody = $('gcctm-dec-body');
+        if (!decisions.length) {
+            tbody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">暂无数据 (等待gcc_observe()写入)</td></tr>';
+        } else {
+            tbody.innerHTML = decisions.map(dec => {
+                const ts = (dec.ts||'').replace('T',' ').slice(0,16);
+                const action = dec.gcc_action || dec.action || '-';
+                const mainAction = dec.main_action || '-';
+                const consensus = dec.consensus || '-';
+                const treeScore = (dec.tree_result && dec.tree_result.best_score != null)
+                    ? dec.tree_result.best_score.toFixed(3) : '-';
+                // best source: pick highest scored source from tree
+                let bestSrc = '-';
+                const scores = dec.tree_result && dec.tree_result.scores_by_source;
+                if (scores && typeof scores === 'object') {
+                    const maxKey = Object.keys(scores).reduce((a, b) => (scores[a]||0) > (scores[b]||0) ? a : b, '');
+                    bestSrc = maxKey || '-';
+                }
+                const ver = dec.verification || {};
+                const topo = ver.topology != null ? ver.topology.toFixed(3) : '-';
+                const geo = ver.geometry != null ? ver.geometry.toFixed(3) : '-';
+                const alg = ver.algebra != null ? ver.algebra.toFixed(3) : '-';
+                const actionColor = action === 'BUY' ? '#3fb950' : action === 'SELL' ? '#f85149' : '#656d76';
+                const matchBadge = consensus === 'AGREE'
+                    ? '<span style="color:#3fb950">一致</span>'
+                    : consensus === 'DISAGREE'
+                    ? '<span style="color:#f85149">分歧</span>'
+                    : '<span style="color:#656d76">-</span>';
+                return `<tr>
+                    <td style="font-size:0.85em;color:#656d76">${ts}</td>
+                    <td>${dec.symbol||'-'}</td>
+                    <td style="color:#656d76">${mainAction}</td>
+                    <td style="color:${actionColor};font-weight:600">${action}</td>
+                    <td>${matchBadge}</td>
+                    <td style="font-size:0.85em">${bestSrc}</td>
+                    <td>${treeScore}</td>
+                    <td>${topo}</td>
+                    <td>${geo}</td>
+                    <td>${alg}</td>
+                </tr>`;
+            }).join('');
+        }
+        // KNN cards
+        const cardsEl = $('gcctm-knn-cards');
+        if (!knn.length) {
+            cardsEl.innerHTML = '<div style="color:#656d76;font-size:0.85em">暂无KNN经验数据</div>';
+        } else {
+            cardsEl.innerHTML = knn.map(e => {
+                const ts = (e.ts||'').replace('T',' ').slice(0,16);
+                const feat = e.features || {};
+                const outcome = e.outcome;
+                const outcomeColor = outcome === 'WIN' ? '#3fb950' : outcome === 'LOSS' ? '#f85149' : '#d29922';
+                const outcomeLabel = outcome || '待验证';
+                return `<div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;min-width:220px;max-width:280px">
+                    <div style="font-weight:600;margin-bottom:6px">${e.symbol||'-'} <span style="font-size:0.8em;color:#656d76">${ts}</span></div>
+                    <div style="font-size:0.85em;margin-bottom:4px">动作: <span style="font-weight:600">${e.action||'-'}</span> | 结果: <span style="color:${outcomeColor};font-weight:600">${outcomeLabel}</span></div>
+                    <div style="font-size:0.78em;color:#8b949e;line-height:1.6">
+                        Vision置信: ${feat.vision_conf!=null?feat.vision_conf.toFixed(2):'-'} |
+                        扫描置信: ${feat.scan_conf!=null?feat.scan_conf.toFixed(2):'-'}<br>
+                        N门控: ${feat.n_gate_buy!=null?feat.n_gate_buy:'-'} |
+                        过滤通过: ${feat.filter_passed!=null?feat.filter_passed:'-'}<br>
+                        量比: ${feat.vol_ratio!=null?feat.vol_ratio.toFixed(2):'-'} |
+                        胜率: ${feat.win_rate!=null?feat.win_rate.toFixed(2):'-'}<br>
+                        拓扑: ${feat.topology_score!=null?feat.topology_score.toFixed(3):'-'} |
+                        几何: ${feat.geometry_score!=null?feat.geometry_score.toFixed(3):'-'}
+                    </div>
+                    ${e.backfill_ts ? `<div style="font-size:0.75em;color:#656d76;margin-top:4px">回填: ${e.backfill_ts.slice(0,16)}</div>` : ''}
+                </div>`;
+            }).join('');
+        }
+    }).catch(err => {
+        $('gcctm-dec-body').innerHTML = `<tr><td colspan="10" style="color:#f85149">加载失败: ${err}</td></tr>`;
+    });
+}
+
 loadData();
+loadGccTm();
 setInterval(loadData, 300000);
+setInterval(loadGccTm, 300000);
 </script>
 </body>
 </html>
