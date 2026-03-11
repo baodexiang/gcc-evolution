@@ -43,6 +43,7 @@ _LOG_FILE        = _STATE_DIR / "gcc_trading_decisions.jsonl"
 _GOVERNANCE_FILE = _STATE_DIR / "plugin_governance_actions.json"
 _REGIME_FILE     = _STATE_DIR / "regime_validation.json"
 _CONTEXT_SNAP_DIR = _STATE_DIR / "gcc_decision_context"
+_MAIN_STATE_FILE  = Path("logs") / "state.json"
 
 # ── 决策输出日志 ───────────────────────────────────────────────
 def _log_decision(record: dict) -> None:
@@ -251,6 +252,48 @@ def _read_signal_direction() -> str:
 
 
 # ══════════════════════════════════════════════════════════════
+# S12b  _read_signal_direction_detail() → dict
+# 读 .GCC/signal_filter/direction_log.jsonl 最新一条，获取方向占优信息
+# ══════════════════════════════════════════════════════════════
+def _read_signal_direction_detail() -> dict:
+    """读取 SignalDirectionFilter 最新方向判断。"""
+    log_path = _GCC_DIR / "signal_filter" / "direction_log.jsonl"
+    if not log_path.exists():
+        return {"direction": "NO_ANSWER"}
+    try:
+        last_line = ""
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    last_line = line.strip()
+        return json.loads(last_line) if last_line else {"direction": "NO_ANSWER"}
+    except Exception:
+        return {"direction": "NO_ANSWER"}
+
+
+# ══════════════════════════════════════════════════════════════
+# S12c  _read_position(symbol) → (position_units, max_units)
+# 读 logs/state.json 获取当前仓位档位
+# ══════════════════════════════════════════════════════════════
+def _read_position(symbol: str) -> tuple:
+    """读取品种当前仓位。返回 (position_units, max_units)。"""
+    if not _MAIN_STATE_FILE.exists():
+        return (0, 5)
+    try:
+        d = json.loads(_MAIN_STATE_FILE.read_text(encoding="utf-8"))
+        st = d.get(symbol)
+        if not st:
+            return (0, 5)
+        pos = st.get("position_units", 0) or 0
+        mx = st.get("max_units", 5)
+        if mx is None:
+            mx = 5
+        return (pos, mx)
+    except Exception:
+        return (0, 5)
+
+
+# ══════════════════════════════════════════════════════════════
 # L1-S02  _read_plugin_governor / _read_regime / _read_risk_budget
 # 补充输入槽位：外挂治理状态、市场体制、风险预算
 # ══════════════════════════════════════════════════════════════
@@ -402,6 +445,11 @@ class DecisionContext:
     regime: dict = field(default_factory=dict)
     governor: dict = field(default_factory=dict)
     risk_budget: dict = field(default_factory=dict)
+    # 信号方向过滤 + 仓位管理
+    signal_direction: dict = field(default_factory=dict)
+    position: tuple = (0, 5)  # (position_units, max_units)
+    # 信号池统计（4H内收集的外挂BUY/SELL计数）
+    signal_pool: dict = field(default_factory=dict)  # {buy:N, sell:N, total:N, strongest:"..."}
     # 扩展槽位（docx P0 数据源预留）
     extended: dict = field(default_factory=dict)
 
@@ -414,7 +462,11 @@ class DecisionContext:
             "vol_ratio": round(self.vol_ratio, 4),
             "n_gate_buy": self.n_gate_buy, "n_gate_sell": self.n_gate_sell,
             "regime": self.regime, "governor": self.governor,
-            "risk_budget": self.risk_budget, "extended": self.extended,
+            "risk_budget": self.risk_budget,
+            "signal_direction": self.signal_direction,
+            "position": list(self.position),
+            "signal_pool": self.signal_pool,
+            "extended": self.extended,
         }
 
     def snapshot(self) -> None:
@@ -557,6 +609,15 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
     else:
         scores["cvd"] = 0.0
 
+    # 信号池: 4H内外挂BUY票数占比 → 支持BUY方向
+    pool = context.get("signal_pool", {})
+    pool_total = pool.get("total", 0)
+    if pool_total > 0:
+        buy_ratio = pool.get("buy", 0) / pool_total
+        scores["signal_pool"] = (buy_ratio - 0.5) * 0.40  # 全BUY→+0.20, 全SELL→-0.20
+    else:
+        scores["signal_pool"] = 0.0
+
     return scores
 
 
@@ -637,6 +698,15 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
     else:
         scores["cvd"] = 0.0
 
+    # 信号池: 4H内外挂SELL票数占比 → 支持SELL方向
+    pool = context.get("signal_pool", {})
+    pool_total = pool.get("total", 0)
+    if pool_total > 0:
+        sell_ratio = pool.get("sell", 0) / pool_total
+        scores["signal_pool"] = (sell_ratio - 0.5) * 0.40  # 全SELL→+0.20, 全BUY→-0.20
+    else:
+        scores["signal_pool"] = 0.0
+
     return scores
 
 
@@ -647,7 +717,7 @@ def _score_hold_candidate() -> dict:
     """HOLD 路径固定中性分 0.0，作为基线竞争者。"""
     return {"vision": 0.0, "scan": 0.0, "filter": 0.0,
             "win_rate": 0.0, "volume": 0.0, "vwap": 0.0,
-            "obi": 0.0, "cvd": 0.0}
+            "obi": 0.0, "cvd": 0.0, "signal_pool": 0.0}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -664,51 +734,54 @@ def _aggregate_candidate_score(scores: dict) -> float:
 # S18-S21  剪枝规则
 # ══════════════════════════════════════════════════════════════
 _CRYPTO_SYMBOLS = frozenset({
-    "BTCUSDC", "ETHUSDC", "SOLUSDC", "ZECUSDC", "DOGEUSDC",
-    "BNBUSDC", "XRPUSDC", "ADAUSDC", "DOTUSDC",
+    "BTCUSDC", "ETHUSDC", "SOLUSDC", "ZECUSDC",
 })
 
 def _apply_pruning(nodes: List[TreeNode], symbol: str,
                    context: dict) -> List[TreeNode]:
     """
-    对三个候选节点依次应用剪枝规则 P1-P4。
-    修改 node.pruned / node.prune_reason 并返回同一列表。
+    对候选节点应用剪枝规则 P1-P3。
+    P1: SignalDirectionFilter ENFORCE — 方向占优时剪反向
+    P2: Vision — 形态不适合交易时剪枝
+    P3: Position Control — 仓位已满时阻止同方向
     """
+    position, max_units = context.get("position", (0, 5))
+    vision_bias, vision_conf = context.get("vision", ("HOLD", 0.5))
+    sig_dir = context.get("signal_direction", {})
+    sig_dir_label = sig_dir.get("direction", "NO_ANSWER")
+    sig_dir_mode = sig_dir.get("mode", _read_signal_direction())
+
     for node in nodes:
         if node.pruned:
             continue
 
-        # P1: N-Gate BLOCK → 剪掉加密 BUY 路径
-        if node.action == "BUY" and symbol in _CRYPTO_SYMBOLS:
-            if context.get(f"n_gate_buy") == "BLOCK":
+        # P1: SignalDirectionFilter — ENFORCE模式下方向占优时剪反向
+        if sig_dir_mode == "ENFORCE":
+            if node.action == "BUY" and sig_dir_label == "SELL_DOMINANT":
                 node.pruned = True
-                node.prune_reason = "P1:N-Gate BLOCK(crypto BUY)"
+                node.prune_reason = f"P1:SignalFilter SELL_DOMINANT"
+                continue
+            if node.action == "SELL" and sig_dir_label == "BUY_DOMINANT":
+                node.pruned = True
+                node.prune_reason = f"P1:SignalFilter BUY_DOMINANT"
                 continue
 
-        # P2: FilterChain 三道门全失败 → 剪掉对应方向
-        if node.action in ("BUY", "SELL"):
-            fc_key = f"filter_{node.action.lower()}"
-            fc = context.get(fc_key, {})
-            # passed=False 且 blocked_by 非空 → 明确被拒
-            if fc.get("passed") is False and fc.get("blocked_by"):
-                node.pruned = True
-                node.prune_reason = f"P2:FilterChain blocked_by={fc['blocked_by']}"
-                continue
-
-        # P3: aggregate 绝对值 < 0.15 → 信号太弱，剪枝
-        if abs(node.aggregate) < 0.15 and node.action != "HOLD":
+        # P2: Vision — 形态不支持该方向时剪枝
+        # Vision bias=HOLD表示当前形态不适合交易
+        if node.action in ("BUY", "SELL") and vision_bias == "HOLD" and vision_conf >= 0.7:
             node.pruned = True
-            node.prune_reason = f"P3:aggregate={node.aggregate:.3f}<0.15"
+            node.prune_reason = f"P2:Vision HOLD(形态不适合交易) conf={vision_conf:.0%}"
             continue
 
-        # P4: 扫描引擎方向相反 → 惩罚分数 × 0.5（不剪枝，只降权）
-        scan_dir = context.get("scan", ("NONE", 0.0))[0]
-        if node.action == "BUY" and scan_dir == "SELL":
-            node.aggregate *= 0.5
-            node.scores_by_source["_p4_penalty"] = "scan_opposite"
-        elif node.action == "SELL" and scan_dir == "BUY":
-            node.aggregate *= 0.5
-            node.scores_by_source["_p4_penalty"] = "scan_opposite"
+        # P3: Position Control — 仓位已满不加仓，空仓不减仓
+        if node.action == "BUY" and position >= max_units:
+            node.pruned = True
+            node.prune_reason = f"P3:Position full({position}/{max_units})"
+            continue
+        if node.action == "SELL" and position <= 0:
+            node.pruned = True
+            node.prune_reason = f"P3:Position empty(0/{max_units})"
+            continue
 
     return nodes
 
@@ -743,17 +816,17 @@ _PRUNE_RATIO = 0.8    # 每轮剪枝比例 (论文~80%剪枝)
 # L2 子策略定义 — 每个方向3种策略，强调不同数据源
 _L2_STRATEGIES: Dict[str, List[dict]] = {
     "BUY": [
-        {"strategy": "momentum",  "emphasis": {"scan": 1.6, "volume": 1.4, "vision": 0.8}},
-        {"strategy": "value",     "emphasis": {"win_rate": 1.8, "filter": 1.5, "scan": 0.7}},
-        {"strategy": "breakout",  "emphasis": {"volume": 2.0, "vision": 1.3, "filter": 0.8}},
+        {"strategy": "momentum",  "emphasis": {"scan": 1.6, "volume": 1.4, "vision": 0.8, "signal_pool": 1.2}},
+        {"strategy": "value",     "emphasis": {"win_rate": 1.8, "filter": 1.5, "scan": 0.7, "signal_pool": 1.0}},
+        {"strategy": "breakout",  "emphasis": {"volume": 2.0, "vision": 1.3, "filter": 0.8, "signal_pool": 1.5}},
     ],
     "SELL": [
-        {"strategy": "momentum",  "emphasis": {"scan": 1.6, "volume": 1.4, "vision": 0.8}},
-        {"strategy": "reversal",  "emphasis": {"vision": 1.8, "win_rate": 1.3, "scan": 0.7}},
-        {"strategy": "weakness",  "emphasis": {"filter": 1.8, "win_rate": 1.5, "volume": 0.8}},
+        {"strategy": "momentum",  "emphasis": {"scan": 1.6, "volume": 1.4, "vision": 0.8, "signal_pool": 1.2}},
+        {"strategy": "reversal",  "emphasis": {"vision": 1.8, "win_rate": 1.3, "scan": 0.7, "signal_pool": 1.0}},
+        {"strategy": "weakness",  "emphasis": {"filter": 1.8, "win_rate": 1.5, "volume": 0.8, "signal_pool": 1.5}},
     ],
     "HOLD": [
-        {"strategy": "neutral",   "emphasis": {}},  # HOLD 只有一个子策略
+        {"strategy": "neutral",   "emphasis": {}},
     ],
 }
 
@@ -1284,11 +1357,13 @@ class GCCTradingModule:
         self,
         bars: list,
         main_decision: Optional[str] = None,
+        signal_pool_data: Optional[dict] = None,
     ) -> dict:
         """
         主流程入口。
         bars: OHLCV list，最新在末尾，至少含 volume/close 字段。
         main_decision: 主程序决策 ("BUY"/"SELL"/"HOLD"/None)，用于一致率统计。
+        signal_pool_data: 4H信号池统计 {buy:N, sell:N, total:N, strongest:"...", vote_detail:{}}
         返回: result dict，含 action/verdict/consensus 等字段。
         """
         ts = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
@@ -1299,6 +1374,9 @@ class GCCTradingModule:
 
         # L1: 组装 DecisionContext（含新增槽位 + 落盘快照）
         ctx = self._build_context(bars, ts)
+        # 注入信号池数据到context
+        if signal_pool_data:
+            ctx.signal_pool = signal_pool_data
         context = self._context_to_score_dict(ctx)
 
         # L3-S02: hold_only 模式 — 直接 HOLD，只记日志
@@ -1385,6 +1463,8 @@ class GCCTradingModule:
             regime=_read_regime(sym),
             governor=_read_plugin_governor(sym),
             risk_budget=_read_risk_budget(),
+            signal_direction=_read_signal_direction_detail(),
+            position=_read_position(sym),
             # Phase B1: Schwab VWAP + Phase B2: Coinbase OBI/CVD
             extended={
                 "schwab_vwap": _read_schwab_vwap(sym),
@@ -1405,6 +1485,9 @@ class GCCTradingModule:
             "n_gate_buy": ctx.n_gate_buy, "n_gate_sell": ctx.n_gate_sell,
             "regime": ctx.regime, "governor": ctx.governor,
             "risk_budget": ctx.risk_budget,
+            "signal_direction": ctx.signal_direction,
+            "position": ctx.position,
+            "signal_pool": ctx.signal_pool,
             "schwab_vwap": ctx.extended.get("schwab_vwap", {}),
             "coinbase": ctx.extended.get("coinbase", {}),
         }
@@ -1424,7 +1507,7 @@ class GCCTradingModule:
         """
         arXiv:2603.04735 PUCT 树搜索算法:
         1. L1展开: 生成 BUY/SELL/HOLD 三个方向节点
-        2. 剪枝: 应用 P1-P4 规则 (~80% 候选被剪)
+        2. 剪枝: 应用 P1-P3 规则 (SignalFilter/Vision/Position)
         3. L2展开: 存活L1节点 → 子策略节点 (momentum/value/breakout...)
         4. PUCT迭代: N轮选择→数值反馈→回传值→再选择
         5. 最终选择: 最高Q值或最多访问次数的L2节点提升为最终候选
@@ -2195,10 +2278,8 @@ def gcc_observe(
 ) -> None:
     """
     4H K线结束时由 llm_decide() 调用。
-    1. 取出本周期收集的所有外挂信号
-    2. 结合数据源(FilterChain/VWAP/regime等)整合分析
-    3. 投票裁决 BUY / SELL / HOLD
-    4. 写日志 + KNN经验卡（observe模式，不干预实际交易）
+    完整流程: 信号收集 → P1-P3过滤 → PUCT树搜索(论文1) → 三视角验证(论文2)
+              → 下单/pending_order → KNN经验卡 → gcc-evo循环
     """
     try:
         signals = _drain_signals(symbol)
@@ -2210,13 +2291,10 @@ def gcc_observe(
         # 回填上一次模拟交易的outcome（用当前K线收盘价）
         _backfill_sim_trades(symbol, bars)
 
-        # 统计投票
+        # 信号池统计 → 注入PUCT作为数据源维度
         buy_votes = sum(1 for s in signals if s["action"] == "BUY")
         sell_votes = sum(1 for s in signals if s["action"] == "SELL")
-        buy_weight = sum(s["confidence"] for s in signals if s["action"] == "BUY")
-        sell_weight = sum(s["confidence"] for s in signals if s["action"] == "SELL")
 
-        # 信号归因：记录各外挂的投票
         vote_detail = {}
         for s in signals:
             src = s["source"]
@@ -2224,7 +2302,6 @@ def gcc_observe(
                 vote_detail[src] = {"BUY": 0, "SELL": 0}
             vote_detail[src][s["action"]] += 1
 
-        # 找出最强信号源（投票最多的外挂）
         strongest_source = ""
         if vote_detail:
             strongest_source = max(
@@ -2232,46 +2309,32 @@ def gcc_observe(
                 key=lambda k: vote_detail[k]["BUY"] + vote_detail[k]["SELL"]
             )
 
-        # 树搜索 + 三视角验证（使用已有逻辑）
-        result = mod.process(bars, main_decision=main_decision)
+        signal_pool_data = {
+            "buy": buy_votes,
+            "sell": sell_votes,
+            "total": len(signals),
+            "strongest": strongest_source,
+            "vote_detail": vote_detail,
+        }
 
-        # 整合裁决：信号池投票 + 树搜索结果
-        tree_action = result.get("final_action", "HOLD")
-        tree_verdict = result.get("verdict", "SKIP")
+        # 全部交给论文算法裁决:
+        # 1. P1-P3过滤(SignalDirection/Vision/Position)
+        # 2. PUCT树搜索(arXiv:2603.04735) — 信号池作为评分维度
+        # 3. 三视角验证(arXiv:2407.09468) — consensus≥2/3→EXECUTE
+        result = mod.process(
+            bars,
+            main_decision=main_decision,
+            signal_pool_data=signal_pool_data,
+        )
 
-        # GCC-TM 最终裁决逻辑：
-        # 1. 无信号 → HOLD
-        # 2. 有信号 → 以投票多数方向为候选
-        # 3. 树搜索+三视角作为确认/否决
-        if not signals:
-            gcc_action = "HOLD"
-            gcc_reason = "no_signals"
-        elif buy_votes > sell_votes:
-            # 多数投BUY
-            if tree_action in ("BUY", "HOLD") and tree_verdict != "HOLD_ONLY":
-                gcc_action = "BUY"
-                gcc_reason = f"buy_votes={buy_votes}(w={buy_weight:.2f}) tree={tree_action}"
-            else:
-                gcc_action = "HOLD"
-                gcc_reason = f"buy_votes={buy_votes} but tree={tree_action}/{tree_verdict}"
-        elif sell_votes > buy_votes:
-            # 多数投SELL
-            if tree_action in ("SELL", "HOLD") and tree_verdict != "HOLD_ONLY":
-                gcc_action = "SELL"
-                gcc_reason = f"sell_votes={sell_votes}(w={sell_weight:.2f}) tree={tree_action}"
-            else:
-                gcc_action = "HOLD"
-                gcc_reason = f"sell_votes={sell_votes} but tree={tree_action}/{tree_verdict}"
-        else:
-            # 平票 → HOLD
-            gcc_action = "HOLD"
-            gcc_reason = f"tie buy={buy_votes} sell={sell_votes}"
+        gcc_action = result.get("final_action", "HOLD")
+        gcc_verdict = result.get("verdict", "SKIP")
+        gcc_reason = f"puct={gcc_action} verdict={gcc_verdict} signals={len(signals)}"
 
-        # 当前价格（用于模拟执行基准）
         closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
         current_price = closes[-1] if closes else 0.0
 
-        # 写决策日志（追加到 gcc_trading_decisions.jsonl）
+        # 决策日志
         ts_now = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
         dec_record = {
             "ts": ts_now,
@@ -2279,15 +2342,12 @@ def gcc_observe(
             "phase": mod.phase,
             "gcc_action": gcc_action,
             "main_action": main_decision,
-            "verdict": tree_verdict,
+            "verdict": gcc_verdict,
             "reason": gcc_reason,
-            "buy_votes": buy_votes,
-            "sell_votes": sell_votes,
-            "buy_weight": round(buy_weight, 3),
-            "sell_weight": round(sell_weight, 3),
+            "buy_signals": buy_votes,
+            "sell_signals": sell_votes,
             "strongest_source": strongest_source,
             "vote_detail": vote_detail,
-            "tree_action": tree_action,
             "tree_score": result.get("tree_score", 0),
             "consensus": result.get("consensus", 0),
             "topology": result.get("topology"),
@@ -2305,16 +2365,15 @@ def gcc_observe(
         except Exception:
             pass
 
-        # 模拟执行记录 — 下一K线验证用
-        # 记录 gcc_action + 当前价格，回填时用下一K线价格计算盈亏
+        # 模拟执行记录
         if gcc_action != "HOLD":
             _sim_path = _STATE_DIR / "gcc_sim_trades.jsonl"
             sim_record = {
                 "ts": ts_now, "symbol": symbol,
                 "action": gcc_action, "entry_price": current_price,
                 "strongest_source": strongest_source,
-                "buy_votes": buy_votes, "sell_votes": sell_votes,
-                "outcome": None,  # 下一K线回填
+                "signals_count": len(signals),
+                "outcome": None,
             }
             try:
                 with open(_sim_path, "a", encoding="utf-8") as f:
@@ -2322,7 +2381,7 @@ def gcc_observe(
             except Exception:
                 pass
 
-        # 写 KNN 经验
+        # KNN经验卡 → gcc-evo循环消费
         if gcc_action != "HOLD":
             ver_results_raw = result.get("verifier_results", [])
             ver_results = [
@@ -2333,6 +2392,7 @@ def gcc_observe(
                 for r in ver_results_raw
             ]
             ctx = mod._build_context(bars)
+            ctx.signal_pool = signal_pool_data
             features = _build_knn_features(ctx, ver_results)
             exp = KNNExperience(
                 symbol=symbol,
@@ -2343,12 +2403,10 @@ def gcc_observe(
                 price=current_price,
                 ref_price=current_price,
             )
-            # KNN经验卡追加信号池归因（写入jsonl时额外字段）
             exp_dict = exp.as_dict()
-            exp_dict["buy_votes"] = buy_votes
-            exp_dict["sell_votes"] = sell_votes
             exp_dict["strongest_source"] = strongest_source
             exp_dict["vote_detail"] = vote_detail
+            exp_dict["signals_count"] = len(signals)
             _write_knn_experience_dict(exp_dict)
             filled = _backfill_outcome(symbol, current_price)
             for fr in filled:
@@ -2357,9 +2415,9 @@ def gcc_observe(
                 )
 
         logger.info(
-            "[GCC-TM] %s gcc=%s main=%s signals=%d (B%d/S%d) src=%s reason=%s",
-            symbol, gcc_action, main_decision, len(signals),
-            buy_votes, sell_votes, strongest_source, gcc_reason,
+            "[GCC-TM] %s action=%s verdict=%s signals=%d(B%d/S%d) src=%s",
+            symbol, gcc_action, gcc_verdict, len(signals),
+            buy_votes, sell_votes, strongest_source,
         )
     except Exception as e:
         import traceback

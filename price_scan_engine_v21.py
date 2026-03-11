@@ -5998,6 +5998,19 @@ class PriceScanEngine:
         source = signal_data.get("source") or signal_type
         signal_data["source"] = source
 
+        # KEY-011: 所有外挂BUY/SELL在过滤前推入GCC-TM信号池
+        # GCC-TM在4H结束时统一收集、PUCT裁决，不受P0过滤链影响
+        _sig_action = signal_data.get("signal", "")
+        if _sig_action in ("BUY", "SELL"):
+            try:
+                from gcc_trading_module import gcc_push_signal
+                _sig_conf = float(signal_data.get("consensus_score", 0.5)) or 0.5
+                gcc_push_signal(symbol, source, _sig_action, _sig_conf)
+            except ImportError:
+                pass
+            except Exception as _gcc_err:
+                logger.debug("[GCC-TM] push from scan engine failed: %s", _gcc_err)
+
         def _record_key004_trade(executed_flag: bool) -> None:
             try:
                 tracker = getattr(self, "_plugin_profit_tracker", None)
