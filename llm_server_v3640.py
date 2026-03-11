@@ -50236,7 +50236,6 @@ def key009_reject():
 @app.route("/key009/gcctm", methods=["GET"])
 def key009_gcctm():
     """KEY-011 GCC-TM: 返回最近决策日志 + KNN经验条目"""
-    import itertools as _it
     decisions = []
     knn_entries = []
     dec_path = ROOT / "state" / "gcc_trading_decisions.jsonl"

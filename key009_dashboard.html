@@ -404,7 +404,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div id="gcctm-summary" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
 <table>
 <thead><tr>
-  <th>时间</th><th>品种</th><th>主流程</th><th>GCC决定</th><th>共识</th>
+  <th>时间</th><th>品种</th><th>裁决</th><th>GCC动作</th><th>共识</th>
   <th>最强信号源</th><th>树搜索分</th><th>拓扑</th><th>几何</th><th>代数</th>
 </tr></thead>
 <tbody id="gcctm-dec-body"></tbody>
@@ -1757,14 +1757,17 @@ function _doRender() {
 }
 
 function loadGccTm() {
+    // KNN 9维特征名称 (与 gcc_trading_module.py KNNExperience.feature_names 对齐)
+    const FEAT_NAMES = ['vision_conf','scan_conf','n_gate_buy','filter_passed',
+        'filter_vol_score','win_rate','vol_ratio','topology_score','geometry_score'];
     fetch('/key009/gcctm').then(r => r.json()).then(d => {
         const decisions = d.decisions || [];
         const knn = d.knn_entries || [];
         // Summary
         const summary = $('gcctm-summary');
-        const buys = decisions.filter(x => x.gcc_action === 'BUY').length;
-        const sells = decisions.filter(x => x.gcc_action === 'SELL').length;
-        const holds = decisions.filter(x => x.gcc_action === 'HOLD').length;
+        const buys = decisions.filter(x => x.final_action === 'BUY').length;
+        const sells = decisions.filter(x => x.final_action === 'SELL').length;
+        const holds = decisions.filter(x => x.final_action === 'HOLD').length;
         summary.textContent = `共 ${decisions.length} 条决策 | BUY:${buys} SELL:${sells} HOLD:${holds} | KNN经验:${knn.length} 条`;
         // Decision table
         const tbody = $('gcctm-dec-body');
@@ -1773,34 +1776,37 @@ function loadGccTm() {
         } else {
             tbody.innerHTML = decisions.map(dec => {
                 const ts = (dec.ts||'').replace('T',' ').slice(0,16);
-                const action = dec.gcc_action || dec.action || '-';
-                const mainAction = dec.main_action || '-';
-                const consensus = dec.consensus || '-';
-                const treeScore = (dec.tree_result && dec.tree_result.best_score != null)
-                    ? dec.tree_result.best_score.toFixed(3) : '-';
-                // best source: pick highest scored source from tree
+                const action = dec.final_action || '-';
+                const verdict = dec.verdict || '-';
+                // consensus 是整数 0-3 (3个验证器通过数)
+                const consensus = dec.consensus;
+                const bn = dec.best_node || {};
+                const treeScore = bn.aggregate != null ? bn.aggregate.toFixed(3) : '-';
+                // best source: 从 best_node.scores_by_source 找最高分来源
                 let bestSrc = '-';
-                const scores = dec.tree_result && dec.tree_result.scores_by_source;
+                const scores = bn.scores_by_source;
                 if (scores && typeof scores === 'object') {
-                    const maxKey = Object.keys(scores).reduce((a, b) => (scores[a]||0) > (scores[b]||0) ? a : b, '');
-                    bestSrc = maxKey || '-';
+                    const keys = Object.keys(scores);
+                    if (keys.length) {
+                        bestSrc = keys.reduce((a, b) => (scores[a]||0) > (scores[b]||0) ? a : b);
+                    }
                 }
-                const ver = dec.verification || {};
-                const topo = ver.topology != null ? ver.topology.toFixed(3) : '-';
-                const geo = ver.geometry != null ? ver.geometry.toFixed(3) : '-';
-                const alg = ver.algebra != null ? ver.algebra.toFixed(3) : '-';
+                // verifier_results: [{perspective,ok,score,reasoning},...]
+                const vrs = dec.verifier_results || [];
+                const getVR = (name) => { const v = vrs.find(x => x.perspective === name); return v && v.score != null ? v.score.toFixed(3) : '-'; };
+                const topo = getVR('topology');
+                const geo = getVR('geometry');
+                const alg = getVR('algebra');
                 const actionColor = action === 'BUY' ? '#3fb950' : action === 'SELL' ? '#f85149' : '#656d76';
-                const matchBadge = consensus === 'AGREE'
-                    ? '<span style="color:#3fb950">一致</span>'
-                    : consensus === 'DISAGREE'
-                    ? '<span style="color:#f85149">分歧</span>'
-                    : '<span style="color:#656d76">-</span>';
+                const conLabel = consensus != null
+                    ? `<span style="color:${consensus >= 2 ? '#3fb950' : consensus >= 1 ? '#d29922' : '#f85149'}">${consensus}/3</span>`
+                    : '-';
                 return `<tr>
                     <td style="font-size:0.85em;color:#656d76">${ts}</td>
                     <td>${dec.symbol||'-'}</td>
-                    <td style="color:#656d76">${mainAction}</td>
+                    <td style="color:#656d76">${verdict}</td>
                     <td style="color:${actionColor};font-weight:600">${action}</td>
-                    <td>${matchBadge}</td>
+                    <td>${conLabel}</td>
                     <td style="font-size:0.85em">${bestSrc}</td>
                     <td>${treeScore}</td>
                     <td>${topo}</td>
@@ -1809,31 +1815,34 @@ function loadGccTm() {
                 </tr>`;
             }).join('');
         }
-        // KNN cards
+        // KNN cards — features 是 List[float] 长度9, outcome 是 bool|null
         const cardsEl = $('gcctm-knn-cards');
         if (!knn.length) {
             cardsEl.innerHTML = '<div style="color:#656d76;font-size:0.85em">暂无KNN经验数据</div>';
         } else {
             cardsEl.innerHTML = knn.map(e => {
                 const ts = (e.ts||'').replace('T',' ').slice(0,16);
-                const feat = e.features || {};
+                const fArr = e.features || [];
+                const f = (i) => fArr[i] != null ? (Number.isInteger(fArr[i]) ? fArr[i] : fArr[i].toFixed(2)) : '-';
+                const f3 = (i) => fArr[i] != null ? fArr[i].toFixed(3) : '-';
                 const outcome = e.outcome;
-                const outcomeColor = outcome === 'WIN' ? '#3fb950' : outcome === 'LOSS' ? '#f85149' : '#d29922';
-                const outcomeLabel = outcome || '待验证';
+                const outcomeColor = outcome === true ? '#3fb950' : outcome === false ? '#f85149' : '#d29922';
+                const outcomeLabel = outcome === true ? '盈利' : outcome === false ? '亏损' : '待验证';
                 return `<div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;min-width:220px;max-width:280px">
                     <div style="font-weight:600;margin-bottom:6px">${e.symbol||'-'} <span style="font-size:0.8em;color:#656d76">${ts}</span></div>
                     <div style="font-size:0.85em;margin-bottom:4px">动作: <span style="font-weight:600">${e.action||'-'}</span> | 结果: <span style="color:${outcomeColor};font-weight:600">${outcomeLabel}</span></div>
                     <div style="font-size:0.78em;color:#8b949e;line-height:1.6">
-                        Vision置信: ${feat.vision_conf!=null?feat.vision_conf.toFixed(2):'-'} |
-                        扫描置信: ${feat.scan_conf!=null?feat.scan_conf.toFixed(2):'-'}<br>
-                        N门控: ${feat.n_gate_buy!=null?feat.n_gate_buy:'-'} |
-                        过滤通过: ${feat.filter_passed!=null?feat.filter_passed:'-'}<br>
-                        量比: ${feat.vol_ratio!=null?feat.vol_ratio.toFixed(2):'-'} |
-                        胜率: ${feat.win_rate!=null?feat.win_rate.toFixed(2):'-'}<br>
-                        拓扑: ${feat.topology_score!=null?feat.topology_score.toFixed(3):'-'} |
-                        几何: ${feat.geometry_score!=null?feat.geometry_score.toFixed(3):'-'}
+                        Vision置信: ${f(0)} |
+                        扫描置信: ${f(1)}<br>
+                        N门控: ${f(2)} |
+                        过滤通过: ${f(3)}<br>
+                        量价分: ${f(4)} |
+                        胜率: ${f(5)}<br>
+                        量比: ${f(6)} |
+                        拓扑: ${f3(7)} |
+                        几何: ${f3(8)}
                     </div>
-                    ${e.backfill_ts ? `<div style="font-size:0.75em;color:#656d76;margin-top:4px">回填: ${e.backfill_ts.slice(0,16)}</div>` : ''}
+                    ${e.price ? `<div style="font-size:0.75em;color:#656d76;margin-top:4px">价格: $${e.price.toFixed(2)}${e.ref_price ? ' | 基准: $'+e.ref_price.toFixed(2) : ''}</div>` : ''}
                 </div>`;
             }).join('');
         }
