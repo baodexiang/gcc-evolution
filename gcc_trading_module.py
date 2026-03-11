@@ -1026,16 +1026,19 @@ def _write_knn_experience(exp: KNNExperience) -> None:
         logger.warning("[GCC-TRADE] write_knn_experience: %s", e)
 
 
-def _backfill_outcome(symbol: str, current_price: float, lookback: int = _KNN_BACKFILL_LOOKBACK) -> None:
+def _backfill_outcome(symbol: str, current_price: float,
+                      lookback: int = _KNN_BACKFILL_LOOKBACK) -> List[dict]:
     """
     S46: 回填最近未填 outcome 的经验条目。
     规则: 当前价格 > ref_price * 1.005 → BUY经验=True / SELL经验=False
           当前价格 < ref_price * 0.995 → BUY经验=False / SELL经验=True
           否则 → neutral (outcome 保持 None)
     lookback: 最多回填最近 N 条未填条目。
+    返回: 本次回填的记录列表 [{price, action, outcome}, ...]，供 Algebra verifier 使用。
     """
+    filled_records: List[dict] = []
     if not _KNN_EXP_FILE.exists() or current_price <= 0:
-        return
+        return filled_records
     try:
         lines = _KNN_EXP_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
         updated = []
@@ -1061,9 +1064,17 @@ def _backfill_outcome(symbol: str, current_price: float, lookback: int = _KNN_BA
                     if move > 0.005:
                         rec["outcome"] = (action == "BUY")
                         fill_count += 1
+                        filled_records.append({
+                            "price": ref, "action": action,
+                            "outcome": rec["outcome"],
+                        })
                     elif move < -0.005:
                         rec["outcome"] = (action == "SELL")
                         fill_count += 1
+                        filled_records.append({
+                            "price": ref, "action": action,
+                            "outcome": rec["outcome"],
+                        })
                     # |move| <= 0.5% → 保持 None（neutral，不算）
             updated.append(json.dumps(rec, ensure_ascii=False))
 
@@ -1072,6 +1083,7 @@ def _backfill_outcome(symbol: str, current_price: float, lookback: int = _KNN_BA
             logger.info("[GCC-TRADE] backfill %s: %d outcomes filled", symbol, fill_count)
     except Exception as e:
         logger.warning("[GCC-TRADE] backfill_outcome %s: %s", symbol, e)
+    return filled_records
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1080,11 +1092,41 @@ def _backfill_outcome(symbol: str, current_price: float, lookback: int = _KNN_BA
 _gcc_modules: dict = {}   # {symbol: GCCTradingModule}
 
 
+def _load_algebra_history(mod: "GCCTradingModule") -> int:
+    """从 KNN 经验文件加载已回填的历史 outcome → 喂给 Algebra verifier。"""
+    count = 0
+    if not _KNN_EXP_FILE.exists():
+        return count
+    try:
+        for line in _KNN_EXP_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if (rec.get("symbol") == mod.symbol
+                    and rec.get("outcome") is not None):
+                mod._verifier.algebra.record_outcome(
+                    float(rec.get("price") or rec.get("ref_price") or 0),
+                    rec.get("action", "HOLD"),
+                    bool(rec["outcome"]),
+                )
+                count += 1
+    except Exception as e:
+        logger.debug("[GCC-TM] load_algebra_history %s: %s", mod.symbol, e)
+    return count
+
+
 def _get_gcc_module(symbol: str) -> "GCCTradingModule":
     """懒加载单例：每个品种一个 GCCTradingModule 实例。"""
     if symbol not in _gcc_modules:
-        _gcc_modules[symbol] = GCCTradingModule(symbol, phase=PHASE_OBSERVE)
-        logger.info("[GCC-TM] init module for %s", symbol)
+        mod = GCCTradingModule(symbol, phase=PHASE_OBSERVE)
+        # 从 KNN 经验加载已回填历史 → Algebra verifier 冷启动
+        n = _load_algebra_history(mod)
+        if n:
+            logger.info("[GCC-TM] init %s: loaded %d algebra history records", symbol, n)
+        _gcc_modules[symbol] = mod
     return _gcc_modules[symbol]
 
 
@@ -1125,8 +1167,13 @@ def gcc_observe(symbol: str, bars: list, main_decision: str) -> None:
                 ref_price=closes[-1] if closes else 0.0,
             )
             _write_knn_experience(exp)
-            # 尝试回填历史 outcome
-            _backfill_outcome(symbol, closes[-1] if closes else 0.0)
+            # 尝试回填历史 outcome → 结果喂给 Algebra verifier
+            cur_price = closes[-1] if closes else 0.0
+            filled = _backfill_outcome(symbol, cur_price)
+            for fr in filled:
+                mod._verifier.algebra.record_outcome(
+                    fr["price"], fr["action"], fr["outcome"]
+                )
 
         logger.info(
             "[GCC-TM] %s gcc=%s main=%s verdict=%s",
