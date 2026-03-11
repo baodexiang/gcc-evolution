@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file. This project fo
 
 ---
 
+## [5.400] — 2026-03-11
+
+### 🔧 Changed
+
+- Bumped the current opensource source version to **5.400** (`setup.py`, `gcc_evolution/__init__.py`, CLI banner, dashboard label, and user manual headings).
+- Updated the main user manual entrypoints to `v5.400` (`README*.md`, `QUICKSTART*.md`, `TUTORIAL*.md`).
+- Regenerated the source archive as `gcc_evolution_v5400.zip`.
+
+---
+
+## [5.345] — 2026-03-10
+
+### 🔧 Changed
+
+- Release version bumped to **5.345** (setup.py, gcc_evolution/__init__.py, dashboard label, documentation version markers, embedded paid-module version fields).
+- Aligned the opensource workspace with the generated `gcc_evolution_v5345.zip` archive.
+
+---
+
 ## [5.325] — 2026-03-07
 
 ### 🔧 Changed

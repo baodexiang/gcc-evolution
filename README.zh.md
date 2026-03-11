@@ -1,4 +1,4 @@
-﻿# gcc-evo v5.345
+# gcc-evo v5.400
 
 另见: [FRAMEWORK_BOUNDARY.md](FRAMEWORK_BOUNDARY.md) | [FRAMEWORK_BOUNDARY.en.md](FRAMEWORK_BOUNDARY.en.md) | [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md) | [PRICING.md](PRICING.md)
 
@@ -97,7 +97,7 @@ python pdf_to_cards_v3.py output_cards --book "Wyckoff Methodology" --chapter "C
 gcc-evo loop GCC-0001 --once
 ```
 
-在权威 `v5.345` 口径里，`loop` 属于付费核心流程，因为它依赖 `L4 + L5` 的决策进化与闭环编排。
+在权威 `v5.400` 口径里，`loop` 属于付费核心流程，因为它依赖 `L4 + L5` 的决策进化与闭环编排。
 开源包同时保留了 `gcc-evo loop DEMO-001 --once --dry-run` 这条社区版 smoke path。
 如果要跑非 `--dry-run` 的 loop，先把上面的 3 个 `L0 prerequisite` 都设为 `pass`。
 

@@ -4,6 +4,25 @@
 
 ---
 
+## [5.400] — 2026-03-11
+
+### 🔧 变更 (Changed)
+
+- opensource 当前源码版本升级到 **5.400**（`setup.py`、`gcc_evolution/__init__.py`、CLI banner、dashboard 版本展示与用户手册标题）。
+- 更新用户手册主入口到 `v5.400`（`README*.md`、`QUICKSTART*.md`、`TUTORIAL*.md`）。
+- 重新生成源码压缩包 `gcc_evolution_v5400.zip`。
+
+---
+
+## [5.345] — 2026-03-10
+
+### 🔧 变更 (Changed)
+
+- 发布版本升级到 **5.345**（setup.py、gcc_evolution/__init__.py、Dashboard 展示、文档版本标记、付费模块内嵌版本字段）。
+- 对齐 opensource 工作目录与已生成的 gcc_evolution_v5345.zip 包版本口径。
+
+---
+
 ## [5.325] — 2026-03-07
 
 ### 🔧 变更 (Changed)
