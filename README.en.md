@@ -1,4 +1,4 @@
-﻿# gcc-evo v5.340
+﻿# gcc-evo v5.345
 
 See also: [FRAMEWORK_BOUNDARY.md](FRAMEWORK_BOUNDARY.md) | [FRAMEWORK_BOUNDARY.en.md](FRAMEWORK_BOUNDARY.en.md) | [LAYER_STRUCTURE.md](LAYER_STRUCTURE.md) | [PRICING.en.md](PRICING.en.md)
 
@@ -54,25 +54,31 @@ gcc-evo init
 gcc-evo setup KEY-001
 gcc-evo l0 scaffold
 gcc-evo l0 check
+gcc-evo l0 set-prereq data_quality --status pass --evidence "acceptance"
+gcc-evo l0 set-prereq deterministic_rules --status pass --evidence "acceptance"
+gcc-evo l0 set-prereq mathematical_filters --status pass --evidence "acceptance"
 gcc-evo pipe task "Improve retrieval quality" -k KEY-001 -m retrieval -p P1
 gcc-evo pipe list
 gcc-evo pipe status GCC-0001
 gcc-evo memory compact
 gcc-evo memory export
 gcc-evo health
+gcc-evo loop DEMO-001 --once --dry-run
 ```
 
 ## OCR and Knowledge Card Flow
 
+OCR and card generation are currently shipped as repository scripts, not `gcc-evo` subcommands.
+
 ```bash
-gcc-evo knowledge ocr-pdf paper.pdf output_cards
-gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine
+python ocr_pdf.py paper.pdf output_cards
+python pdf_to_cards_v3.py output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine
 ```
 
 If an LLM is configured, you can run an additional refinement pass:
 
 ```bash
-gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine --llm-refine --llm-repeat 3
+python pdf_to_cards_v3.py output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine --llm-refine --llm-repeat 3
 ```
 
 This flow produces:
@@ -87,7 +93,8 @@ This flow produces:
 gcc-evo loop GCC-0001 --once
 ```
 
-In the canonical v5.340 model, `loop` is a paid-core workflow because it relies on `L4 + L5`.
+The open-source package also includes a community smoke path via `gcc-evo loop DEMO-001 --once --dry-run`.
+For a non-dry-run loop, make sure the three `L0` prerequisites above are marked `pass` first.
 
 ## Pricing
 

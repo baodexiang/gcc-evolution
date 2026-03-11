@@ -1,4 +1,4 @@
-﻿# QUICKSTART - gcc-evo v5.340
+﻿# QUICKSTART - gcc-evo v5.345
 
 本手册严格按照权威发布口径编写：
 
@@ -27,6 +27,9 @@ gcc-evo init
 gcc-evo setup KEY-001
 gcc-evo l0 scaffold
 gcc-evo l0 check
+gcc-evo l0 set-prereq data_quality --status pass --evidence "acceptance"
+gcc-evo l0 set-prereq deterministic_rules --status pass --evidence "acceptance"
+gcc-evo l0 set-prereq mathematical_filters --status pass --evidence "acceptance"
 ```
 
 ### 第三步：创建任务
@@ -47,15 +50,17 @@ gcc-evo pipe status GCC-0001
 
 ### 第五步：OCR 文档并生成知识卡
 
+这些能力当前是仓库脚本，不是 `gcc-evo` CLI 子命令。
+
 ```bash
-gcc-evo knowledge ocr-pdf paper.pdf output_cards
-gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine
+python ocr_pdf.py paper.pdf output_cards
+python pdf_to_cards_v3.py output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine
 ```
 
 如已配置 LLM，可继续执行：
 
 ```bash
-gcc-evo knowledge cards output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine --llm-refine --llm-repeat 3
+python pdf_to_cards_v3.py output_cards --book "Wyckoff Methodology" --chapter "Chapter 1" --refine --llm-refine --llm-repeat 3
 ```
 
 ## 3. 付费模式工作流
@@ -71,6 +76,14 @@ gcc-evo loop GCC-0001 --once
 - `L4` 决策进化与 Skeptic 验收
 - `L5` 闭环编排与漂移感知调度
 - `DA` 企业级方向锚定约束
+
+开源版可先使用：
+
+```bash
+gcc-evo loop DEMO-001 --once --dry-run
+```
+
+如果要跑非 `--dry-run` 的 loop，先确保上面的 3 个 prerequisite 都已经通过。
 
 ## 4. 定价逻辑
 
