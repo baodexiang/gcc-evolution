@@ -42924,7 +42924,34 @@ def llm_decide():
                 f"source={_gcc_order.get('source','')}"
             )
             if _gcc_act in ("BUY", "SELL"):
-                if is_us_stock(symbol):
+                if symbol == "BTCUSDC":
+                    # BTCUSDC走永续合约通道
+                    try:
+                        from btc_perp import execute_signal as _btc_execute
+                        _btc_res = _btc_execute(_gcc_act, dry_run=False)
+                        send_ok = _btc_res.get("success", False)
+                        log_to_server(
+                            f"[BTC_PERP] GCC-TM {_gcc_act} → success={send_ok} "
+                            f"action={_btc_res.get('action', 'N/A')}"
+                        )
+                    except Exception as _btc_e:
+                        log_to_server(f"[BTC_PERP][ERROR] GCC-TM {_gcc_act}: {_btc_e}")
+                        send_ok = False
+                elif symbol == "TSLA":
+                    # TSLA走期权通道
+                    try:
+                        from qqq_options import execute_signal as _qqq_execute
+                        _qqq_res = _qqq_execute(_gcc_act, dry_run=False)
+                        send_ok = _qqq_res.get("success", False)
+                        _opt_info = _qqq_res.get('option', {})
+                        log_to_server(
+                            f"[TSLA_OPT] GCC-TM {_gcc_act} → success={send_ok} "
+                            f"type={_opt_info.get('type', 'N/A')} strike={_opt_info.get('strike', 'N/A')}"
+                        )
+                    except Exception as _qqq_e:
+                        log_to_server(f"[TSLA_OPT][ERROR] GCC-TM {_gcc_act}: {_qqq_e}")
+                        send_ok = False
+                elif is_us_stock(symbol):
                     send_ok = send_signalstack_order(_gcc_act, symbol, source="gcc_tm")
                 else:
                     send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol, source="gcc_tm")

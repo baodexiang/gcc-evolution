@@ -140,6 +140,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <span id="review-phase" style="font-weight:700;color:#0969da"></span>
 <span id="review-detail" style="color:#656d76;margin-left:8px"></span>
 <span id="review-sf-badge" class="badge" style="margin-left:10px;vertical-align:middle;display:none"></span>
+<span id="review-sf-meta" style="display:block;color:#656d76;font-size:0.92em;margin-top:6px"></span>
 <a href="/key009/reject" id="reject-btn" style="float:right;color:#cf222e;font-weight:700;text-decoration:none;display:none">[REJECT]</a>
 </div>
 
@@ -371,6 +372,9 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div class="summary" id="bl-summary"></div>
 <h2>方向过滤器 (SignalFilter)</h2>
 <div class="summary" id="sf-summary"></div>
+<h2>按品种方向过滤</h2>
+<table><thead><tr><th>品种</th><th>模式</th><th>当前方向</th><th>4H BUY/SELL</th><th>本周 BUY/SELL</th><th>4H样本</th><th>本周样本</th><th>4H拦截</th><th>本周拦截</th></tr></thead>
+<tbody id="sf-symbol-body"></tbody></table>
 <h2>基准K线 + 唐安琪周期</h2>
 <table><thead><tr><th>品种</th><th>Buy基准</th><th>Sell基准</th><th>Buy距今</th><th>Sell距今</th><th>DC hl_avg</th><th>周期趋势</th><th>成熟度</th><th>周期计数</th><th>更新时间</th></tr></thead>
 <tbody id="bl-state-body"></tbody></table>
@@ -410,6 +414,25 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 
 <!-- Tab: GCC交易决策模块 (KEY-011) -->
 <div class="tab-content" id="tab-gcctm">
+
+<!-- 最终决策摘要 -->
+<h2>最终决策摘要 (每品种最新结论)</h2>
+<div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:20px">
+  <div style="flex:1;min-width:320px">
+    <h3 style="margin:0 0 8px 0;font-size:0.95em;color:#656d76">美股</h3>
+    <table>
+    <thead><tr><th>品种</th><th>最终决策</th><th>GCC</th><th>共识</th><th>时间</th></tr></thead>
+    <tbody id="summary-us-body"></tbody>
+    </table>
+  </div>
+  <div style="flex:1;min-width:320px">
+    <h3 style="margin:0 0 8px 0;font-size:0.95em;color:#656d76">加密货币</h3>
+    <table>
+    <thead><tr><th>品种</th><th>最终决策</th><th>GCC</th><th>共识</th><th>时间</th></tr></thead>
+    <tbody id="summary-crypto-body"></tbody>
+    </table>
+  </div>
+</div>
 
 <!-- 美股执行区域 -->
 <h2>🟢 美股 GCC-TM 执行</h2>
@@ -666,6 +689,7 @@ function _doRender() {
     const phaseEl = $('review-phase');
     const detailEl = $('review-detail');
     const sfBadge = $('review-sf-badge');
+    const sfMeta = $('review-sf-meta');
     const rejectBtn = $('reject-btn');
     const phaseMap = {
         'IDLE': ['IDLE', '等待下一个4h slot'],
@@ -690,6 +714,9 @@ function _doRender() {
         sfBadge.className = 'badge badge-silent';
         sfBadge.style.display = 'inline-block';
     }
+    const sfTop = DATA.signal_direction_filter || {};
+    const sfBlockedTop = ((sfTop.by_symbol || []).reduce((s, x) => s + Number(x.blocked_4h || 0), 0));
+    sfMeta.textContent = `Direction: ${sfTop.direction || 'N/A'} | 4H sample: ${sfTop.sample_4h ?? '-'} | 4H blocked: ${sfBlockedTop}`;
     bar.style.display = 'block';
     bar.style.background = rs.phase === 'WAITING' ? '#fff8c5' : rs.phase === 'FIXING' ? '#ffebe9' : '#ddf4ff';
     bar.style.borderColor = rs.phase === 'WAITING' ? '#d4a72c' : rs.phase === 'FIXING' ? '#cf222e' : '#54aeff';
@@ -1129,9 +1156,9 @@ function _doRender() {
     const gDetail = gateBox.detail || {};
     const totalGates = Object.values(gTotals).reduce((a,b)=>a+b, 0);
     const gateNames = Object.entries(gTotals).sort((a,b)=>b[1]-a[1]);
-    let gateSummaryHTML = `<div class="card"><div class="label">Gate Blocks</div><div class="value ${totalGates>0?'yellow':'green'}">${totalGates}</div></div>`;
+    let gateSummaryHTML = `<div class="card"><div class="label">当前聚合拦截</div><div class="value ${totalGates>0?'yellow':'green'}">${totalGates}</div><div class="sub">来自 gates.totals</div></div>`;
     if ((gateValidated.total_blocked||0) > 0) {
-        gateSummaryHTML += `<div class="card"><div class="label">Validated Blocks</div><div class="value blue">${gateValidated.total_blocked||0}</div><div class="sub">${gateValidated.validated||0} reviewed</div></div>`;
+        gateSummaryHTML += `<div class="card"><div class="label">历史验证拦截</div><div class="value blue">${gateValidated.total_blocked||0}</div><div class="sub">${gateValidated.validated||0} reviewed · 来自 block_validation</div></div>`;
     }
     for (const [gn, gc] of gateNames) {
         if (gc > 0) {
@@ -1139,7 +1166,7 @@ function _doRender() {
             gateSummaryHTML += `<div class="card"><div class="label">${gn}</div><div class="value yellow">${gc}</div><div class="sub">${symCount} symbols</div></div>`;
         }
     }
-    if (totalGates === 0) gateSummaryHTML += `<div class="card"><div class="label">Status</div><div class="value green">No gate blocks</div></div>`;
+    if (totalGates === 0) gateSummaryHTML += `<div class="card"><div class="label">状态</div><div class="value green">当前无聚合拦截</div><div class="sub">${(gateValidated.total_blocked||0) > 0 ? '但历史验证里仍有拦截记录' : '当前窗口无拦截'}</div></div>`;
     $('gate-summary').innerHTML = gateSummaryHTML;
 
     const maxGate = Math.max(...Object.values(gTotals), 1);
@@ -1147,8 +1174,8 @@ function _doRender() {
         `<div style="margin:4px 0;font-size:0.85em">${gn}: ${barHTML(gc,maxGate,'yellow',250)} <strong>${gc}</strong> (${(gc/totalGates*100).toFixed(0)}%)</div>`
     ).join('') || (
         (gateValidated.total_blocked||0) > 0
-            ? `<div style="color:#9a6700;padding:10px">Gate aggregate is 0, but block validation has ${gateValidated.total_blocked||0} historical blocked records</div>`
-            : '<div style="color:#1a7f37;padding:10px">No gate blocks</div>'
+            ? `<div style="color:#9a6700;padding:10px">当前 gates 聚合为 0，但 block_validation 中仍有 ${gateValidated.total_blocked||0} 条历史验证拦截。详见“拦截验证”页。</div>`
+            : '<div style="color:#1a7f37;padding:10px">当前窗口无聚合拦截</div>'
     );
 
     let gHTML = '';
@@ -1160,8 +1187,8 @@ function _doRender() {
     }
     $('gate-body').innerHTML = gHTML || (
         (gateValidated.total_blocked||0) > 0
-            ? `<tr><td colspan="4" style="color:#9a6700">Gate aggregate detail is empty; validated blocked records = ${gateValidated.total_blocked||0}. See Block Validation tab.</td></tr>`
-            : '<tr><td colspan="4" style="color:#1a7f37">No gate blocks</td></tr>'
+            ? `<tr><td colspan="4" style="color:#9a6700">当前 gates 明细为空；但历史验证拦截 = ${gateValidated.total_blocked||0}。请查看“拦截验证”页获取原因与来源。</td></tr>`
+            : '<tr><td colspan="4" style="color:#1a7f37">当前窗口无聚合拦截</td></tr>'
     );
 
     const allGateSyms = new Set();
@@ -1190,8 +1217,8 @@ function _doRender() {
         $('gate-heatmap').innerHTML = hmHTML;
     } else {
         $('gate-heatmap').innerHTML = (gateValidated.total_blocked||0) > 0
-            ? `<div style="color:#9a6700;padding:10px">Gate heatmap detail is empty; validated blocked records = ${gateValidated.total_blocked||0}</div>`
-            : '<div style="color:#656d76;padding:10px">?????</div>';
+            ? `<div style="color:#9a6700;padding:10px">当前 heatmap 无聚合明细；但历史验证拦截 = ${gateValidated.total_blocked||0}。</div>`
+            : '<div style="color:#656d76;padding:10px">当前窗口无拦截热力数据</div>';
     }
     let mhtml = '';
     if (m.vf_acc_avg !== undefined) mhtml += `<div class="metric"><div class="k">VF Accuracy</div><div class="v">${(m.vf_acc_avg*100).toFixed(1)}%</div></div>`;
@@ -1480,12 +1507,36 @@ function _doRender() {
     const sfSellW = sf.sell_ratio_week != null ? (sf.sell_ratio_week * 100).toFixed(1) + '%' : '-';
     const sfSample4h = sf.sample_4h != null ? sf.sample_4h : '-';
     const sfSampleW = sf.sample_week != null ? sf.sample_week : '-';
+    const sfBySymbol = (sf.by_symbol || []).slice().sort((a,b) => {
+        const aScore = Number(b?.sample_4h || 0) + Number(b?.blocked_4h || 0);
+        const bScore = Number(a?.sample_4h || 0) + Number(a?.blocked_4h || 0);
+        return aScore - bScore;
+    });
     $('sf-summary').innerHTML = `
         <div class="card"><div class="label">模式</div><div class="value" style="color:${sfModeColor}">${sfFilterMode}</div><div class="sub">ENFORCE=真拦截</div></div>
         <div class="card"><div class="label">当前方向</div><div class="value" style="color:${sfDirColor}">${sfDir}</div><div class="sub">${sf.reason || ''}</div></div>
         <div class="card"><div class="label">4H Buy/Sell</div><div class="value blue">${sfBuy4h} / ${sfSell4h}</div><div class="sub">样本 ${sfSample4h}</div></div>
         <div class="card"><div class="label">本周 Buy/Sell</div><div class="value blue">${sfBuyW} / ${sfSellW}</div><div class="sub">样本 ${sfSampleW}</div></div>
     `;
+    $('sf-symbol-body').innerHTML = sfBySymbol.map(row => {
+        const dir = row.direction || 'NO_ANSWER';
+        const dirColor = dir === 'BUY_DOMINANT' ? '#1a7f37' : dir === 'SELL_DOMINANT' ? '#cf222e' : dir === 'NEUTRAL' ? '#0969da' : '#656d76';
+        const buy4 = ((Number(row.buy_ratio_4h || 0) * 100).toFixed(1)) + '%';
+        const sell4 = ((Number(row.sell_ratio_4h || 0) * 100).toFixed(1)) + '%';
+        const buyW = ((Number(row.buy_ratio_week || 0) * 100).toFixed(1)) + '%';
+        const sellW = ((Number(row.sell_ratio_week || 0) * 100).toFixed(1)) + '%';
+        return `<tr>
+            <td><strong>${row.symbol}</strong></td>
+            <td>${row.mode || sfFilterMode}</td>
+            <td style="color:${dirColor};font-weight:700">${dir}</td>
+            <td>${buy4} / ${sell4}</td>
+            <td>${buyW} / ${sellW}</td>
+            <td>${row.sample_4h ?? 0}</td>
+            <td>${row.sample_week ?? 0}</td>
+            <td>${row.blocked_4h ?? 0}</td>
+            <td>${row.blocked_week ?? 0}</td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="9" style="color:#656d76">暂无按品种 SignalFilter 数据</td></tr>';
 
     const bl = DATA.baseline || {};
     const blStats = bl.stats || {};
@@ -2102,7 +2153,9 @@ function loadGccTm() {
         const usDec = decisions.filter(x => US_EXECUTE.has(x.symbol));
         const cryptoDec = decisions.filter(x => CRYPTO_SYMS.has(x.symbol));
         const cryptoExecDec = cryptoDec.filter(x => String(x.phase || '').toLowerCase() === 'execute');
-        const cryptoObsDec = cryptoDec.filter(x => String(x.phase || '').toLowerCase() !== 'execute');
+        const cryptoExecKeys = new Set(cryptoExecDec.map(d => `${d.symbol}|${d.ts}`));
+        const cryptoObsDec = cryptoDec.filter(x => String(x.phase || '').toLowerCase() !== 'execute')
+            .filter(d => !cryptoExecKeys.has(`${d.symbol}|${d.ts}`));
         const otherDec = decisions.filter(x => !US_EXECUTE.has(x.symbol) && !CRYPTO_SYMS.has(x.symbol));
 
         const summarizeSymbols = (poolSet, decs) => {
@@ -2141,6 +2194,60 @@ function loadGccTm() {
             cryptoBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">No crypto observe data</td></tr>';
         } else {
             cryptoBody.innerHTML = cryptoObsDec.map(renderDecisionRow).join('');
+        }
+
+        // ── 最终决策摘要 ──────────────────────────────────
+        const buildSummary = (decs, poolSet) => {
+            // 每品种取最新一条有gcc_action的决策作为最终结论
+            const latest = {};
+            decs.forEach(d => {
+                const sym = d.symbol;
+                if (!sym) return;
+                const action = d.gcc_action || d.final_action || '';
+                if (!action || action === '-') return;
+                const ts = d.ts || '';
+                if (!latest[sym] || ts > latest[sym].ts) {
+                    latest[sym] = {
+                        symbol: sym,
+                        action: action,
+                        gcc: d.gcc_action || d.final_action || '-',
+                        consensus: d.consensus != null ? `${d.consensus}/3` : '-',
+                        ts: ts
+                    };
+                }
+            });
+            // 补上池中没出现信号的品种为HOLD
+            [...poolSet].forEach(sym => {
+                if (!latest[sym]) {
+                    latest[sym] = { symbol: sym, action: 'HOLD', gcc: '-', consensus: '-', ts: '-' };
+                }
+            });
+            return Object.values(latest).sort((a, b) => a.symbol.localeCompare(b.symbol));
+        };
+        const renderSummaryRow = (item) => {
+            const a = item.action;
+            const color = a === 'BUY' ? '#3fb950' : a === 'SELL' ? '#f85149' : '#656d76';
+            const bg = a === 'BUY' ? '#f0fff4' : a === 'SELL' ? '#fff5f5' : 'transparent';
+            const ts = formatGccTmTimestamp(item.ts || '');
+            return `<tr style="background:${bg}">
+                <td style="font-weight:600">${item.symbol}</td>
+                <td style="color:${color};font-weight:700;font-size:1.1em">${a}</td>
+                <td>${item.gcc}</td>
+                <td>${item.consensus}</td>
+                <td style="font-size:0.85em;color:#656d76">${ts}</td>
+            </tr>`;
+        };
+        const usSummaryBody = $('summary-us-body');
+        const cryptoSummaryBody = $('summary-crypto-body');
+        if (usSummaryBody) {
+            const usSummary = buildSummary(usDec, US_EXECUTE);
+            usSummaryBody.innerHTML = usSummary.length ? usSummary.map(renderSummaryRow).join('') :
+                '<tr><td colspan="5" style="color:#656d76;text-align:center">暂无数据</td></tr>';
+        }
+        if (cryptoSummaryBody) {
+            const cryptoSummary = buildSummary(cryptoDec, CRYPTO_SYMS);
+            cryptoSummaryBody.innerHTML = cryptoSummary.length ? cryptoSummary.map(renderSummaryRow).join('') :
+                '<tr><td colspan="5" style="color:#656d76;text-align:center">暂无数据</td></tr>';
         }
 
         // Summary

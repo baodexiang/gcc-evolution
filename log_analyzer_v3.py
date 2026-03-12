@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-Log Analyzer v3.14 - 增强版日志分析器
+Log Analyzer v3.15 - 增强版日志分析器
 ======================================
+
+v3.15 更新 (2026-03-10):
+- KEY-011 GCC-TM: 树搜索决策+三视角观察+回填+pending检测 (6个子模式)
+- 检测组从39组扩展到40组 (+6 GCC-TM子类)
+- 日报新增Section 2a-23: PUCT决策统计+共识度+品种执行率
 
 v3.14 更新 (2026-03-01):
 - GCC-0174 S5d-S5e: CardBridge Phase门控检测 (card_phase_gate/card_acc_backfill)
@@ -2526,6 +2531,25 @@ class DataQualityChecker:
         "card_knn_evolve": re.compile(
             r'\[GCC-0174\]\[KNN\]\s+每日知识卡进化完成:\s+(\d+)卡\s+promote=(\d+)\s+demote=(\d+)\s+archive=(\d+)'
         ),
+        # === 40. KEY-011: GCC交易决策模块 (树搜索+三视角验证+KNN经验) ===
+        "gcctm_decision": re.compile(
+            r'\[GCC-TRADE\]\s+(\S+)\s+action=(\w+)\s+verdict=(\w+)\s+consensus=(\d)/3'
+        ),
+        "gcctm_observe": re.compile(
+            r'\[GCC-TM\]\s+(\S+)\s+gcc=(\w+)\s+main=(\w+)\s+verdict=(\w+)'
+        ),
+        "gcctm_backfill": re.compile(
+            r'\[GCC-TRADE\]\s+backfill\s+(\S+):\s+(\d+)\s+outcomes filled'
+        ),
+        "gcctm_init": re.compile(
+            r'\[GCC-TM\]\s+init\s+(\S+):\s+loaded\s+(\d+)\s+algebra history records'
+        ),
+        "gcctm_pending": re.compile(
+            r'\[GCC-TRADE\]\s+pending_order written:\s+(\w+)\s+(\S+)'
+        ),
+        "gcctm_error": re.compile(
+            r'\[GCC-TM\]\s+gcc_observe\s+(\S+):\s+(.*)'
+        ),
     }
 
     # v3.5: 提取品种的辅助正则 (含yfinance符号格式)
@@ -2759,6 +2783,22 @@ class DataQualityChecker:
             "card_acc_backfill_total": 0,
             "card_knn_evolve_count": 0,
             "card_knn_evolve_snapshot": "",
+            # 40. KEY-011: GCC交易决策模块 (树搜索+三视角验证)
+            "gcctm_decision": 0,
+            "gcctm_by_action": defaultdict(int),          # {BUY: n, SELL: n, HOLD: n}
+            "gcctm_by_verdict": defaultdict(int),         # {EXECUTE: n, SKIP: n}
+            "gcctm_by_consensus": defaultdict(int),       # {0: n, 1: n, 2: n, 3: n}
+            "gcctm_by_symbol": defaultdict(lambda: {"total": 0, "execute": 0}),
+            "gcctm_observe": 0,
+            "gcctm_agree": 0,                             # gcc与main一致次数
+            "gcctm_disagree": 0,
+            "gcctm_backfill": 0,
+            "gcctm_backfill_total": 0,                    # 回填outcome总条数
+            "gcctm_init_count": 0,
+            "gcctm_algebra_loaded": 0,                    # 加载的algebra历史总数
+            "gcctm_pending": 0,                           # Phase2 pending_order写入
+            "gcctm_error": 0,
+            "gcctm_error_by_symbol": defaultdict(int),
             # 汇总
             "by_symbol": defaultdict(lambda: defaultdict(int)),
             "total_issues": 0,
@@ -3501,6 +3541,61 @@ class DataQualityChecker:
                     results["card_knn_evolve_count"] += 1
                     results["card_knn_evolve_snapshot"] = f"total={_cke_hit.group(1)} promote={_cke_hit.group(2)} demote={_cke_hit.group(3)} archive={_cke_hit.group(4)}"
 
+            # --- 40. KEY-011: GCC交易决策模块 ---
+            _gtd = self.PATTERNS.get("gcctm_decision")
+            if _gtd:
+                _gtd_hit = _gtd.search(line)
+                if _gtd_hit:
+                    results["gcctm_decision"] += 1
+                    _sym = _gtd_hit.group(1)
+                    _act = _gtd_hit.group(2)   # BUY/SELL/HOLD
+                    _vrd = _gtd_hit.group(3)   # EXECUTE/SKIP
+                    _con = _gtd_hit.group(4)   # 0-3
+                    results["gcctm_by_action"][_act] += 1
+                    results["gcctm_by_verdict"][_vrd] += 1
+                    results["gcctm_by_consensus"][_con] += 1
+                    results["gcctm_by_symbol"][_sym]["total"] += 1
+                    if _vrd == "EXECUTE":
+                        results["gcctm_by_symbol"][_sym]["execute"] += 1
+
+            _gto = self.PATTERNS.get("gcctm_observe")
+            if _gto:
+                _gto_hit = _gto.search(line)
+                if _gto_hit:
+                    results["gcctm_observe"] += 1
+                    _gcc_dir = _gto_hit.group(2)
+                    _main_dir = _gto_hit.group(3)
+                    if _gcc_dir == _main_dir:
+                        results["gcctm_agree"] += 1
+                    else:
+                        results["gcctm_disagree"] += 1
+
+            _gtb = self.PATTERNS.get("gcctm_backfill")
+            if _gtb:
+                _gtb_hit = _gtb.search(line)
+                if _gtb_hit:
+                    results["gcctm_backfill"] += 1
+                    results["gcctm_backfill_total"] += int(_gtb_hit.group(2))
+
+            _gti = self.PATTERNS.get("gcctm_init")
+            if _gti:
+                _gti_hit = _gti.search(line)
+                if _gti_hit:
+                    results["gcctm_init_count"] += 1
+                    results["gcctm_algebra_loaded"] += int(_gti_hit.group(2))
+
+            _gtp = self.PATTERNS.get("gcctm_pending")
+            if _gtp:
+                if _gtp.search(line):
+                    results["gcctm_pending"] += 1
+
+            _gte = self.PATTERNS.get("gcctm_error")
+            if _gte:
+                _gte_hit = _gte.search(line)
+                if _gte_hit:
+                    results["gcctm_error"] += 1
+                    results["gcctm_error_by_symbol"][_gte_hit.group(1)] += 1
+
         # 汇总
         results["total_issues"] = (
             results["kline_insufficient"] + results["no_history_data"] +
@@ -3592,6 +3687,19 @@ class DataQualityChecker:
         detector.stats["gcc0174_card_phase_gate"] = results["card_phase_gate_count"]
         detector.stats["gcc0174_card_knn_evolve"] = results["card_knn_evolve_count"]
         detector.stats["gcc0174_card_acc_backfill"] = results["card_acc_backfill_total"]
+        # KEY-011: GCC-TM
+        detector.stats["key011_gcctm_decision"] = results["gcctm_decision"]
+        detector.stats["key011_gcctm_observe"] = results["gcctm_observe"]
+        detector.stats["key011_gcctm_agree"] = results["gcctm_agree"]
+        detector.stats["key011_gcctm_disagree"] = results["gcctm_disagree"]
+        detector.stats["key011_gcctm_backfill"] = results["gcctm_backfill_total"]
+        detector.stats["key011_gcctm_pending"] = results["gcctm_pending"]
+        detector.stats["key011_gcctm_error"] = results["gcctm_error"]
+        results["gcctm_by_action"] = dict(results["gcctm_by_action"])
+        results["gcctm_by_verdict"] = dict(results["gcctm_by_verdict"])
+        results["gcctm_by_consensus"] = dict(results["gcctm_by_consensus"])
+        results["gcctm_by_symbol"] = {k: dict(v) for k, v in results["gcctm_by_symbol"].items()}
+        results["gcctm_error_by_symbol"] = dict(results["gcctm_error_by_symbol"])
 
         return results
 
@@ -6175,6 +6283,72 @@ class ReportGenerator:
 
                 if _cb_cards:
                     lines.append(f"- 激活卡片: {', '.join(sorted(_cb_cards))}")
+                    lines.append("")
+
+        # === 2a-23. KEY-011 GCC交易决策模块 (GCC-TM) ===
+        if dq_result:
+            _tm_dec = dq_result.get("gcctm_decision", 0)
+            _tm_obs = dq_result.get("gcctm_observe", 0)
+            _tm_agree = dq_result.get("gcctm_agree", 0)
+            _tm_disagree = dq_result.get("gcctm_disagree", 0)
+            _tm_backfill = dq_result.get("gcctm_backfill_total", 0)
+            _tm_pending = dq_result.get("gcctm_pending", 0)
+            _tm_error = dq_result.get("gcctm_error", 0)
+            _tm_by_action = dq_result.get("gcctm_by_action", {})
+            _tm_by_verdict = dq_result.get("gcctm_by_verdict", {})
+            _tm_by_consensus = dq_result.get("gcctm_by_consensus", {})
+            _tm_by_symbol = dq_result.get("gcctm_by_symbol", {})
+            _tm_err_sym = dq_result.get("gcctm_error_by_symbol", {})
+
+            if _tm_dec > 0 or _tm_obs > 0:
+                _exec_n = _tm_by_verdict.get("EXECUTE", 0)
+                _skip_n = _tm_by_verdict.get("SKIP", 0)
+                _exec_rate = f"{_exec_n/_tm_dec:.0%}" if _tm_dec > 0 else "---"
+                _agree_rate = f"{_tm_agree/_tm_obs:.0%}" if _tm_obs > 0 else "---"
+                lines.extend([
+                    "---",
+                    "",
+                    "## KEY-011 GCC交易决策模块 (PUCT树搜索)",
+                    "",
+                    f"- 决策: {_tm_dec}次 (EXECUTE={_exec_n} SKIP={_skip_n}, 执行率{_exec_rate})",
+                    f"- 观察: {_tm_obs}次 (一致{_tm_agree} 分歧{_tm_disagree}, 一致率{_agree_rate})",
+                ])
+                if _tm_backfill > 0:
+                    lines.append(f"- 回填: +{_tm_backfill}条outcome")
+                if _tm_pending > 0:
+                    lines.append(f"- Pending写入: {_tm_pending}笔")
+                if _tm_error > 0:
+                    lines.append(f"- ⚠️ 异常: {_tm_error}次")
+                lines.append("")
+
+                # 按action分布
+                if _tm_by_action:
+                    _acts = " / ".join(f"{k}={v}" for k, v in sorted(_tm_by_action.items()))
+                    lines.append(f"- Action分布: {_acts}")
+
+                # 共识度分布
+                if _tm_by_consensus:
+                    _cons = " / ".join(f"{k}/3={v}" for k, v in sorted(_tm_by_consensus.items()))
+                    lines.append(f"- 共识度: {_cons}")
+                lines.append("")
+
+                # 品种表
+                if _tm_by_symbol:
+                    lines.append("| 品种 | 决策数 | EXECUTE | 执行率 |")
+                    lines.append("|------|--------|---------|--------|")
+                    for _s in sorted(_tm_by_symbol.keys()):
+                        _sd = _tm_by_symbol[_s]
+                        _st = _sd.get("total", 0)
+                        _se = _sd.get("execute", 0)
+                        _sr = f"{_se/_st:.0%}" if _st > 0 else "---"
+                        lines.append(f"| {_s} | {_st} | {_se} | {_sr} |")
+                    lines.append("")
+
+                # 异常品种
+                if _tm_err_sym:
+                    lines.append("- 异常品种: " + ", ".join(
+                        f"{s}({n})" for s, n in sorted(_tm_err_sym.items(), key=lambda x: -x[1])
+                    ))
                     lines.append("")
 
         # === 2b. 4方校准准确率 (v3.640) ===

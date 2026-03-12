@@ -13,7 +13,7 @@ TSLA期权直接买入模块 (GCC-0256 S5)
   4. 信号反转: Vision方向反转 → 先平旧仓(下轮再开)
 
 资金控制:
-  - 严格 ≤ $1000/笔，向下取整
+  - 严格 ≤ $3000/笔，向下取整
   - 同时最多1个持仓 (避免资金分散)
   - 持仓状态持久化到 state/tsla_options_position.json
 
@@ -35,7 +35,7 @@ logger = logging.getLogger("tsla_options")
 _position_lock = threading.Lock()
 
 # ── 配置 ─────────────────────────────────────────────────────────────────
-BUDGET = 2000           # 每次交易预算 (USD)，严格不超
+BUDGET = 3000           # 每次交易预算 (USD)，严格不超
 MIN_DTE = 7             # 最短到期天数
 MAX_DTE = 14            # 最长到期天数
 TARGET_DELTA = 0.50     # 目标delta (ATM)
@@ -377,11 +377,20 @@ def place_option(option: dict, dry_run: bool = True) -> dict:
             from schwab_data_provider import get_provider as _gp
             bal = _gp().get_account_balance()
             option_bp = bal.get("option_buying_power", 0)
-            if option_bp < BUDGET:
-                msg = f"账户期权购买力${option_bp:.0f} < 预算${BUDGET}，跳过下单"
-                logger.warning(f"[TSLA_OPT] {msg}")
-                return {"success": False, "error": msg}
-            logger.info(f"[TSLA_OPT] 资金检查通过: option_buying_power=${option_bp:.0f}")
+            if option_bp < option["total_cost"]:
+                # 资金不够买当前合约数，降级到实际能买的最大量
+                affordable = int(option_bp / (option["cost_per_contract"] * 100))
+                if affordable < 1:
+                    msg = f"账户期权购买力${option_bp:.0f}不足以买1张(需${option['cost_per_contract'] * 100:.0f})，跳过"
+                    logger.warning(f"[TSLA_OPT] {msg}")
+                    return {"success": False, "error": msg}
+                logger.warning(
+                    f"[TSLA_OPT] 资金不足: 购买力${option_bp:.0f} < 计划${option['total_cost']:.0f}，"
+                    f"降级 {option['contracts']}→{affordable}张"
+                )
+                option["contracts"] = affordable
+                option["total_cost"] = round(option["cost_per_contract"] * 100 * affordable, 2)
+            logger.info(f"[TSLA_OPT] 资金检查通过: option_buying_power=${option_bp:.0f}, 下单${option['total_cost']:.0f}")
         except Exception as _bal_e:
             logger.error(f"[TSLA_OPT] 资金检查异常: {_bal_e}")
             return {"success": False, "error": f"资金检查失败: {_bal_e}"}

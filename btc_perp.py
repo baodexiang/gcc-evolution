@@ -35,7 +35,7 @@ logger = logging.getLogger("btc_perp")
 _position_lock = threading.Lock()
 
 # ── 配置 ─────────────────────────────────────────────────────────────────
-BUDGET = 1000           # 保证金 (USDC)
+BUDGET = 3000           # 保证金 (USDC)
 LEVERAGE = 5            # 杠杆倍数 (Coinbase max 10x, 用户限制5x)
 PRODUCT_ID = "BTC-PERP-INTX"
 MARGIN_TYPE = "CROSS"
@@ -237,13 +237,22 @@ def open_position(direction: str, dry_run: bool = True) -> dict:
         return {"success": True, "dry_run": True, "direction": direction,
                 "price": price, "size": base_size, "notional": notional}
 
-    # 资金检查
+    # 资金检查: 不够BUDGET时降级到实际可用金额
     balance = get_perp_balance()
+    actual_margin = BUDGET
     if balance < BUDGET:
-        msg = f"可用保证金${balance:.0f} < 需要${BUDGET}，跳过"
-        logger.warning(f"[BTC_PERP] {msg}")
-        return {"success": False, "error": msg}
-    logger.info(f"[BTC_PERP] 资金检查通过: 可用${balance:.0f}")
+        if balance < 100:
+            msg = f"可用保证金${balance:.0f}不足最低$100，跳过"
+            logger.warning(f"[BTC_PERP] {msg}")
+            return {"success": False, "error": msg}
+        actual_margin = balance
+        logger.warning(
+            f"[BTC_PERP] 资金不足: 可用${balance:.0f} < 预算${BUDGET}，"
+            f"降级到${actual_margin:.0f}"
+        )
+        notional = actual_margin * LEVERAGE
+        base_size = round(notional / price, 8)
+    logger.info(f"[BTC_PERP] 资金检查通过: 可用${balance:.0f}, 使用${actual_margin:.0f}")
 
     try:
         from coinbase_sync_v6 import api_request
