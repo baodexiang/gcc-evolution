@@ -33,6 +33,7 @@ from .features import (
     extract_feiyun_features,
     extract_chandelier_features,
     extract_l2_macd_features,
+    extract_gcctm_features,
     _append_extended_features,
     _calc_dc_position,
     _calc_vol_ratio,
@@ -91,7 +92,7 @@ __all__ = [
     "extract_supertrend_features", "extract_supertrend_av2_features",
     "extract_chanbs_features", "extract_double_pattern_features",
     "extract_rob_hoffman_features", "extract_feiyun_features",
-    "extract_chandelier_features", "extract_l2_macd_features",
+    "extract_chandelier_features", "extract_l2_macd_features", "extract_gcctm_features",
     # L2
     "PluginKNNDB", "knn_match",
     # L3

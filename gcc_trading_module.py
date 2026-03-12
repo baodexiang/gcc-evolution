@@ -2412,8 +2412,26 @@ def gcc_observe(
             except Exception:
                 pass
 
-        # v3.670: KNN经验统一由 gcc-evo L4 管理（plugin_knn_history.npz）
-        # gcc-tm 不再独立写入/回填 gcc_knn_experience.jsonl
+        # GCC-0254: 接入统一KNN — gcc-evo L4 管理（plugin_knn_history.npz）
+        # plugin_name="gcctm"，回填由 backfill_returns() 自动处理
+        if gcc_action in ("BUY", "SELL"):
+            try:
+                from modules.knn.features import extract_gcctm_features, infer_regime_from_bars
+                from modules.knn.orchestrator import plugin_knn_record_and_query
+                _gcctm_feat = extract_gcctm_features(dec_record, bars)
+                _gcctm_regime = infer_regime_from_bars(bars)
+                _gcctm_knn_res = plugin_knn_record_and_query(
+                    "gcctm", symbol, _gcctm_feat, gcc_action,
+                    close_price=current_price, regime=_gcctm_regime, bars=bars,
+                )
+                if _gcctm_knn_res:
+                    logger.info(
+                        "[GCC-TM][KNN] %s %s win_rate=%.0f%% avg_ret=%.2f%% bias=%s",
+                        symbol, gcc_action, _gcctm_knn_res.win_rate * 100,
+                        _gcctm_knn_res.avg_return * 100, _gcctm_knn_res.bias,
+                    )
+            except Exception as _knn_err:
+                logger.debug("[GCC-TM][KNN] %s record failed: %s", symbol, _knn_err)
 
         logger.info(
             "[GCC-TM] %s action=%s verdict=%s signals=%d(B%d/S%d) src=%s",

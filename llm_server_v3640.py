@@ -71,10 +71,12 @@ try:
         gcc_observe as _gcc_observe,
         gcc_push_signal as _gcc_push,
         gcc_consume_pending_order as _gcc_consume,
+        _GCC_TM_EXECUTE_SYMBOLS,
     )
     _HAS_GCC_TM = True
 except ImportError:
     _HAS_GCC_TM = False
+    _GCC_TM_EXECUTE_SYMBOLS = frozenset()
     def _gcc_observe(*a, **kw): pass
     def _gcc_push(*a, **kw): pass
     def _gcc_consume(*a, **kw): return None
@@ -25571,7 +25573,7 @@ def _dispatch_crypto_anchor_signal(symbol: str, direction: str, trigger_price: f
 
     for i in range(units_target):
         result = send_3commas_signal(direction, trigger_price, symbol,
-                                     signal_type="人类锚定", bypass_cooldown=True)
+                                     signal_type="人类锚定", bypass_cooldown=True, source="gcc_tm")
         if result is True:
             units_sent += 1
             log_to_server(f"[GCC-0244][DISPATCH] {symbol} {direction} unit {i+1}/{units_target} ✓")
@@ -25716,12 +25718,21 @@ def _check_human_anchor_gate(symbol: str, final_action: str, signal_type: str) -
 # =========================================================
 # 3Commas Webhook 下单（加密货币）
 # =========================================================
-def send_3commas_signal(final_action: str, last_close: float, symbol: str, signal_type: str = "", bypass_cooldown: bool = False):
+def send_3commas_signal(final_action: str, last_close: float, symbol: str, signal_type: str = "", bypass_cooldown: bool = False, source: str = "main"):
     """v21.18: 补request_id+60s冷却+连续失败熔断; GCC-0194: 去掉重复过滤(已在扫描引擎统一处理)
-    返回: True=成功, False=API发送失败, None=被门控/过滤拦截"""
+    返回: True=成功, False=API发送失败, None=被门控/过滤拦截
+    v3.680 GCC-0254: source参数 — 加密货币只允许 source='gcc_tm' 实盘下单，主路径观察"""
     if final_action not in ["BUY", "SELL"]:
         log_to_server(f"[3Commas] final_action={final_action} 非 BUY/SELL，跳过。")
         return False
+
+    # GCC-0254: GCC-TM 独占模式 — 白名单品种(加密+5美股)主路径信号转为观察记录
+    if _HAS_GCC_TM and symbol in _GCC_TM_EXECUTE_SYMBOLS and source != "gcc_tm":
+        log_to_server(
+            f"[GCC_TM_OBSERVE] {symbol} {final_action} price={last_close:.2f} "
+            f"source={source} type={signal_type} → GCC-TM接管，主路径观察"
+        )
+        return None  # 门控拦截，不实际下单
 
     # GCC-0194: 所有信号(含移动止损/止盈)均在扫描引擎FilterChain Vision门控统一过滤，主程序不再重复
 
@@ -39774,11 +39785,20 @@ INITIAL_US_STOCK_POSITIONS = {
 # =========================================================
 # SignalStack 下单函数（美股专用）
 # =========================================================
-def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""):
+def send_signalstack_order(final_action: str, symbol: str, signal_type: str = "", source: str = "main"):
     """v3.411: 幂等性 + 重试 + 60秒信号冷却; v3.641: 连续失败熔断; v3.663: KEY-003价值限买; GCC-0194: 去掉重复过滤
-    返回: True=成功, False=API发送失败, None=被门控/过滤拦截"""
+    返回: True=成功, False=API发送失败, None=被门控/过滤拦截
+    v3.680 GCC-0254: source参数 — GCC-TM白名单美股只允许 source='gcc_tm' 实盘下单"""
     if final_action not in ["BUY", "SELL"]:
         return False
+
+    # GCC-0254: GCC-TM 独占模式 — 白名单美股主路径信号转为观察记录
+    if _HAS_GCC_TM and symbol in _GCC_TM_EXECUTE_SYMBOLS and source != "gcc_tm":
+        log_to_server(
+            f"[GCC_TM_OBSERVE] {symbol} {final_action} "
+            f"source={source} type={signal_type} → GCC-TM接管，主路径观察"
+        )
+        return None  # 门控拦截，不实际下单
 
     # GCC-0194: 所有信号(含移动止损/止盈)均在扫描引擎FilterChain Vision门控统一过滤，主程序不再重复
 
@@ -42724,7 +42744,10 @@ def llm_decide():
                 f"source={_gcc_order.get('source','')}"
             )
             if _gcc_act in ("BUY", "SELL"):
-                send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol)
+                if is_us_stock(symbol):
+                    send_ok = send_signalstack_order(_gcc_act, symbol, source="gcc_tm")
+                else:
+                    send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol, source="gcc_tm")
                 if send_ok:
                     log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单成功")
                     try:
@@ -50070,9 +50093,9 @@ L2门卫交易触发
             else:
                 print(f"[v3.460] 🚫 {symbol} 门卫拒绝: {gate_reason}")
 
-        # GCC-TM: 扫描引擎信号推送 — 美股+加密货币
-        # 美股: observe_only=True（不接管下单）; 加密: 尊重品种配置的phase
-        if _HAS_GCC_TM and (is_crypto_symbol(symbol) or (is_us_stock(symbol) and symbol in {"TSLA", "CRWV", "NBIS", "ONDS", "OPEN"})) and ohlcv_bars:
+        # GCC-TM: 扫描引擎信号推送 — 全部美股+加密货币
+        # GCC-0254: 白名单品种 observe_only=False(实盘); 其余美股 observe_only=True(观察)
+        if _HAS_GCC_TM and (is_crypto_symbol(symbol) or is_us_stock(symbol)) and ohlcv_bars:
             try:
                 if macd_triggered and macd_action in ("BUY", "SELL"):
                     _macd_strength_shadow = float(
@@ -50094,7 +50117,7 @@ L2门卫交易触发
                     else "HOLD"
                 )
                 _gcc_observe(symbol, ohlcv_bars, _gcc_main_action,
-                             observe_only=not is_crypto_symbol(symbol))
+                             observe_only=symbol not in _GCC_TM_EXECUTE_SYMBOLS)
                 log_to_server(
                     f"[GCC-TM][SHADOW] {symbol} main={_gcc_main_action} "
                     f"macd={macd_action or '-'} gate={trade_action or '-'} "

@@ -268,3 +268,19 @@ def extract_l2_macd_features(div_result, bars: list, position_pct: float = 50.0)
     pos_norm = float(position_pct) / 100.0
     indicator = np.array([div_encoded, strength, kline_count, pos_norm])
     return _append_extended_features(indicator, bars)
+
+
+def extract_gcctm_features(result: dict, bars: list) -> np.ndarray:
+    """GCC-TM: tree_score + consensus + topology/geometry/algebra + signal_pool → 8维 + 61维
+    GCC-0254: 接入统一KNN，让gcc-evo循环能看到GCC-TM决策数据"""
+    tree_score = min(float(result.get("tree_score", 0)), 1.0)
+    consensus = min(float(result.get("consensus", 0)), 3.0) / 3.0  # 0~3 → 0~1
+    topo = 1.0 if result.get("topology") == "PASS" else 0.0
+    geom = 1.0 if result.get("geometry") == "PASS" else 0.0
+    algb = 1.0 if result.get("algebra") == "PASS" else 0.0
+    buy_sig = min(float(result.get("buy_signals", 0)), 10) / 10.0
+    sell_sig = min(float(result.get("sell_signals", 0)), 10) / 10.0
+    sig_count = min(float(result.get("signals_count", 0)), 20) / 20.0
+    indicator = np.array([tree_score, consensus, topo, geom, algb,
+                          buy_sig, sell_sig, sig_count])
+    return _append_extended_features(indicator, bars)
