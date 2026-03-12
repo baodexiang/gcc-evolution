@@ -9716,6 +9716,17 @@ class PriceScanEngine:
         main_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
         logger.info(f"[ChanBS][OBSERVE] {symbol} {action} 信号已记录(观察模式，不发送执行)")
         logger.info(f"  └─ 降级原因: 缠论准确率25.5%，暂停实际交易，仅观察")
+
+        # GCC-0254: 缠论信号推入GCC-TM信号池 — 主路径不执行，但让树搜索评估
+        try:
+            from gcc_trading_module import gcc_push_signal
+            _chanbs_conf = float(result.strength) if result.strength else 0.5
+            gcc_push_signal(symbol, "ChanBS", action, _chanbs_conf)
+            logger.info(f"[ChanBS→GCC-TM] {symbol} {action} conf={_chanbs_conf:.2f} 已推入信号池")
+        except ImportError:
+            pass
+        except Exception as _gcc_err:
+            logger.debug("[ChanBS→GCC-TM] push failed: %s", _gcc_err)
         signal_data["server_executed"] = False
         signal_data["server_reason"] = "ChanBS观察模式(准确率不足)"
         server_response = {"executed": False, "reason": "ChanBS观察模式"}
