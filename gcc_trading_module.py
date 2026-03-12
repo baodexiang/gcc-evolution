@@ -62,17 +62,25 @@ def _log_decision(record: dict) -> None:
 # bias: "BUY" | "SELL" | "HOLD"  confidence: 0.0~1.0
 # ══════════════════════════════════════════════════════════════
 def _read_vision(symbol: str) -> Tuple[str, float]:
-    """从 vision_cache 读取最新 Vision 判断。"""
-    snap_file = _VISION_SNAP_DIR / symbol / "latest.json"
-    if not snap_file.exists():
+    """从 state/vision/latest.json 读取最新 Vision 判断。
+    v3.670: 修正路径(原snap_file不存在) + 字段映射(direction→bias)。
+    direction UP→BUY, DOWN→SELL, SIDE→HOLD
+    """
+    vision_file = _STATE_DIR / "vision" / "latest.json"
+    if not vision_file.exists():
         return "HOLD", 0.5
     try:
-        d = json.loads(snap_file.read_text(encoding="utf-8"))
-        bias = (d.get("bias") or "HOLD").upper()
-        if bias not in ("BUY", "SELL", "HOLD"):
-            bias = "HOLD"
-        conf = float(d.get("confidence") or 0.5)
+        all_data = json.loads(vision_file.read_text(encoding="utf-8"))
+        entry = all_data.get(symbol, {})
+        current = entry.get("current", {})
+        if not current:
+            return "HOLD", 0.5
+        direction = (current.get("direction") or "SIDE").upper()
+        conf = float(current.get("confidence") or 0.5)
         conf = max(0.0, min(1.0, conf))
+        # 映射: UP→BUY, DOWN→SELL, SIDE→HOLD
+        bias_map = {"UP": "BUY", "DOWN": "SELL"}
+        bias = bias_map.get(direction, "HOLD")
         return bias, conf
     except Exception as e:
         logger.debug("[GCC-TRADE] _read_vision %s: %s", symbol, e)
@@ -592,7 +600,7 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
 
     # Phase B2: Coinbase OBI — 买压支持BUY，卖压反对
     coinbase = context.get("coinbase", {})
-    obi_bias = coinbase.get("obi", {}).get("obi_bias", "UNKNOWN")
+    obi_bias = coinbase.get("obi_bias", "UNKNOWN")
     if obi_bias == "BUY_PRESSURE":
         scores["obi"] = +0.08
     elif obi_bias == "SELL_PRESSURE":
@@ -601,7 +609,7 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
         scores["obi"] = 0.0
 
     # Phase B2: Coinbase CVD — 主买支持BUY，主卖反对
-    cvd_bias = coinbase.get("cvd", {}).get("cvd_bias", "UNKNOWN")
+    cvd_bias = coinbase.get("cvd_bias", "UNKNOWN")
     if cvd_bias == "BUY_DOMINANT":
         scores["cvd"] = +0.08
     elif cvd_bias == "SELL_DOMINANT":
@@ -681,7 +689,7 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
 
     # Phase B2: Coinbase OBI — 卖压支持SELL，买压反对
     coinbase = context.get("coinbase", {})
-    obi_bias = coinbase.get("obi", {}).get("obi_bias", "UNKNOWN")
+    obi_bias = coinbase.get("obi_bias", "UNKNOWN")
     if obi_bias == "SELL_PRESSURE":
         scores["obi"] = +0.08
     elif obi_bias == "BUY_PRESSURE":
@@ -690,7 +698,7 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
         scores["obi"] = 0.0
 
     # Phase B2: Coinbase CVD — 主卖支持SELL，主买反对
-    cvd_bias = coinbase.get("cvd", {}).get("cvd_bias", "UNKNOWN")
+    cvd_bias = coinbase.get("cvd_bias", "UNKNOWN")
     if cvd_bias == "SELL_DOMINANT":
         scores["cvd"] = +0.08
     elif cvd_bias == "BUY_DOMINANT":
@@ -1787,14 +1795,23 @@ class KNNExperience:
         ]
 
 
-def _build_knn_features(context: dict, ver_results: List[VerifierResult]) -> List[float]:
+def _build_knn_features(context, ver_results: List[VerifierResult]) -> List[float]:
     """S44: 从 context + verifier_results 提取 9 维特征向量。"""
-    vision_bias, vision_conf = context.get("vision", ("HOLD", 0.5))
-    _, scan_conf             = context.get("scan",   ("NONE", 0.0))
-    n_gate_buy               = context.get("n_gate_buy", "INACTIVE")
-    filter_buy               = context.get("filter_buy", {})
-    win_rate                 = context.get("win_rate_buy", 0.5)
-    vol_ratio                = context.get("vol_ratio", 1.0)
+    _g = getattr(context, "__getitem__", None)
+    if _g or isinstance(context, dict):
+        vision_bias, vision_conf = context.get("vision", ("HOLD", 0.5))
+        _, scan_conf             = context.get("scan",   ("NONE", 0.0))
+        n_gate_buy               = context.get("n_gate_buy", "INACTIVE")
+        filter_buy               = context.get("filter_buy", {})
+        win_rate                 = context.get("win_rate_buy", 0.5)
+        vol_ratio                = context.get("vol_ratio", 1.0)
+    else:
+        vision_bias, vision_conf = getattr(context, "vision", ("HOLD", 0.5))
+        _, scan_conf             = getattr(context, "scan",   ("NONE", 0.0))
+        n_gate_buy               = getattr(context, "n_gate_buy", "INACTIVE")
+        filter_buy               = getattr(context, "filter_buy", {})
+        win_rate                 = getattr(context, "win_rate_buy", 0.5)
+        vol_ratio                = getattr(context, "vol_ratio", 1.0)
 
     n_gate_val = {"INACTIVE": 0.0, "OBSERVE": 0.5, "BLOCK": 1.0}.get(n_gate_buy, 0.0)
     filter_passed = 1.0 if filter_buy.get("passed") else 0.0
