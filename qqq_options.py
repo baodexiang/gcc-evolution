@@ -39,7 +39,7 @@ BUDGET = 2000           # 每次交易预算 (USD)，严格不超
 MIN_DTE = 7             # 最短到期天数
 MAX_DTE = 14            # 最长到期天数
 TARGET_DELTA = 0.50     # 目标delta (ATM)
-MAX_CONTRACTS = 5       # 单次最大合约数
+MAX_CONTRACTS = 5       # 单次最大合约数，在BUDGET内买满
 SYMBOL = "TSLA"         # 标的
 
 # 卖出策略参数 (无固定止盈, 让利润跑)
@@ -392,7 +392,7 @@ def place_option(option: dict, dry_run: bool = True) -> dict:
         client, account_hash = _get_schwab_client()
         opt_symbol = option["option_symbol"]
         contracts = option["contracts"]
-        limit_price = option["cost_per_contract"]
+        limit_price = str(option["cost_per_contract"])
 
         order_spec = option_buy_to_open_limit(
             opt_symbol, contracts, limit_price
@@ -459,7 +459,7 @@ def close_option(option: dict, contracts: int = None, dry_run: bool = True,
         else:
             # 用当前bid价作为限价
             bid = option.get("bid", option.get("cost_per_contract", 0.01))
-            order_spec = option_sell_to_close_limit(opt_symbol, qty, bid)
+            order_spec = option_sell_to_close_limit(opt_symbol, qty, str(bid))
 
         label = f"Close {option.get('type','?')} {option.get('strike', option.get('long_strike','?'))} x{qty}"
 
