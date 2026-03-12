@@ -125,22 +125,7 @@ class TestPhaseControl(unittest.TestCase):
     def setUp(self):
         self.of = OFFilter()
 
-    def test_phase0_returns_none(self):
-        self.of._phase = 0
-        # Mock data sources to avoid API calls
-        self.of._get_obi_cvd = lambda s: {"obi": -0.5, "obi_bias": "SELL_PRESSURE",
-                                           "cvd": 0, "cvd_bias": "SELL_DOMINANT"}
-        self.of._get_rvol = lambda s: 1.0
-        self.of._calc_volume_profile = lambda s: {"vp_position": "IN_VALUE",
-                                                    "poc": 100, "val": 95, "vah": 105}
-        self.of._write_state = lambda s, d, r: None  # skip I/O
-
-        result = self.of.run("TSLA", "BUY")
-        self.assertIsNone(result["passed"])
-
-    def test_phase1_returns_bool(self):
-        self.of._phase = 1
-        self.of._reload_config = lambda: None  # 防止 run() 内重载覆盖
+    def _mock_data(self):
         self.of._get_obi_cvd = lambda s: {"obi": -0.5, "obi_bias": "SELL_PRESSURE",
                                            "cvd": 0, "cvd_bias": "SELL_DOMINANT"}
         self.of._get_rvol = lambda s: 1.0
@@ -148,9 +133,40 @@ class TestPhaseControl(unittest.TestCase):
                                                     "poc": 100, "val": 95, "vah": 105}
         self.of._write_state = lambda s, d, r: None
 
+    def test_phase0_returns_none(self):
+        self.of._phase_crypto = 0
+        self.of._phase_stock = 0
+        self.of._reload_config = lambda: None
+        self._mock_data()
+
+        result = self.of.run("TSLA", "BUY")
+        self.assertIsNone(result["passed"])
+
+    def test_phase1_returns_bool(self):
+        self.of._phase_crypto = 1
+        self.of._phase_stock = 1
+        self.of._reload_config = lambda: None
+        self._mock_data()
+
         result = self.of.run("TSLA", "BUY")
         self.assertIsInstance(result["passed"], bool)
         self.assertFalse(result["passed"])  # CVD_SELL + OBI_SELL should block
+
+    def test_per_asset_phase(self):
+        """加密Phase1执行, 美股Phase0观察"""
+        self.of._phase_crypto = 1
+        self.of._phase_stock = 0
+        self.of._reload_config = lambda: None
+        self._mock_data()
+
+        # 美股 Phase0 → None
+        r_stock = self.of.run("TSLA", "BUY")
+        self.assertIsNone(r_stock["passed"])
+
+        # 加密 Phase1 → False(被拦截)
+        r_crypto = self.of.run("BTCUSDC", "BUY")
+        self.assertIsInstance(r_crypto["passed"], bool)
+        self.assertFalse(r_crypto["passed"])
 
     def test_invalid_direction(self):
         result = self.of.run("TSLA", "HOLD")
@@ -189,7 +205,13 @@ class TestConfig(unittest.TestCase):
 
     def test_default_config(self):
         cfg = _load_config()
-        self.assertEqual(cfg["phase"], 0)
+        # phase 可以是 int 或 dict
+        phase = cfg["phase"]
+        if isinstance(phase, dict):
+            self.assertIn("crypto", phase)
+            self.assertIn("stock", phase)
+        else:
+            self.assertIsInstance(phase, int)
         self.assertAlmostEqual(cfg["thresholds"]["obi_threshold"], 0.30)
         self.assertAlmostEqual(cfg["thresholds"]["rvol_low"], 0.50)
 

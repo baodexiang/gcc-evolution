@@ -1,7 +1,11 @@
-# OF-Filter 配置 (GCC-0255 S9)
+# OF-Filter 配置 (GCC-0255 S10)
 # 修改后无需重启 — OFFilter 每次 run() 时重载
 
-phase: 0  # 0=观察(passed=None), 1=判断(passed=True/False), 2=生效拦截
+# Phase 按资产类别独立控制
+# 0=观察(passed=None), 1=判断(passed=True/False), 2=生效拦截
+phase:
+  crypto: 1                  # 加密货币: Phase1 执行 (2026-03-12起)
+  stock: 0                   # 美股: Phase0 观察 (下周一2026-03-17切Phase1)
 
 thresholds:
   obi_threshold: 0.30       # OBI 绝对值超过此值触发 R2 拦截

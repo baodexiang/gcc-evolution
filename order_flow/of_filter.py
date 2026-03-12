@@ -75,7 +75,14 @@ class OFFilter:
     def _reload_config(self):
         """从 yaml 加载阈值。"""
         cfg = _load_config()
-        self._phase = cfg.get("phase", 0)
+        # phase 支持 int(全局) 或 dict(按资产类别)
+        phase_raw = cfg.get("phase", 0)
+        if isinstance(phase_raw, dict):
+            self._phase_crypto = int(phase_raw.get("crypto", 0))
+            self._phase_stock = int(phase_raw.get("stock", 0))
+        else:
+            self._phase_crypto = int(phase_raw)
+            self._phase_stock = int(phase_raw)
         th = cfg.get("thresholds", {})
         self.OBI_THRESHOLD = float(th.get("obi_threshold", 0.30))
         self.RVOL_LOW = float(th.get("rvol_low", 0.50))
@@ -139,8 +146,9 @@ class OFFilter:
             direction, obi, obi_bias, cvd_bias, rvol
         )
 
-        # Phase 控制
-        if self._phase == 0:
+        # Phase 控制 — 按资产类别独立
+        _phase = self._phase_crypto if _is_crypto(symbol) else self._phase_stock
+        if _phase == 0:
             effective_passed = None  # 观察模式，不拦截
         else:
             effective_passed = rule_passed
@@ -169,8 +177,8 @@ class OFFilter:
                 "[OF-FILTER] %s %s → BLOCKED by %s "
                 "(obi=%.3f cvd=%s rvol=%.2f) Phase=%d%s",
                 symbol, direction, blocked_by,
-                obi, cvd_bias, rvol, self._phase,
-                " [观察模式]" if self._phase == 0 else "",
+                obi, cvd_bias, rvol, _phase,
+                " [观察模式]" if _phase == 0 else "",
             )
         else:
             logger.debug(
