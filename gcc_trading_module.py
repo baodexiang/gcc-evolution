@@ -174,6 +174,13 @@ def _load_candle_state(symbol: str) -> Optional[CandleState]:
         return None
 
 
+def _atomic_write(p: Path, data: str) -> None:
+    """P2原子写入: 先写临时文件, 再rename(防止断电导致半写损坏)。"""
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(data, encoding="utf-8")
+    tmp.replace(p)  # 原子 rename
+
+
 def _save_candle_state(state: Optional[CandleState]) -> None:
     """保存K线状态。state=None时删除文件。"""
     if state is None:
@@ -181,10 +188,7 @@ def _save_candle_state(state: Optional[CandleState]) -> None:
     p = _candle_state_path(state.symbol)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(
-            json.dumps(state.as_dict(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        _atomic_write(p, json.dumps(state.as_dict(), ensure_ascii=False, indent=2))
     except Exception as e:
         logger.debug("[GCC-TM] save_candle_state: %s", e)
 
@@ -208,16 +212,34 @@ def _save_candle_summary(symbol: str, summary: dict) -> None:
     p = _candle_summary_path(symbol)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        # latest: 覆盖写入(下根K线只需最后一条)
-        p.write_text(
-            json.dumps(summary, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        # latest: 原子覆盖写入(下根K线只需最后一条)
+        _atomic_write(p, json.dumps(summary, ensure_ascii=False, indent=2))
         # history: 追加写入(保留完整趋势链条)
+        # P1去重: 检查最后一条是否同一symbol+ts(过期聚合可能重复写入)
         history_file = _STATE_DIR / "gcc_candle_history.jsonl"
         record = {**summary, "symbol": symbol}
-        with open(history_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _dup = False
+        try:
+            if history_file.exists():
+                with open(history_file, "rb") as fh:
+                    fh.seek(0, 2)  # end
+                    pos = fh.tell()
+                    buf = b""
+                    while pos > 0 and b"\n" not in buf.rstrip(b"\n"):
+                        chunk = min(pos, 512)
+                        pos -= chunk
+                        fh.seek(pos)
+                        buf = fh.read(chunk) + buf
+                    last_line = buf.rstrip(b"\n").split(b"\n")[-1]
+                    if last_line:
+                        last = json.loads(last_line)
+                        if last.get("symbol") == symbol and last.get("ts") == summary.get("ts"):
+                            _dup = True
+        except Exception:
+            pass
+        if not _dup:
+            with open(history_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:
         logger.debug("[GCC-TM] save_candle_summary: %s", e)
 
@@ -2823,7 +2845,9 @@ def gcc_observe(
         if executed and not state.traded:
             state.traded = True
             state.trade_round = state.current_round - 1
-            # 写pending_order
+            # P0安全: 先持久化traded=True, 再写pending_order
+            # 防止断电后traded丢失导致重复下单
+            _save_candle_state(state)
             if mod.phase == PHASE_EXECUTE:
                 mod._write_pending_order(gcc_action, current_price,
                                           round_record["ts"])
