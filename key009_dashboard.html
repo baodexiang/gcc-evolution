@@ -1470,10 +1470,10 @@ function _doRender() {
 
     // ── 方向过滤器 SignalFilter ──
     const sf = DATA.signal_direction_filter || {};
-    const sfMode = sf.mode || 'OFF';
+    const sfFilterMode = sf.mode || 'OFF';
     const sfDir = sf.direction || 'N/A';
     const sfDirColor = sfDir === 'BUY_DOMINANT' ? '#1a7f37' : sfDir === 'SELL_DOMINANT' ? '#cf222e' : sfDir === 'NEUTRAL' ? '#0969da' : '#656d76';
-    const sfModeColor = sfMode === 'ENFORCE' ? '#1a7f37' : sfMode === 'OBSERVE' ? '#9a6700' : '#656d76';
+    const sfModeColor = sfFilterMode === 'ENFORCE' ? '#1a7f37' : sfFilterMode === 'OBSERVE' ? '#9a6700' : '#656d76';
     const sfBuy4h = sf.buy_ratio_4h != null ? (sf.buy_ratio_4h * 100).toFixed(1) + '%' : '-';
     const sfSell4h = sf.sell_ratio_4h != null ? (sf.sell_ratio_4h * 100).toFixed(1) + '%' : '-';
     const sfBuyW = sf.buy_ratio_week != null ? (sf.buy_ratio_week * 100).toFixed(1) + '%' : '-';
@@ -1481,7 +1481,7 @@ function _doRender() {
     const sfSample4h = sf.sample_4h != null ? sf.sample_4h : '-';
     const sfSampleW = sf.sample_week != null ? sf.sample_week : '-';
     $('sf-summary').innerHTML = `
-        <div class="card"><div class="label">模式</div><div class="value" style="color:${sfModeColor}">${sfMode}</div><div class="sub">ENFORCE=真拦截</div></div>
+        <div class="card"><div class="label">模式</div><div class="value" style="color:${sfModeColor}">${sfFilterMode}</div><div class="sub">ENFORCE=真拦截</div></div>
         <div class="card"><div class="label">当前方向</div><div class="value" style="color:${sfDirColor}">${sfDir}</div><div class="sub">${sf.reason || ''}</div></div>
         <div class="card"><div class="label">4H Buy/Sell</div><div class="value blue">${sfBuy4h} / ${sfSell4h}</div><div class="sub">样本 ${sfSample4h}</div></div>
         <div class="card"><div class="label">本周 Buy/Sell</div><div class="value blue">${sfBuyW} / ${sfSellW}</div><div class="sub">样本 ${sfSampleW}</div></div>
