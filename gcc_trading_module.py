@@ -2007,7 +2007,10 @@ def _load_algebra_history(mod: "GCCTradingModule") -> int:
 # B1: 品种级 phase 配置 — 加密 OBSERVE / 美股 EXECUTE
 # 安全开关：只有在此集合中的美股品种才会走 EXECUTE 模式
 _GCC_TM_EXECUTE_SYMBOLS: frozenset = frozenset({
-    "TSLA", "CRWV", "NBIS", "ONDS", "OPEN",
+    # 美股全量 EXECUTE
+    "TSLA", "CRWV", "NBIS", "ONDS", "OPEN", "HIMS",
+    "AMD", "COIN", "RKLB", "RDDT", "NVDA", "PLTR",
+    # 加密
     "BTCUSDC", "ETHUSDC", "ZECUSDC", "SOLUSDC",
 })  # B4: 逐品种开启，随时可关
 
