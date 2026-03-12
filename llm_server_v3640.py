@@ -25919,6 +25919,10 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
         log_to_server(f"[3Commas] {symbol} {final_action} 冷却中，剩余{remaining:.0f}s")
         return "COOLDOWN"
 
+    # v3.670: 乐观锁 — 通过冷却检查后立即写入时间戳，防止同一轮循环多路径重复发送
+    if not bypass_cooldown:
+        state[last_signal_key] = current_time
+
     # v21.18: 连续失败熔断 (3次→30min冻结)
     TC_MAX_CONSECUTIVE_FAILS = 3
     TC_FREEZE_SECONDS = 1800
@@ -39966,6 +39970,9 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
         log_to_server(f"[SignalStack] {symbol} {final_action} 冷却中，剩余{remaining:.0f}s")
         return "COOLDOWN"  # v3.560 P2-1: 返回COOLDOWN标识，区分冷却和成功
 
+    # v3.670: 乐观锁 — 通过冷却检查后立即写入时间戳，防止同一轮循环多路径重复发送
+    state[last_signal_key] = current_time
+
     # v3.641: 连续失败熔断 - 3次连续失败后冻结30分钟
     SS_MAX_CONSECUTIVE_FAILS = 3
     SS_FREEZE_SECONDS = 1800  # 30分钟
@@ -50325,6 +50332,123 @@ def key009_dashboard():
     _sf_mode = _get_signal_filter_mode()
     _ds_health = _get_data_source_health_snapshot()
     # KEY-010: 方向过滤器实时状态
+    def _build_signal_filter_symbol_stats():
+        try:
+            from datetime import datetime as _dt_sf, timedelta as _td_sf, timezone as _tz_sf
+            _now_ny = datetime.now(ZoneInfo("America/New_York"))
+            _cut_4h = _now_ny - _td_sf(hours=4)
+            _cut_1w = _now_ny - _td_sf(days=7)
+            _sf_root = ROOT / ".GCC" / "signal_filter"
+            _valid = _sf_root / "valid_signals.jsonl"
+            _filtered = _sf_root / "filtered_signals.jsonl"
+            _stats = {}
+
+            def _bucket(sym):
+                if not sym:
+                    return None
+                sym = str(sym).upper().strip()
+                if not sym:
+                    return None
+                if sym not in _stats:
+                    _stats[sym] = {
+                        "symbol": sym,
+                        "mode": _sf_mode,
+                        "buy_4h": 0, "sell_4h": 0,
+                        "buy_1w": 0, "sell_1w": 0,
+                        "blocked_4h": 0, "blocked_1w": 0,
+                    }
+                return _stats[sym]
+
+            def _parse_ts(raw):
+                if not raw:
+                    return None
+                try:
+                    raw = str(raw).strip().replace("Z", "+00:00")
+                    dt = _dt_sf.fromisoformat(raw)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=_tz_sf.utc)
+                    return dt.astimezone(ZoneInfo("America/New_York"))
+                except Exception:
+                    return None
+
+            if _valid.exists():
+                for _ln in _valid.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    _ln = _ln.strip()
+                    if not _ln:
+                        continue
+                    try:
+                        _rec = json.loads(_ln)
+                    except Exception:
+                        continue
+                    _dt = _parse_ts(_rec.get("timestamp"))
+                    if not _dt:
+                        continue
+                    _b = _bucket(_rec.get("symbol"))
+                    if not _b:
+                        continue
+                    _dir = str(_rec.get("direction", "")).lower()
+                    if _dt >= _cut_1w:
+                        if _dir == "buy":
+                            _b["buy_1w"] += 1
+                        elif _dir == "sell":
+                            _b["sell_1w"] += 1
+                    if _dt >= _cut_4h:
+                        if _dir == "buy":
+                            _b["buy_4h"] += 1
+                        elif _dir == "sell":
+                            _b["sell_4h"] += 1
+
+            if _filtered.exists():
+                for _ln in _filtered.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    _ln = _ln.strip()
+                    if not _ln:
+                        continue
+                    try:
+                        _rec = json.loads(_ln)
+                    except Exception:
+                        continue
+                    if not (_rec.get("blocked") or _rec.get("would_block")):
+                        continue
+                    _dt = _parse_ts(_rec.get("timestamp"))
+                    if not _dt:
+                        continue
+                    _b = _bucket(_rec.get("symbol"))
+                    if not _b:
+                        continue
+                    if _dt >= _cut_1w:
+                        _b["blocked_1w"] += 1
+                    if _dt >= _cut_4h:
+                        _b["blocked_4h"] += 1
+
+            _out = []
+            for _sym, _b in sorted(_stats.items()):
+                _tot_4h = _b["buy_4h"] + _b["sell_4h"]
+                _tot_1w = _b["buy_1w"] + _b["sell_1w"]
+                if _b["buy_4h"] > _b["sell_4h"] and _b["buy_4h"] > 0:
+                    _dir = "BUY_DOMINANT"
+                elif _b["sell_4h"] > _b["buy_4h"] and _b["sell_4h"] > 0:
+                    _dir = "SELL_DOMINANT"
+                elif _tot_4h > 0:
+                    _dir = "NEUTRAL"
+                else:
+                    _dir = "NO_ANSWER"
+                _out.append({
+                    "symbol": _sym,
+                    "mode": _b["mode"],
+                    "direction": _dir,
+                    "buy_ratio_4h": round((_b["buy_4h"] / _tot_4h), 3) if _tot_4h else 0.0,
+                    "sell_ratio_4h": round((_b["sell_4h"] / _tot_4h), 3) if _tot_4h else 0.0,
+                    "buy_ratio_week": round((_b["buy_1w"] / _tot_1w), 3) if _tot_1w else 0.0,
+                    "sell_ratio_week": round((_b["sell_1w"] / _tot_1w), 3) if _tot_1w else 0.0,
+                    "sample_4h": _tot_4h,
+                    "sample_week": _tot_1w,
+                    "blocked_4h": _b["blocked_4h"],
+                    "blocked_week": _b["blocked_1w"],
+                })
+            return _out
+        except Exception:
+            return []
+
     _sf_detail = {"mode": _sf_mode}
     if signal_filter:
         try:
@@ -50341,6 +50465,7 @@ def key009_dashboard():
             })
         except Exception:
             pass
+    _sf_detail["by_symbol"] = _build_signal_filter_symbol_stats()
     for _rk in ("24h", "1w", "1m"):
         d = multi_data.get(_rk)
         if isinstance(d, dict):
