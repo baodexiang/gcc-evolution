@@ -1,14 +1,15 @@
 """
-gcc_trading_module.py  —  GCC交易决策模块 v0.1
+gcc_trading_module.py  —  GCC交易决策模块 v0.2 (顺大逆小)
 基于 arXiv:2603.04735 (树状搜索) + arXiv:2407.09468 (三视角验证)
+
+v0.2 架构: 顺大逆小 (Follow Big, Counter Small)
+  - Vision在K线开盘时看历史K线定方向(门控), 一票定音
+  - 每30分钟一轮决策(共8轮/4H), 方向一致时入场
+  - 交易后继续收集信号, 8轮汇总与下一K线Vision对比
+  - 上一K线汇总与当前Vision矛盾时整根K线HOLD
 
 Phase 1: 观察模式 — 只记录决策日志，不干扰现有交易逻辑
 Phase 2: 执行模式 — BUY→下一K线市价买入 / SELL→市价卖出 / HOLD→不动
-
-GCC-0244 实施步骤:
-  S01 ✅ 复制 gcc_decision_engine.py
-  S02-S05 ✅ 所有 import 验证通过
-  S06-S12 ✅ 数据读取层 (本文件)
 """
 
 from __future__ import annotations
@@ -17,8 +18,9 @@ import json
 import logging
 import math
 import os
+import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from zoneinfo import ZoneInfo
@@ -44,6 +46,313 @@ _GOVERNANCE_FILE = _STATE_DIR / "plugin_governance_actions.json"
 _REGIME_FILE     = _STATE_DIR / "regime_validation.json"
 _CONTEXT_SNAP_DIR = _STATE_DIR / "gcc_decision_context"
 _MAIN_STATE_FILE  = Path("logs") / "state.json"
+
+# ── v0.2 顺大逆小: K线轮次常量 ─────────────────────────────────
+_CANDLE_DURATION_MIN = 240    # 4H K线 (分钟)
+_ROUND_INTERVAL_MIN  = 30    # 每轮30分钟
+_ROUNDS_PER_CANDLE   = _CANDLE_DURATION_MIN // _ROUND_INTERVAL_MIN  # 8
+
+# 4H K线UTC边界 (0:00, 4:00, 8:00, 12:00, 16:00, 20:00)
+_4H_BOUNDARIES_UTC = [0, 4, 8, 12, 16, 20]
+
+# 前向声明(完整定义在L1054附近), 供_get_candle_open_utc使用
+_CRYPTO_SYMBOLS: frozenset = frozenset()  # 将被后面覆盖
+
+
+def _get_candle_open_utc(ts_epoch: float = None, symbol: str = None) -> float:
+    """根据时间计算当前4H K线的开盘时间戳(epoch秒)。
+    加密货币: UTC 4H边界 (0:00/4:00/8:00/12:00/16:00/20:00)。
+    美股: 纽约时区4H边界 (盘中9:30起算, 约9/13/17/21 ET)。
+    """
+    if ts_epoch is None:
+        ts_epoch = time.time()
+
+    # 美股用纽约时区计算, 加密用UTC
+    is_crypto = symbol in _CRYPTO_SYMBOLS if symbol else False
+    if is_crypto or symbol is None:
+        dt = datetime.fromtimestamp(ts_epoch, tz=timezone.utc)
+    else:
+        dt = datetime.fromtimestamp(ts_epoch, tz=_NY_TZ)
+
+    hour = dt.hour
+    candle_hour = (hour // 4) * 4
+    candle_open = dt.replace(hour=candle_hour, minute=0, second=0, microsecond=0)
+    return candle_open.timestamp()
+
+
+def _get_current_round(ts_epoch: float = None, symbol: str = None) -> int:
+    """计算当前处于第几轮 (0-7)。"""
+    if ts_epoch is None:
+        ts_epoch = time.time()
+    candle_open = _get_candle_open_utc(ts_epoch, symbol=symbol)
+    elapsed_min = (ts_epoch - candle_open) / 60.0
+    round_idx = int(elapsed_min // _ROUND_INTERVAL_MIN)
+    return min(round_idx, _ROUNDS_PER_CANDLE - 1)
+
+
+# ── v0.2 CandleState: K线生命周期状态 ─────────────────────────
+@dataclass
+class CandleState:
+    """单根4H K线的轮次决策状态。"""
+    symbol: str
+    candle_open_ts: float         # UTC epoch秒 (4H K线开盘时间)
+    vision_direction: str         # "BUY" | "SELL" | "HOLD"
+    vision_confidence: float      # Vision置信度
+    prev_summary: str             # 上一K线8轮汇总方向
+    effective_direction: str      # 实际执行方向 (矛盾时=HOLD)
+    current_round: int = 0        # 当前已完成轮次 (0-8)
+    traded: bool = False          # 是否已交易
+    trade_round: int = -1         # 交易发生在第几轮 (-1=未交易)
+    round_decisions: list = field(default_factory=list)  # 每轮决策记录
+
+    def is_expired(self, now: float = None) -> bool:
+        """当前时间是否已超出本K线范围。"""
+        if now is None:
+            now = time.time()
+        return now >= self.candle_open_ts + _CANDLE_DURATION_MIN * 60
+
+    def as_dict(self) -> dict:
+        return {
+            "symbol": self.symbol,
+            "candle_open_ts": self.candle_open_ts,
+            "candle_open_str": datetime.fromtimestamp(
+                self.candle_open_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            "vision_direction": self.vision_direction,
+            "vision_confidence": self.vision_confidence,
+            "prev_summary": self.prev_summary,
+            "effective_direction": self.effective_direction,
+            "current_round": self.current_round,
+            "traded": self.traded,
+            "trade_round": self.trade_round,
+            "round_decisions": self.round_decisions,
+        }
+
+
+def _candle_state_path(symbol: str) -> Path:
+    return _STATE_DIR / f"gcc_candle_state_{symbol}.json"
+
+
+def _candle_summary_path(symbol: str) -> Path:
+    return _STATE_DIR / f"gcc_candle_summary_{symbol}.json"
+
+
+def _load_candle_state(symbol: str) -> Optional[CandleState]:
+    """加载当前K线状态，过期或不存在返回None。
+    过期时先聚合上一根K线的汇总(防止丢失)。
+    """
+    p = _candle_state_path(symbol)
+    if not p.exists():
+        return None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        state = CandleState(
+            symbol=d["symbol"],
+            candle_open_ts=d["candle_open_ts"],
+            vision_direction=d["vision_direction"],
+            vision_confidence=d["vision_confidence"],
+            prev_summary=d.get("prev_summary", "HOLD"),
+            effective_direction=d["effective_direction"],
+            current_round=d.get("current_round", 0),
+            traded=d.get("traded", False),
+            trade_round=d.get("trade_round", -1),
+            round_decisions=d.get("round_decisions", []),
+        )
+        if state.is_expired():
+            # 过期 → 聚合上一根K线的汇总再丢弃
+            # 注: 此处无bars可用, volume boost跳过(可接受的精度损失)
+            if state.round_decisions:
+                _aggregate_candle_summary(state)
+                logger.info("[GCC-TM] %s expired candle aggregated before discard", symbol)
+            try:
+                p.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return None
+        return state
+    except Exception as e:
+        logger.debug("[GCC-TM] load_candle_state %s: %s", symbol, e)
+        return None
+
+
+def _save_candle_state(state: Optional[CandleState]) -> None:
+    """保存K线状态。state=None时删除文件。"""
+    if state is None:
+        return
+    p = _candle_state_path(state.symbol)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            json.dumps(state.as_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.debug("[GCC-TM] save_candle_state: %s", e)
+
+
+def _load_prev_summary(symbol: str) -> dict:
+    """加载上一K线的8轮汇总结果。"""
+    p = _candle_summary_path(symbol)
+    if not p.exists():
+        return {"direction": "HOLD", "confidence": 0.5}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {"direction": "HOLD", "confidence": 0.5}
+
+
+def _save_candle_summary(symbol: str, summary: dict) -> None:
+    """保存当前K线的8轮汇总结果(供下一K线读取)。"""
+    p = _candle_summary_path(symbol)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.debug("[GCC-TM] save_candle_summary: %s", e)
+
+
+def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
+    """新K线开始: Vision定方向 + 与上一K线汇总比较 → 确定effective_direction。
+    bars: OHLCV数据，用于触发新鲜Vision API调用(排除当前未完成K线)。
+    """
+    now = time.time()
+    candle_open = _get_candle_open_utc(now, symbol=symbol)
+
+    # Vision读取: 优先通过主程序触发新API调用, 回退到缓存
+    vision_bias, vision_conf = "HOLD", 0.5
+    _fresh_called = False
+    if bars and len(bars) >= 15:
+        try:
+            from llm_server_v3640 import read_vision_result
+            # 排除最后一根(当前未完成K线), Vision看历史
+            hist_bars = bars[:-1] if len(bars) > 1 else bars
+            # force_refresh=True: 新K线必须拿新鲜Vision，绕过冷却
+            vr = read_vision_result(symbol, ohlcv_bars=hist_bars, force_refresh=True)
+            if vr and vr.get("current"):
+                cur = vr["current"]
+                direction = (cur.get("direction") or "SIDE").upper()
+                conf = float(cur.get("confidence") or 0.5)
+                conf = max(0.0, min(1.0, conf))
+                bias_map = {"UP": "BUY", "DOWN": "SELL"}
+                vision_bias = bias_map.get(direction, "HOLD")
+                vision_conf = conf
+                _fresh_called = True
+                logger.info("[GCC-TM] %s fresh Vision call: %s(%.0f%%)", symbol, vision_bias, conf * 100)
+        except Exception as e:
+            logger.warning("[GCC-TM] %s fresh Vision FAILED at candle open, using stale cache: %s", symbol, e)
+    if not _fresh_called:
+        vision_bias, vision_conf = _read_vision(symbol)
+        logger.warning("[GCC-TM] %s Vision from STALE cache (no fresh call): %s(%.0f%%)", symbol, vision_bias, vision_conf * 100)
+
+    # 上一K线汇总
+    prev = _load_prev_summary(symbol)
+    prev_dir = prev.get("direction", "HOLD")
+
+    # 信心机制: 矛盾时HOLD
+    if prev_dir == "HOLD" or prev_dir == vision_bias:
+        # 一致或上一K线无方向 → 信任Vision
+        effective = vision_bias
+    elif vision_bias == "HOLD":
+        # Vision也没方向 → HOLD
+        effective = "HOLD"
+    else:
+        # 完全相反 (BUY vs SELL) → 矛盾，不交易
+        effective = "HOLD"
+
+    state = CandleState(
+        symbol=symbol,
+        candle_open_ts=candle_open,
+        vision_direction=vision_bias,
+        vision_confidence=vision_conf,
+        prev_summary=prev_dir,
+        effective_direction=effective,
+    )
+
+    # 如果程序重启, 当前已经不在round 0, 补齐缺失轮次
+    actual_round = _get_current_round(now, symbol=symbol)
+    if actual_round > 0:
+        for i in range(actual_round):
+            state.round_decisions.append({
+                "round": i, "action": "HOLD",
+                "verdict": "BACKFILL", "executed": False,
+                "note": "program_restart_backfill",
+            })
+        state.current_round = actual_round
+        logger.info("[GCC-TM] %s backfilled %d missed rounds", symbol, actual_round)
+
+    logger.info(
+        "[GCC-TM] %s new candle: vision=%s(%.0f%%) prev=%s effective=%s round=%d",
+        symbol, vision_bias, vision_conf * 100, prev_dir, effective, state.current_round,
+    )
+    return state
+
+
+def _aggregate_candle_summary(state: CandleState, bars: list = None) -> dict:
+    """8轮结束: 汇总所有轮次决策 → BUY/SELL/HOLD + 置信度。
+    bars: 完整4H K线的OHLCV, 用于volume修正(K线完成后量比才准确)。
+    """
+    buy_count = sum(1 for r in state.round_decisions if r.get("action") == "BUY")
+    sell_count = sum(1 for r in state.round_decisions if r.get("action") == "SELL")
+    hold_count = len(state.round_decisions) - buy_count - sell_count
+
+    # 多数投票
+    total = max(len(state.round_decisions), 1)
+    if buy_count > sell_count and buy_count > hold_count:
+        direction = "BUY"
+        confidence = buy_count / total
+    elif sell_count > buy_count and sell_count > hold_count:
+        direction = "SELL"
+        confidence = sell_count / total
+    else:
+        # 平局或HOLD最多 → HOLD, 确保confidence > 0
+        direction = "HOLD"
+        confidence = max(hold_count / total, 0.5)
+
+    # Volume修正: K线完成后量比才准确
+    volume_boost = 0.0
+    if bars and len(bars) >= 2:
+        try:
+            cur_vol = float(bars[-1].get("volume") or bars[-1].get("v") or 0)
+            # 均量 = 前N根的平均
+            prev_vols = [float(b.get("volume") or b.get("v") or 0)
+                         for b in bars[-21:-1] if b]
+            avg_vol = sum(prev_vols) / max(len(prev_vols), 1) if prev_vols else 0
+            if avg_vol > 0:
+                rvol = cur_vol / avg_vol
+                # 放量(>1.5)且方向明确 → 增强confidence
+                if rvol >= 1.5 and direction != "HOLD":
+                    volume_boost = min((rvol - 1.0) * 0.1, 0.15)
+                    confidence = min(confidence + volume_boost, 1.0)
+                # 缩量(<0.5)且方向有分歧 → 降低confidence
+                elif rvol < 0.5 and confidence < 0.6:
+                    volume_boost = -0.1
+                    confidence = max(confidence + volume_boost, 0.1)
+                logger.info("[GCC-TM] %s volume at 4H end: rvol=%.2f boost=%.2f",
+                            state.symbol, rvol, volume_boost)
+        except Exception as e:
+            logger.debug("[GCC-TM] %s volume calc error: %s", state.symbol, e)
+
+    summary = {
+        "direction": direction,
+        "confidence": round(confidence, 3),
+        "buy_rounds": buy_count,
+        "sell_rounds": sell_count,
+        "hold_rounds": hold_count,
+        "total_rounds": len(state.round_decisions),
+        "traded": state.traded,
+        "trade_round": state.trade_round,
+        "volume_boost": round(volume_boost, 3),
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    }
+    _save_candle_summary(state.symbol, summary)
+    logger.info(
+        "[GCC-TM] %s candle summary: %s (B:%d S:%d H:%d traded=%s)",
+        state.symbol, direction, buy_count, sell_count, hold_count, state.traded,
+    )
+    return summary
+
 
 # ── 决策输出日志 ───────────────────────────────────────────────
 def _log_decision(record: dict) -> None:
@@ -540,16 +849,16 @@ class TreeNode:
 # ══════════════════════════════════════════════════════════════
 # S14  _score_buy_candidate — BUY 路径各数据源打分
 # 返回 scores_by_source dict，每个 key 对应一个数据源贡献值
-# 权重设计 (总和不超过 1.0，便于 aggregate 归一化到 [-1,1]):
-#   vision    0.35  — 形态识别主信号
-#   scan      0.25  — 扫描引擎方向
-#   filter    0.20  — 过滤链通过情况
-#   win_rate  0.12  — 历史胜率偏置
-#   volume    0.08  — 量比确认
+# v0.2 权重设计 (Vision已提升为门控，不参与打分):
+#   scan      0.30  — 扫描引擎方向 (入场信号)
+#   filter    0.25  — 过滤链通过情况 (入场条件)
+#   win_rate  0.15  — 历史胜率偏置
+#   volume    0.10  — 量比确认
+#   signal_pool 0.45 — 外挂共识 (入场信心)
+#   vwap/obi/cvd/vp/rvol — 量价确认
 # ══════════════════════════════════════════════════════════════
 def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
-    """为 BUY 候选路径打分，返回各数据源得分 (正=支持BUY, 负=反对)。"""
-    vision_bias, vision_conf = context.get("vision", ("HOLD", 0.5))
+    """v0.2: 为 BUY 候选路径打分 (Vision已提升为门控，不参与打分)。"""
     scan_dir,    scan_conf   = context.get("scan",   ("NONE", 0.0))
     filter_res               = context.get("filter_buy", {})
     win_rate                 = context.get("win_rate_buy", 0.5)
@@ -557,75 +866,62 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
 
     scores = {}
 
-    # vision: BUY支持+full, SELL反对-full, HOLD中性0
-    if vision_bias == "BUY":
-        scores["vision"] = +vision_conf * 0.35
-    elif vision_bias == "SELL":
-        scores["vision"] = -vision_conf * 0.35
-    else:
-        scores["vision"] = 0.0
-
-    # scan: 方向一致为正，相反为负
+    # scan: 方向一致为正，相反为负 (v0.2: 0.25→0.30)
     if scan_dir == "BUY":
-        scores["scan"] = +scan_conf * 0.25
+        scores["scan"] = +scan_conf * 0.30
     elif scan_dir == "SELL":
-        scores["scan"] = -scan_conf * 0.25
+        scores["scan"] = -scan_conf * 0.30
     else:
         scores["scan"] = 0.0
 
-    # filter chain: passed=+0.20, failed=-0.20, None=0
+    # filter chain: passed=+0.25, failed=-0.25 (v0.2: 0.20→0.25)
     if filter_res.get("passed") is True:
-        scores["filter"] = +0.20
+        scores["filter"] = +0.25
     elif filter_res.get("passed") is False:
-        scores["filter"] = -0.20
+        scores["filter"] = -0.25
     else:
         scores["filter"] = 0.0
 
-    # win_rate 偏置: 中性=0, 胜率越高越正
-    scores["win_rate"] = (win_rate - 0.5) * 0.24   # 0.5→0, 1.0→+0.12, 0.0→-0.12
+    # win_rate 偏置 (v0.2: 0.24→0.30, 即 0.5→0, 1.0→+0.15)
+    scores["win_rate"] = (win_rate - 0.5) * 0.30
 
-    # volume: 量比>1.5 轻微加分，<0.5 轻微减分
-    if vol_ratio >= 1.5:
-        scores["volume"] = +0.08
-    elif vol_ratio <= 0.5:
-        scores["volume"] = -0.04
-    else:
-        scores["volume"] = 0.0
+    # volume: v0.2 K线未完成时量比不准，轮次中不参与打分(8轮汇总时再用)
+    scores["volume"] = 0.0
 
-    # Phase B1: VWAP — 价格在VWAP上方支持BUY，下方反对
+    # Phase B1: VWAP — 价格在VWAP上方支持BUY (v0.2: 0.10→0.15)
     vwap_bias = context.get("schwab_vwap", {}).get("vwap_bias", "UNKNOWN")
     if vwap_bias == "ABOVE":
-        scores["vwap"] = +0.10
+        scores["vwap"] = +0.15
     elif vwap_bias == "BELOW":
-        scores["vwap"] = -0.06
+        scores["vwap"] = -0.10
     else:
         scores["vwap"] = 0.0
 
-    # Phase B2: Coinbase OBI — 买压支持BUY，卖压反对
+    # Phase B2: Coinbase OBI — 买压支持BUY (v0.2: 0.08→0.10)
     coinbase = context.get("coinbase", {})
     obi_bias = coinbase.get("obi_bias", "UNKNOWN")
     if obi_bias == "BUY_PRESSURE":
-        scores["obi"] = +0.08
+        scores["obi"] = +0.10
     elif obi_bias == "SELL_PRESSURE":
-        scores["obi"] = -0.06
+        scores["obi"] = -0.08
     else:
         scores["obi"] = 0.0
 
-    # Phase B2: Coinbase CVD — 主买支持BUY，主卖反对
+    # Phase B2: Coinbase CVD — 主买支持BUY (v0.2: 0.08→0.10)
     cvd_bias = coinbase.get("cvd_bias", "UNKNOWN")
     if cvd_bias == "BUY_DOMINANT":
-        scores["cvd"] = +0.08
+        scores["cvd"] = +0.10
     elif cvd_bias == "SELL_DOMINANT":
-        scores["cvd"] = -0.06
+        scores["cvd"] = -0.08
     else:
         scores["cvd"] = 0.0
 
-    # 信号池: 4H内外挂BUY票数占比 → 支持BUY方向
+    # 信号池: 30分钟内外挂BUY票数占比 (v0.2: 0.40→0.45)
     pool = context.get("signal_pool", {})
     pool_total = pool.get("total", 0)
     if pool_total > 0:
         buy_ratio = pool.get("buy", 0) / pool_total
-        scores["signal_pool"] = (buy_ratio - 0.5) * 0.40  # 全BUY→+0.20, 全SELL→-0.20
+        scores["signal_pool"] = (buy_ratio - 0.5) * 0.45  # 全BUY→+0.225, 全SELL→-0.225
     else:
         scores["signal_pool"] = 0.0
 
@@ -655,8 +951,7 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
 # 镜像 BUY 打分，方向相反
 # ══════════════════════════════════════════════════════════════
 def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
-    """为 SELL 候选路径打分。"""
-    vision_bias, vision_conf = context.get("vision", ("HOLD", 0.5))
+    """v0.2: 为 SELL 候选路径打分 (Vision已提升为门控，不参与打分)。"""
     scan_dir,    scan_conf   = context.get("scan",   ("NONE", 0.0))
     filter_res               = context.get("filter_sell", {})
     win_rate                 = context.get("win_rate_sell", 0.5)
@@ -664,75 +959,62 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
 
     scores = {}
 
-    # vision: SELL支持, BUY反对
-    if vision_bias == "SELL":
-        scores["vision"] = +vision_conf * 0.35
-    elif vision_bias == "BUY":
-        scores["vision"] = -vision_conf * 0.35
-    else:
-        scores["vision"] = 0.0
-
-    # scan: SELL方向一致为正
+    # scan: SELL方向一致为正 (v0.2: 0.25→0.30)
     if scan_dir == "SELL":
-        scores["scan"] = +scan_conf * 0.25
+        scores["scan"] = +scan_conf * 0.30
     elif scan_dir == "BUY":
-        scores["scan"] = -scan_conf * 0.25
+        scores["scan"] = -scan_conf * 0.30
     else:
         scores["scan"] = 0.0
 
-    # filter chain
+    # filter chain (v0.2: 0.20→0.25)
     if filter_res.get("passed") is True:
-        scores["filter"] = +0.20
+        scores["filter"] = +0.25
     elif filter_res.get("passed") is False:
-        scores["filter"] = -0.20
+        scores["filter"] = -0.25
     else:
         scores["filter"] = 0.0
 
-    # win_rate
-    scores["win_rate"] = (win_rate - 0.5) * 0.24
+    # win_rate (v0.2: 0.24→0.30)
+    scores["win_rate"] = (win_rate - 0.5) * 0.30
 
-    # volume
-    if vol_ratio >= 1.5:
-        scores["volume"] = +0.08
-    elif vol_ratio <= 0.5:
-        scores["volume"] = -0.04
-    else:
-        scores["volume"] = 0.0
+    # volume: v0.2 K线未完成时量比不准，轮次中不参与打分
+    scores["volume"] = 0.0
 
-    # Phase B1: VWAP — 价格在VWAP下方支持SELL，上方反对
+    # Phase B1: VWAP — 价格在VWAP下方支持SELL (v0.2: 0.10→0.15)
     vwap_bias = context.get("schwab_vwap", {}).get("vwap_bias", "UNKNOWN")
     if vwap_bias == "BELOW":
-        scores["vwap"] = +0.10
+        scores["vwap"] = +0.15
     elif vwap_bias == "ABOVE":
-        scores["vwap"] = -0.06
+        scores["vwap"] = -0.10
     else:
         scores["vwap"] = 0.0
 
-    # Phase B2: Coinbase OBI — 卖压支持SELL，买压反对
+    # Phase B2: Coinbase OBI — 卖压支持SELL (v0.2: 0.08→0.10)
     coinbase = context.get("coinbase", {})
     obi_bias = coinbase.get("obi_bias", "UNKNOWN")
     if obi_bias == "SELL_PRESSURE":
-        scores["obi"] = +0.08
+        scores["obi"] = +0.10
     elif obi_bias == "BUY_PRESSURE":
-        scores["obi"] = -0.06
+        scores["obi"] = -0.08
     else:
         scores["obi"] = 0.0
 
-    # Phase B2: Coinbase CVD — 主卖支持SELL，主买反对
+    # Phase B2: Coinbase CVD — 主卖支持SELL (v0.2: 0.08→0.10)
     cvd_bias = coinbase.get("cvd_bias", "UNKNOWN")
     if cvd_bias == "SELL_DOMINANT":
-        scores["cvd"] = +0.08
+        scores["cvd"] = +0.10
     elif cvd_bias == "BUY_DOMINANT":
-        scores["cvd"] = -0.06
+        scores["cvd"] = -0.08
     else:
         scores["cvd"] = 0.0
 
-    # 信号池: 4H内外挂SELL票数占比 → 支持SELL方向
+    # 信号池: 30分钟内外挂SELL票数占比 (v0.2: 0.40→0.45)
     pool = context.get("signal_pool", {})
     pool_total = pool.get("total", 0)
     if pool_total > 0:
         sell_ratio = pool.get("sell", 0) / pool_total
-        scores["signal_pool"] = (sell_ratio - 0.5) * 0.40  # 全SELL→+0.20, 全BUY→-0.20
+        scores["signal_pool"] = (sell_ratio - 0.5) * 0.45  # 全SELL→+0.225, 全BUY→-0.225
     else:
         scores["signal_pool"] = 0.0
 
@@ -761,8 +1043,8 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
 # S16  _score_hold_candidate — HOLD 路径中性分
 # ══════════════════════════════════════════════════════════════
 def _score_hold_candidate() -> dict:
-    """HOLD 路径固定中性分 0.0，作为基线竞争者。"""
-    return {"vision": 0.0, "scan": 0.0, "filter": 0.0,
+    """HOLD 路径固定中性分 0.0，作为基线竞争者。v0.2: 移除vision。"""
+    return {"scan": 0.0, "filter": 0.0,
             "win_rate": 0.0, "volume": 0.0, "vwap": 0.0,
             "obi": 0.0, "cvd": 0.0, "signal_pool": 0.0,
             "volume_profile": 0.0, "rvol_score": 0.0}
@@ -814,21 +1096,16 @@ def _apply_pruning(nodes: List[TreeNode], symbol: str,
                 node.prune_reason = f"P1:SignalFilter BUY_DOMINANT"
                 continue
 
-        # P2: Vision — 形态不支持该方向时剪枝
-        # Vision bias=HOLD表示当前形态不适合交易
-        if node.action in ("BUY", "SELL") and vision_bias == "HOLD" and vision_conf >= 0.7:
-            node.pruned = True
-            node.prune_reason = f"P2:Vision HOLD(形态不适合交易) conf={vision_conf:.0%}"
-            continue
+        # v0.2: P2 Vision剪枝已移除 (Vision提升为K线级门控，见CandleState)
 
-        # P3: Position Control — 仓位已满不加仓，空仓不减仓
+        # P2: Position Control — 仓位已满不加仓，空仓不减仓 (原P3)
         if node.action == "BUY" and position >= max_units:
             node.pruned = True
-            node.prune_reason = f"P3:Position full({position}/{max_units})"
+            node.prune_reason = f"P2:Position full({position}/{max_units})"
             continue
         if node.action == "SELL" and position <= 0:
             node.pruned = True
-            node.prune_reason = f"P3:Position empty(0/{max_units})"
+            node.prune_reason = f"P2:Position empty(0/{max_units})"
             continue
 
     return nodes
@@ -1406,13 +1683,15 @@ class GCCTradingModule:
         bars: list,
         main_decision: Optional[str] = None,
         signal_pool_data: Optional[dict] = None,
+        candle_state: Optional[CandleState] = None,
     ) -> dict:
         """
         主流程入口。
+        v0.2: 增加candle_state参数，传递Vision门控状态到树搜索。
         bars: OHLCV list，最新在末尾，至少含 volume/close 字段。
-        main_decision: 主程序决策 ("BUY"/"SELL"/"HOLD"/None)，用于一致率统计。
-        signal_pool_data: 4H信号池统计 {buy:N, sell:N, total:N, strongest:"...", vote_detail:{}}
-        返回: result dict，含 action/verdict/consensus 等字段。
+        main_decision: 主程序决策，用于一致率统计。
+        signal_pool_data: 30分钟信号池统计 {buy:N, sell:N, total:N, ...}
+        candle_state: 当前K线轮次状态 (None=向后兼容旧行为)
         """
         ts = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1441,9 +1720,9 @@ class GCCTradingModule:
                 self._compare_with_main("HOLD", main_decision, ts)
             return result
 
-        # L2: 树搜索（收集 rejected_nodes）
+        # L2: 树搜索（收集 rejected_nodes）— v0.2传入candle_state做Vision门控
         best_node, rejected_nodes = self._run_tree_search_with_rejected(
-            bars, context
+            bars, context, candle_state=candle_state
         )
 
         # L3: 三视角验证
@@ -1479,18 +1758,99 @@ class GCCTradingModule:
         # S40: 所有模式都写决策日志
         self._write_decision_log(result)
 
-        # S41: execute 模式额外写 pending_order
-        if self.phase == PHASE_EXECUTE and verdict == "EXECUTE":
-            self._write_pending_order(final_action, current_price, ts)
+        # S41: pending_order 由 gcc_observe() 轮次逻辑统一控制
+        # (v0.2: 避免process()和gcc_observe()双写)
 
         # L3-S04: 与主程序对比（含 divergence + takeover_ready）
         if main_decision is not None:
             self._compare_with_main(final_action, main_decision, ts)
 
+        # v0.2: 附加Vision门控信息
+        if candle_state is not None:
+            result["vision_gate"] = {
+                "vision_direction": candle_state.vision_direction,
+                "vision_confidence": candle_state.vision_confidence,
+                "prev_summary": candle_state.prev_summary,
+                "effective_direction": candle_state.effective_direction,
+                "round": candle_state.current_round,
+                "traded": candle_state.traded,
+            }
+
         logger.info(
             "[GCC-TRADE] %s action=%s verdict=%s consensus=%s/3 rejected=%d",
             self.symbol, final_action, verdict, consensus, len(rejected_nodes),
         )
+        return result
+
+    # ── v0.2: process_round() — 轮次感知决策 ─────────────────
+    def process_round(
+        self,
+        bars: list,
+        signals: list,
+        candle_state: CandleState,
+        main_decision: Optional[str] = None,
+        observe_only: bool = False,
+    ) -> dict:
+        """
+        v0.2 顺大逆小: 单轮决策。
+        1. effective_direction=HOLD → 整根K线不交易
+        2. 已交易 → 继续评估但不执行
+        3. 方向不一致 → HOLD
+        4. 方向一致 + 未交易 → EXECUTE
+        """
+        # 构建信号池
+        buy_votes = sum(1 for s in signals if s.get("action") == "BUY")
+        sell_votes = sum(1 for s in signals if s.get("action") == "SELL")
+        total = len(signals)
+        vote_detail = {}
+        for s in signals:
+            src = s.get("source", "unknown")
+            if src not in vote_detail:
+                vote_detail[src] = {"BUY": 0, "SELL": 0}
+            act = s.get("action", "HOLD")
+            if act in ("BUY", "SELL"):
+                vote_detail[src][act] += 1
+
+        signal_pool_data = {
+            "buy": buy_votes, "sell": sell_votes, "total": total,
+            "strongest": max(signals, key=lambda s: s.get("confidence", 0)).get("source", "") if signals else "",
+            "vote_detail": vote_detail,
+        }
+
+        # 调用核心process (传入candle_state做Vision门控)
+        result = self.process(
+            bars, main_decision=main_decision,
+            signal_pool_data=signal_pool_data,
+            candle_state=candle_state,
+        )
+
+        # 轮次后处理
+        result["round"] = candle_state.current_round
+        result["executed"] = False
+
+        # 规则1: effective_direction=HOLD → 不交易
+        if candle_state.effective_direction == "HOLD":
+            result["verdict"] = "DIRECTION_HOLD"
+            result["final_action"] = "HOLD"
+            return result
+
+        # 规则2: 已交易 → 不执行, action改HOLD避免污染8轮汇总
+        if candle_state.traded:
+            result["verdict"] = "ALREADY_TRADED"
+            result["final_action"] = "HOLD"
+            return result
+
+        # 规则3: 方向不一致 → HOLD
+        if (result["final_action"] != "HOLD"
+                and result["final_action"] != candle_state.effective_direction):
+            result["verdict"] = "DIRECTION_MISMATCH"
+            result["final_action"] = "HOLD"
+            return result
+
+        # 规则4: 方向一致 + EXECUTE → 执行
+        if result["verdict"] == "EXECUTE" and not observe_only:
+            result["executed"] = True
+
         return result
 
     # ── 内部: 组装上下文 → DecisionContext ────────────────────
@@ -1542,39 +1902,72 @@ class GCCTradingModule:
 
     # ── L2-S03: 树搜索 + rejected_nodes 收集 ────────────────────
     def _run_tree_search_with_rejected(
-        self, bars: list, context: dict
+        self, bars: list, context: dict,
+        candle_state: Optional[CandleState] = None,
     ) -> Tuple[TreeNode, List[TreeNode]]:
         """树搜索并收集所有被剪枝的节点，供 dashboard 展示。"""
-        best_node = self._run_tree_search(bars, context)
+        best_node = self._run_tree_search(bars, context, candle_state=candle_state)
         # 从内部状态收集 rejected（_run_tree_search 中标记 pruned 的节点）
         rejected = getattr(self, "_last_rejected_nodes", [])
         return best_node, rejected
 
     # ── S38: PUCT 多层树搜索 (arXiv:2603.04735) ────────────────
-    def _run_tree_search(self, bars: list, context: dict) -> TreeNode:
+    def _run_tree_search(self, bars: list, context: dict,
+                         candle_state: Optional[CandleState] = None) -> TreeNode:
         """
-        arXiv:2603.04735 PUCT 树搜索算法:
-        1. L1展开: 生成 BUY/SELL/HOLD 三个方向节点
-        2. 剪枝: 应用 P1-P3 规则 (SignalFilter/Vision/Position)
-        3. L2展开: 存活L1节点 → 子策略节点 (momentum/value/breakout...)
+        v0.2: arXiv:2603.04735 PUCT 树搜索算法 + Vision门控:
+        0. Vision门控: 只展开CandleState锁定的方向 (顺大逆小)
+        1. L1展开: 仅允许方向 + HOLD
+        2. 剪枝: P1(SignalFilter) + P2(Position)
+        3. L2展开: 存活L1节点 → 子策略节点
         4. PUCT迭代: N轮选择→数值反馈→回传值→再选择
-        5. 最终选择: 最高Q值或最多访问次数的L2节点提升为最终候选
+        5. 最终选择: 最高Q值的L2节点
         """
         sym = self.symbol
         closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
         current_price = closes[-1] if closes else 0.0
         self._last_rejected_nodes: List[TreeNode] = []
 
-        # ── Step 1: L1 展开 (方向层) ──
+        # ── Step 0: Vision门控 (v0.2 顺大逆小) ──
+        hold_scores = _score_hold_candidate()
+        if candle_state is not None:
+            if not candle_state.effective_direction or candle_state.effective_direction == "HOLD":
+                hold = TreeNode(action="HOLD", prune_reason="vision_gate:HOLD")
+                hold.scores_by_source = hold_scores
+                return hold
+
+        # ── Step 1: L1 展开 (方向层) — 仅展开允许的方向 ──
         buy_scores  = _score_buy_candidate(sym, bars, context)
         sell_scores = _score_sell_candidate(sym, bars, context)
-        hold_scores = _score_hold_candidate()
 
-        l1_nodes = [
-            TreeNode("BUY",  buy_scores,  _aggregate_candidate_score(buy_scores),  depth=1),
-            TreeNode("SELL", sell_scores, _aggregate_candidate_score(sell_scores), depth=1),
-            TreeNode("HOLD", hold_scores, 0.0, depth=1),
-        ]
+        if candle_state is not None:
+            allowed = candle_state.effective_direction
+            l1_nodes = []
+            if allowed == "BUY":
+                l1_nodes.append(TreeNode("BUY", buy_scores,
+                                         _aggregate_candidate_score(buy_scores), depth=1))
+                # SELL被Vision门控拒绝
+                rejected_sell = TreeNode("SELL", sell_scores,
+                                         _aggregate_candidate_score(sell_scores), depth=1)
+                rejected_sell.pruned = True
+                rejected_sell.prune_reason = "vision_gate:only_BUY_allowed"
+                self._last_rejected_nodes.append(rejected_sell)
+            elif allowed == "SELL":
+                l1_nodes.append(TreeNode("SELL", sell_scores,
+                                         _aggregate_candidate_score(sell_scores), depth=1))
+                rejected_buy = TreeNode("BUY", buy_scores,
+                                        _aggregate_candidate_score(buy_scores), depth=1)
+                rejected_buy.pruned = True
+                rejected_buy.prune_reason = "vision_gate:only_SELL_allowed"
+                self._last_rejected_nodes.append(rejected_buy)
+            l1_nodes.append(TreeNode("HOLD", hold_scores, 0.0, depth=1))
+        else:
+            # 向后兼容: 无candle_state时保留旧行为(三方向都展开)
+            l1_nodes = [
+                TreeNode("BUY",  buy_scores,  _aggregate_candidate_score(buy_scores),  depth=1),
+                TreeNode("SELL", sell_scores, _aggregate_candidate_score(sell_scores), depth=1),
+                TreeNode("HOLD", hold_scores, 0.0, depth=1),
+            ]
 
         # ── Step 2: L1 剪枝 ──
         _apply_pruning(l1_nodes, sym, context)
@@ -2342,7 +2735,7 @@ def _backfill_sim_trades(symbol: str, bars: list) -> None:
 
 # ══════════════════════════════════════════════════════════════
 # S48-S49  llm_server 接入入口
-# 4H K线结束时调用 — 收集信号 → 整合过滤 → 裁决 BUY/SELL/HOLD
+# v0.2 顺大逆小: 每30分钟调用一次(共8轮/4H K线)
 # ══════════════════════════════════════════════════════════════
 def gcc_observe(
     symbol: str,
@@ -2351,10 +2744,13 @@ def gcc_observe(
     observe_only: bool = False,
 ) -> None:
     """
-    4H K线结束时由 llm_decide() 调用。
-    完整流程: 信号收集 → P1-P3过滤 → PUCT树搜索(论文1) → 三视角验证(论文2)
-              → 下单/pending_order → KNN经验卡 → gcc-evo循环
+    v0.2 顺大逆小: 每30分钟由扫描引擎调用。
+    1. 加载/初始化CandleState (新K线时调Vision定方向)
+    2. 收集信号 → process_round → Vision门控决策
+    3. 方向一致且首次 → 执行交易
+    4. 8轮结束 → 汇总 → 保存供下一K线比较
     """
+    original_phase = None
     try:
         signals = _drain_signals(symbol)
         mod = _get_gcc_module(symbol)
@@ -2362,54 +2758,69 @@ def gcc_observe(
         if observe_only and mod.phase != PHASE_OBSERVE:
             mod.phase = PHASE_OBSERVE
 
-        # 回填上一次模拟交易的outcome（用当前K线收盘价）
+        # ── 加载/初始化K线状态 ──
+        state = _load_candle_state(symbol)
+        if state is None:
+            # 新K线: _load_candle_state过期时已自动聚合上一根
+            # 初始化新K线 (Vision定方向 + 对比上一K线汇总)
+            state = _init_candle_state(symbol, bars=bars)
+            _save_candle_state(state)
+
+        # 回填模拟交易
         _backfill_sim_trades(symbol, bars)
 
-        # 信号池统计 → 注入PUCT作为数据源维度
-        buy_votes = sum(1 for s in signals if s["action"] == "BUY")
-        sell_votes = sum(1 for s in signals if s["action"] == "SELL")
+        # ── 轮次去重: 检查当前round index是否已在round_decisions中 ──
+        actual_round = _get_current_round(symbol=symbol)
+        already_done = any(r.get("round") == actual_round for r in state.round_decisions)
+        if already_done:
+            # 同一30分钟内重复调用,跳过
+            _save_candle_state(state)
+            logger.debug("[GCC-TM] %s skip duplicate round %d (already recorded)",
+                         symbol, actual_round)
+            return
 
-        vote_detail = {}
-        for s in signals:
-            src = s["source"]
-            if src not in vote_detail:
-                vote_detail[src] = {"BUY": 0, "SELL": 0}
-            vote_detail[src][s["action"]] += 1
-
-        strongest_source = ""
-        if vote_detail:
-            strongest_source = max(
-                vote_detail.keys(),
-                key=lambda k: vote_detail[k]["BUY"] + vote_detail[k]["SELL"]
-            )
-
-        signal_pool_data = {
-            "buy": buy_votes,
-            "sell": sell_votes,
-            "total": len(signals),
-            "strongest": strongest_source,
-            "vote_detail": vote_detail,
-        }
-
-        # 全部交给论文算法裁决:
-        # 1. P1-P3过滤(SignalDirection/Vision/Position)
-        # 2. PUCT树搜索(arXiv:2603.04735) — 信号池作为评分维度
-        # 3. 三视角验证(arXiv:2407.09468) — consensus≥2/3→EXECUTE
-        result = mod.process(
-            bars,
+        # ── 轮次决策 ──
+        result = mod.process_round(
+            bars, signals, state,
             main_decision=main_decision,
-            signal_pool_data=signal_pool_data,
+            observe_only=observe_only,
         )
 
         gcc_action = result.get("final_action", "HOLD")
         gcc_verdict = result.get("verdict", "SKIP")
-        gcc_reason = f"puct={gcc_action} verdict={gcc_verdict} signals={len(signals)}"
+        executed = result.get("executed", False)
 
         closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
         current_price = closes[-1] if closes else 0.0
 
-        # 决策日志
-        ts_now = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        # ── 更新K线状态 ──
+        buy_votes = sum(1 for s in signals if s.get("action") == "BUY")
+        sell_votes = sum(1 for s in signals if s.get("action") == "SELL")
+
+        round_record = {
+            "round": state.current_round,
+            "action": gcc_action,
+            "verdict": gcc_verdict,
+            "executed": executed,
+            "signals": len(signals),
+            "buy_votes": buy_votes,
+            "sell_votes": sell_votes,
+            "price": current_price,
+            "ts": datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        state.round_decisions.append(round_record)
+        state.current_round += 1
+
+        if executed and not state.traded:
+            state.traded = True
+            state.trade_round = state.current_round - 1
+            # 写pending_order
+            if mod.phase == PHASE_EXECUTE:
+                mod._write_pending_order(gcc_action, current_price,
+                                          round_record["ts"])
+
+        # ── 轮次决策日志 (独立于process()的详细日志) ──
+        ts_now = round_record["ts"]
         dec_record = {
             "ts": ts_now,
             "symbol": symbol,
@@ -2417,35 +2828,38 @@ def gcc_observe(
             "gcc_action": gcc_action,
             "main_action": main_decision,
             "verdict": gcc_verdict,
-            "reason": gcc_reason,
+            "reason": f"v0.2 round={state.current_round - 1}/{_ROUNDS_PER_CANDLE} "
+                       f"dir={state.effective_direction} traded={state.traded}",
             "buy_signals": buy_votes,
             "sell_signals": sell_votes,
-            "strongest_source": strongest_source,
-            "vote_detail": vote_detail,
-            "tree_score": result.get("tree_score", 0),
-            "consensus": result.get("consensus", 0),
-            "topology": result.get("topology"),
-            "geometry": result.get("geometry"),
-            "algebra": result.get("algebra"),
             "signals_count": len(signals),
             "price": current_price,
             "match": gcc_action == main_decision,
             "observe_only": bool(observe_only),
+            "round": state.current_round - 1,
+            "vision_gate": {
+                "vision_direction": state.vision_direction,
+                "effective_direction": state.effective_direction,
+                "prev_summary": state.prev_summary,
+            },
+            "consensus": result.get("consensus", 0),
+            "executed": executed,
         }
-        _dec_path = _STATE_DIR / "gcc_trading_decisions.jsonl"
+        # v0.2: 轮次日志写独立文件，避免与process()的详细日志双写
+        _round_log_path = _STATE_DIR / "gcc_round_decisions.jsonl"
         try:
-            with open(_dec_path, "a", encoding="utf-8") as f:
+            with open(_round_log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(dec_record, ensure_ascii=False) + "\n")
         except Exception:
             pass
 
-        # 模拟执行记录
-        if gcc_action != "HOLD":
+        # 模拟执行记录 (仅在实际执行时记录)
+        if executed and gcc_action != "HOLD":
             _sim_path = _STATE_DIR / "gcc_sim_trades.jsonl"
             sim_record = {
                 "ts": ts_now, "symbol": symbol,
                 "action": gcc_action, "entry_price": current_price,
-                "strongest_source": strongest_source,
+                "round": state.current_round - 1,
                 "signals_count": len(signals),
                 "outcome": None,
             }
@@ -2455,8 +2869,7 @@ def gcc_observe(
             except Exception:
                 pass
 
-        # GCC-0254: 接入统一KNN — gcc-evo L4 管理（plugin_knn_history.npz）
-        # plugin_name="gcctm"，回填由 backfill_returns() 自动处理
+        # KNN记录 (保持不变)
         if gcc_action in ("BUY", "SELL"):
             try:
                 from modules.knn.features import extract_gcctm_features, infer_regime_from_bars
@@ -2476,17 +2889,33 @@ def gcc_observe(
             except Exception as _knn_err:
                 logger.debug("[GCC-TM][KNN] %s record failed: %s", symbol, _knn_err)
 
+        # ── 检查K线结束: 8轮完成 → 汇总(含volume修正) ──
+        if state.current_round >= _ROUNDS_PER_CANDLE:
+            summary = _aggregate_candle_summary(state, bars=bars)
+            logger.info(
+                "[GCC-TM] %s candle complete: summary=%s traded=%s",
+                symbol, summary.get("direction"), state.traded,
+            )
+            # 清除K线状态文件(下次调用时_init_candle_state会创建新的)
+            try:
+                _candle_state_path(symbol).unlink(missing_ok=True)
+            except Exception:
+                pass
+        else:
+            _save_candle_state(state)
+
         logger.info(
-            "[GCC-TM] %s action=%s verdict=%s signals=%d(B%d/S%d) src=%s",
-            symbol, gcc_action, gcc_verdict, len(signals),
-            buy_votes, sell_votes, strongest_source,
+            "[GCC-TM] %s R%d/%d action=%s verdict=%s dir=%s traded=%s signals=%d",
+            symbol, state.current_round - 1, _ROUNDS_PER_CANDLE,
+            gcc_action, gcc_verdict, state.effective_direction,
+            state.traded, len(signals),
         )
     except Exception as e:
         import traceback
         logger.warning("[GCC-TM] gcc_observe %s: %s\n%s", symbol, e, traceback.format_exc())
     finally:
         try:
-            if 'mod' in locals():
+            if 'mod' in locals() and original_phase is not None:
                 mod.phase = original_phase
         except Exception:
             pass

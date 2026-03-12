@@ -10051,6 +10051,22 @@ class PriceScanEngine:
 
                     # GCC-0141: 外挂扫描计时结束
                     _dp.stop(f"plugins_{symbol}")
+
+                    # v0.2 顺大逆小: 外挂扫描完成后触发GCC-TM轮次决策
+                    try:
+                        from gcc_trading_module import gcc_observe as _gcc_observe_round
+                        from gcc_trading_module import _GCC_TM_EXECUTE_SYMBOLS as _GCC_EXEC
+                        _gcc_bars = _phase_bars or YFinanceDataFetcher.get_ohlcv(symbol, _tf_min, 25)
+                        if _gcc_bars and len(_gcc_bars) >= 5:
+                            _gcc_observe_round(
+                                main_symbol, _gcc_bars, "HOLD",
+                                observe_only=main_symbol not in _GCC_EXEC,
+                            )
+                            logger.info(f"[GCC-TM][ROUND] {main_symbol} crypto round triggered")
+                    except ImportError:
+                        pass
+                    except Exception as _gcc_round_err:
+                        logger.debug(f"[GCC-TM][ROUND] {main_symbol} crypto error: {_gcc_round_err}")
                 else:
                     logger.debug(f"[v21.7] {symbol} 外挂扫描跳过(TF={_sym_tf}min, 间隔{_scan_interval_tf}s未到)")
 
@@ -10163,6 +10179,22 @@ class PriceScanEngine:
 
                     # GCC-0141: 外挂扫描计时结束
                     _dp.stop(f"plugins_{symbol}")
+
+                    # v0.2 顺大逆小: 外挂扫描完成后触发GCC-TM轮次决策
+                    try:
+                        from gcc_trading_module import gcc_observe as _gcc_observe_round
+                        from gcc_trading_module import _GCC_TM_EXECUTE_SYMBOLS as _GCC_EXEC
+                        _gcc_bars_s = _phase_bars_s or YFinanceDataFetcher.get_ohlcv(symbol, _tf_min_s, 25)
+                        if _gcc_bars_s and len(_gcc_bars_s) >= 5:
+                            _gcc_observe_round(
+                                symbol, _gcc_bars_s, "HOLD",
+                                observe_only=symbol not in _GCC_EXEC,
+                            )
+                            logger.info(f"[GCC-TM][ROUND] {symbol} stock round triggered")
+                    except ImportError:
+                        pass
+                    except Exception as _gcc_round_err:
+                        logger.debug(f"[GCC-TM][ROUND] {symbol} stock error: {_gcc_round_err}")
                 else:
                     logger.debug(f"[v21.7] {symbol} 外挂扫描跳过(TF={_sym_tf}min, 间隔{_scan_interval_tf}s未到)")
 

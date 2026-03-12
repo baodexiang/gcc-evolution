@@ -620,7 +620,8 @@ def _vision_call_inline(symbol: str, ohlcv_bars: list) -> dict:
         return None
 
 
-def read_vision_result(symbol: str, ignore_ttl: bool = False, ohlcv_bars: list = None) -> dict:
+def read_vision_result(symbol: str, ignore_ttl: bool = False, ohlcv_bars: list = None,
+                       force_refresh: bool = False) -> dict:
     """
     v3.670: 读取Vision结果，过期时自动调用API刷新
 
@@ -630,9 +631,21 @@ def read_vision_result(symbol: str, ignore_ttl: bool = False, ohlcv_bars: list =
         symbol: 品种代码
         ignore_ttl: 忽略TTL (校准器用)
         ohlcv_bars: 主程序OHLCV数据 (用于inline调用)
+        force_refresh: 强制刷新 — 跳过所有缓存+冷却，直接调API
+                       (GCC-TM candle open时使用，确保新K线拿到新鲜Vision)
     """
     import time as _time
     now = _time.time()
+
+    # force_refresh: 跳过所有缓存，直接调API
+    if force_refresh:
+        log_to_server(f"[v3.670] {symbol} Vision force_refresh — 跳过缓存和冷却")
+        vision_result = _vision_call_inline(symbol, ohlcv_bars)
+        if vision_result:
+            _vision_mem_cache[symbol] = {"result": vision_result, "ts": now}
+            return vision_result
+        # API失败时回退到缓存
+        log_to_server(f"[v3.670] {symbol} Vision force_refresh API失败，回退到缓存")
 
     # 1. 检查内存缓存
     mem = _vision_mem_cache.get(symbol)
@@ -49705,13 +49718,12 @@ def llm_decide():
     except Exception as e:
         print(f"[v3.588] {symbol} Vision同步异常(不影响交易): {e}")
 
-    # S49: KEY-011 GCC交易决策模块 — 4H结束时整合裁决（observe模式）
-    # L1信号也作为一票推入信号池
+    # S49: KEY-011 GCC交易决策模块 — L1信号推入信号池
+    # v0.2: gcc_observe 已改为scan engine每30分钟轮次触发，L1只推送信号不调observe
     if _HAS_GCC_TM:
         _l1_action = decision.get("final_action", "HOLD")
         if _l1_action in ("BUY", "SELL"):
             _gcc_push(symbol, "L1_decision", _l1_action, float(decision.get("confidence", 0.5)))
-        _gcc_observe(symbol, bars, _l1_action)
 
     return app.response_class(
         response=json.dumps({"input": user_payload, "decision": decision}, default=str),
@@ -50309,8 +50321,7 @@ L2门卫交易触发
             except Exception as _of_err:
                 log_to_server(f"[OF-FILTER] {symbol} error: {_of_err}")
 
-        # GCC-TM: 扫描引擎信号推送 — 全部美股+加密货币
-        # GCC-0254: 白名单品种 observe_only=False(实盘); 其余美股 observe_only=True(观察)
+        # GCC-TM: L2信号推送 — 只推送不调observe (v0.2: observe由scan engine每30分钟触发)
         if _HAS_GCC_TM and (is_crypto_symbol(symbol) or is_us_stock(symbol)) and ohlcv_bars:
             try:
                 if macd_triggered and macd_action in ("BUY", "SELL"):
@@ -50327,20 +50338,13 @@ L2门卫交易触发
                         _gate_conf_shadow = max(_gate_conf_shadow, 0.8)
                     _gcc_push(symbol, "L2_Gate", trade_action, _gate_conf_shadow)
 
-                _gcc_main_action = (
-                    triggered_action if triggered_action in ("BUY", "SELL")
-                    else trade_action if allow_trade and trade_action in ("BUY", "SELL")
-                    else "HOLD"
-                )
-                _gcc_observe(symbol, ohlcv_bars, _gcc_main_action,
-                             observe_only=symbol not in _GCC_TM_EXECUTE_SYMBOLS)
                 log_to_server(
-                    f"[GCC-TM][SHADOW] {symbol} main={_gcc_main_action} "
+                    f"[GCC-TM][PUSH] {symbol} "
                     f"macd={macd_action or '-'} gate={trade_action or '-'} "
                     f"allow={allow_trade} crypto={is_crypto_symbol(symbol)}"
                 )
             except Exception as _gcc_shadow_err:
-                log_to_server(f"[GCC-TM][SHADOW] {symbol} observe失败: {_gcc_shadow_err}")
+                log_to_server(f"[GCC-TM][PUSH] {symbol} 推送失败: {_gcc_shadow_err}")
 
         # v20.3: 提取MACD背离强度用于返回值
         _macd_strength = 0.0
