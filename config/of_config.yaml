@@ -1,0 +1,18 @@
+# OF-Filter 配置 (GCC-0255 S9)
+# 修改后无需重启 — OFFilter 每次 run() 时重载
+
+phase: 0  # 0=观察(passed=None), 1=判断(passed=True/False), 2=生效拦截
+
+thresholds:
+  obi_threshold: 0.30       # OBI 绝对值超过此值触发 R2 拦截
+  rvol_low: 0.50             # RVOL 低于此值触发 R3 缩量拦截(仅breakout)
+
+cache_ttl:
+  crypto: 30                 # 加密货币缓存秒数
+  stock: 60                  # 美股缓存秒数
+
+volume_profile:
+  n_bins: 20                 # VP 价格桶数
+  value_area_pct: 0.70       # Value Area 成交量占比
+  lvn_ratio: 0.4             # 低于均量 * ratio = LVN
+  hvn_ratio: 1.8             # 高于均量 * ratio = HVN

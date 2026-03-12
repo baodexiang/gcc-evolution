@@ -33,23 +33,60 @@ def _is_crypto(symbol: str) -> bool:
 
 _STATE_DIR = Path("state")
 _STATE_FILE = _STATE_DIR / "filter_chain_state.json"
+_CONFIG_FILE = Path("config/of_config.yaml")
 
-# Phase 控制 — Phase 0 观察模式
-_PHASE = 0  # 0=观察(passed=None), 1=判断(passed=True/False但不拦截), 2=生效
+
+def _load_config() -> dict:
+    """加载 of_config.yaml，失败返回默认值。"""
+    defaults = {
+        "phase": 0,
+        "thresholds": {"obi_threshold": 0.30, "rvol_low": 0.50},
+        "cache_ttl": {"crypto": 30, "stock": 60},
+        "volume_profile": {"n_bins": 20, "value_area_pct": 0.70,
+                           "lvn_ratio": 0.4, "hvn_ratio": 1.8},
+    }
+    if not _CONFIG_FILE.exists():
+        return defaults
+    try:
+        import yaml
+        with open(_CONFIG_FILE, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        # 合并: config 覆盖 defaults
+        for k, v in defaults.items():
+            if k not in cfg:
+                cfg[k] = v
+            elif isinstance(v, dict):
+                merged = dict(v)
+                merged.update(cfg[k] or {})
+                cfg[k] = merged
+        return cfg
+    except Exception:
+        return defaults
 
 
 class OFFilter:
     """OF-Filter: CVD / OBI / RVOL 拦截引擎"""
 
-    # ── 阈值 ──
-    OBI_THRESHOLD = 0.30    # ±0.3 触发拦截
-    RVOL_LOW = 0.50         # 突破场景下的缩量阈值
-    CACHE_TTL_CRYPTO = 30   # 加密 TTL 秒
-    CACHE_TTL_STOCK = 60    # 美股 TTL 秒
-
     def __init__(self):
         self._cache: dict = {}
         self._cache_ts: dict = {}
+        self._reload_config()
+
+    def _reload_config(self):
+        """从 yaml 加载阈值。"""
+        cfg = _load_config()
+        self._phase = cfg.get("phase", 0)
+        th = cfg.get("thresholds", {})
+        self.OBI_THRESHOLD = float(th.get("obi_threshold", 0.30))
+        self.RVOL_LOW = float(th.get("rvol_low", 0.50))
+        ttl = cfg.get("cache_ttl", {})
+        self.CACHE_TTL_CRYPTO = int(ttl.get("crypto", 30))
+        self.CACHE_TTL_STOCK = int(ttl.get("stock", 60))
+        vp = cfg.get("volume_profile", {})
+        self._vp_n_bins = int(vp.get("n_bins", 20))
+        self._vp_va_pct = float(vp.get("value_area_pct", 0.70))
+        self._vp_lvn_ratio = float(vp.get("lvn_ratio", 0.4))
+        self._vp_hvn_ratio = float(vp.get("hvn_ratio", 1.8))
 
     # ══════════════════════════════════════════════════════════
     # 主入口
@@ -71,6 +108,9 @@ class OFFilter:
         """
         if direction not in ("BUY", "SELL"):
             return self._default_result()
+
+        # 热重载配置（修改 yaml 无需重启）
+        self._reload_config()
 
         # 获取数据
         obi_cvd = self._get_obi_cvd(symbol)
@@ -100,7 +140,7 @@ class OFFilter:
         )
 
         # Phase 控制
-        if _PHASE == 0:
+        if self._phase == 0:
             effective_passed = None  # 观察模式，不拦截
         else:
             effective_passed = rule_passed
@@ -129,8 +169,8 @@ class OFFilter:
                 "[OF-FILTER] %s %s → BLOCKED by %s "
                 "(obi=%.3f cvd=%s rvol=%.2f) Phase=%d%s",
                 symbol, direction, blocked_by,
-                obi, cvd_bias, rvol, _PHASE,
-                " [观察模式]" if _PHASE == 0 else "",
+                obi, cvd_bias, rvol, self._phase,
+                " [观察模式]" if self._phase == 0 else "",
             )
         else:
             logger.debug(
@@ -457,7 +497,7 @@ class OFFilter:
             if price_high <= price_low:
                 return default
 
-            n_bins = 20
+            n_bins = self._vp_n_bins
             bin_size = (price_high - price_low) / n_bins
             bins = [0.0] * n_bins
             bin_prices = [price_low + (i + 0.5) * bin_size for i in range(n_bins)]
@@ -485,7 +525,7 @@ class OFFilter:
 
             # Value Area = 70% 成交量围绕 POC
             total_vol = sum(bins)
-            va_target = total_vol * 0.70
+            va_target = total_vol * self._vp_va_pct
             va_vol = bins[poc_idx]
             lo_idx, hi_idx = poc_idx, poc_idx
 
@@ -508,9 +548,9 @@ class OFFilter:
             # LVN/HVN: 低于/高于均量的显著节点
             avg_bin = total_vol / n_bins
             lvn = [round(bin_prices[i], 4) for i in range(n_bins)
-                   if bins[i] < avg_bin * 0.4]
+                   if bins[i] < avg_bin * self._vp_lvn_ratio]
             hvn = [round(bin_prices[i], 4) for i in range(n_bins)
-                   if bins[i] > avg_bin * 1.8]
+                   if bins[i] > avg_bin * self._vp_hvn_ratio]
 
             # 当前价格相对 VA 位置
             current_price = float(bars[-1]["close"])
