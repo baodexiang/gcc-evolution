@@ -39883,6 +39883,29 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
             )
             return None
 
+    # GCC-0256 S5: BTCUSDC信号走永续合约通道 (不走现货)
+    BTC_PERP_ENABLED = True  # 实盘已开启
+    if symbol == "BTCUSDC":
+        if BTC_PERP_ENABLED:
+            try:
+                from btc_perp import execute_signal as _btc_execute
+                _btc_result = _btc_execute(final_action, dry_run=False)
+                log_to_server(
+                    f"[BTC_PERP] {final_action} → "
+                    f"success={_btc_result.get('success')} "
+                    f"action={_btc_result.get('action', 'OPEN')}"
+                )
+                return _btc_result.get("success", False)
+            except Exception as _btc_e:
+                log_to_server(f"[BTC_PERP][ERROR] {final_action}: {_btc_e}")
+                return False
+        else:
+            log_to_server(
+                f"[BTC_PERP][观察] {final_action} signal_type={signal_type} "
+                f"→ 永续通道未开启，仅记录"
+            )
+            return None
+
     # GCC-0254: GCC-TM 独占模式 — 白名单美股主路径信号转为观察记录
     if _HAS_GCC_TM and symbol in _GCC_TM_EXECUTE_SYMBOLS and source != "gcc_tm":
         log_to_server(
@@ -55066,3 +55089,138 @@ def _start_qqq_options_manager():
         log_to_server("[QQQ_OPT] 自动管理线程已启动 (每5分钟检查持仓出场规则)")
 
 _start_qqq_options_manager()
+
+# GCC-0256 S5: BTC永续合约持仓自动管理线程 (24/7, 每5分钟)
+_btc_perp_thread = None
+_btc_perp_stop = threading.Event()
+_BTC_PERP_CHECK_INTERVAL = 300  # 5分钟
+
+_btc_perp_last_signal = {"direction": None, "time": 0}
+
+def _btc_detect_trend() -> Optional[str]:
+    """读取BTCUSDC Vision缓存结果判断趋势, 返回 "BUY"/"SELL"/None
+
+    共用主程序4H baseline刷新周期, 不额外调API
+    confidence>60%才触发
+    """
+    try:
+        result = read_vision_result("BTCUSDC")
+        if not result or not result.get("current"):
+            return None
+
+        current = result["current"]
+        direction = current.get("direction", "").upper()
+        confidence = current.get("confidence", 0)
+
+        if confidence < 0.6:
+            return None
+
+        if direction in ("UP", "BULLISH"):
+            log_to_server(f"[BTC_PERP][VISION] BTCUSDC趋势=UP conf={confidence:.0%}")
+            return "BUY"
+        elif direction in ("DOWN", "BEARISH"):
+            log_to_server(f"[BTC_PERP][VISION] BTCUSDC趋势=DOWN conf={confidence:.0%}")
+            return "SELL"
+        return None
+    except Exception as _e:
+        log_to_server(f"[BTC_PERP][VISION] 读取缓存异常: {_e}")
+        return None
+
+_btc_vision_last_check = {"time": 0}
+_BTC_VISION_INTERVAL = 14400  # 每4小时读Vision缓存(匹配baseline刷新周期)
+
+def _btc_perp_manager_worker():
+    """后台线程: 24/7每5分钟循环 (BTC永不休市)
+
+    进场: Vision(GPT-5.2) 每4小时检测趋势 → 开仓
+    出场: 每5分钟检查止盈止损 + Vision反转检测
+    确认: 每5分钟确认pending_close是否FILLED
+    """
+    import time as _t
+    _t.sleep(60)
+    while not _btc_perp_stop.is_set():
+        try:
+            from btc_perp import (
+                auto_manage as _btc_auto, _load_position as _btc_pos,
+                close_position as _btc_close, check_pending_close as _btc_check_pending,
+                open_position as _btc_open,
+            )
+
+            BTC_PERP_ENABLED = True
+
+            # ── (1) 确认平仓成交 ──────────────────────────────────
+            pending_status = _btc_check_pending()
+            if pending_status == "PENDING":
+                _btc_perp_stop.wait(_BTC_PERP_CHECK_INTERVAL)
+                continue
+            elif pending_status == "FAILED":
+                log_to_server("[BTC_PERP][AUTO] 平仓订单失败，恢复open等下轮重试")
+
+            pos = _btc_pos()
+
+            # ── (2) 有仓: 检查出场 ────────────────────────────────
+            if pos:
+                # 2a. 止盈/止损 (每5分钟)
+                exit_result = _btc_auto(dry_run=False)
+                if exit_result:
+                    log_to_server(
+                        f"[BTC_PERP][EXIT] {exit_result['action']}: {exit_result['reason']} "
+                        f"PnL=${exit_result.get('pnl', 0):.0f} "
+                        f"success={exit_result['result'].get('success')}"
+                    )
+                else:
+                    # 2b. Vision反转检测 (每4小时)
+                    _now_ts = _t.time()
+                    if BTC_PERP_ENABLED and _now_ts - _btc_vision_last_check["time"] >= _BTC_VISION_INTERVAL:
+                        _btc_vision_last_check["time"] = _now_ts
+                        vision_dir = _btc_detect_trend()
+                        if vision_dir:
+                            existing_dir = pos["direction"]
+                            is_reversal = (
+                                (vision_dir == "SELL" and existing_dir == "BUY") or
+                                (vision_dir == "BUY" and existing_dir == "SELL")
+                            )
+                            if is_reversal:
+                                log_to_server(
+                                    f"[BTC_PERP][REVERSAL] Vision={vision_dir} 但持仓={existing_dir}"
+                                    f" → 平仓(下轮再开新方向)"
+                                )
+                                _btc_close(dry_run=False)
+
+            # ── (3) 无仓: 检查进场 ────────────────────────────────
+            elif BTC_PERP_ENABLED:
+                _now_ts = _t.time()
+                if _now_ts - _btc_vision_last_check["time"] >= _BTC_VISION_INTERVAL:
+                    _btc_vision_last_check["time"] = _now_ts
+                    direction = _btc_detect_trend()
+                    if direction:
+                        if (direction != _btc_perp_last_signal["direction"] or
+                                _now_ts - _btc_perp_last_signal["time"] > 1800):
+                            log_to_server(f"[BTC_PERP][ENTRY] Vision={direction}，开仓")
+                            result = _btc_open(direction, dry_run=False)
+                            log_to_server(
+                                f"[BTC_PERP][ENTRY] {direction} "
+                                f"size={result.get('size', 'N/A')} "
+                                f"price=${result.get('price', 0):.0f} "
+                                f"success={result.get('success')}"
+                            )
+                            _btc_perp_last_signal["direction"] = direction
+                            _btc_perp_last_signal["time"] = _now_ts
+
+        except Exception as _e_btc:
+            log_to_server(f"[BTC_PERP][AUTO][ERROR] {_e_btc}")
+        _btc_perp_stop.wait(_BTC_PERP_CHECK_INTERVAL)
+
+def _start_btc_perp_manager():
+    global _btc_perp_thread
+    if _btc_perp_thread is None or not _btc_perp_thread.is_alive():
+        _btc_perp_stop.clear()
+        _btc_perp_thread = threading.Thread(
+            target=_btc_perp_manager_worker,
+            daemon=True,
+            name="BTCPerpManager",
+        )
+        _btc_perp_thread.start()
+        log_to_server("[BTC_PERP] 自动管理线程已启动 (24/7, 每5分钟检查止盈止损)")
+
+_start_btc_perp_manager()
