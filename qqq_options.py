@@ -43,7 +43,7 @@ MIN_DTE = 7             # 最短到期天数
 MAX_DTE = 14            # 最长到期天数
 TARGET_DELTA = 0.50     # 目标delta (ATM)
 MAX_CONTRACTS = 5       # 单次最大合约数
-SYMBOL = "QQQ"          # 标的
+SYMBOL = "TSLA"         # 标的
 
 # 卖出策略参数
 TAKE_PROFIT_PCT = 0.50  # 止盈: 达到最大盈利的50%平仓
@@ -55,7 +55,7 @@ TRAILING_ACTIVATE_PCT = 0.25  # 盈利达最大盈利25%后激活追踪
 TRAILING_PULLBACK_PCT = 0.40  # 从最高价值回撤40%就平仓
 
 # 持仓状态文件
-STATE_FILE = Path(__file__).parent / "state" / "qqq_options_position.json"
+STATE_FILE = Path(__file__).parent / "state" / "tsla_options_position.json"
 
 
 # ── 持仓管理 ─────────────────────────────────────────────────────────────

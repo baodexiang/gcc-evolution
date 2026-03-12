@@ -39860,10 +39860,10 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
     if final_action not in ["BUY", "SELL"]:
         return False
 
-    # GCC-0256 S4: QQQ信号走期权垂直价差通道 (不走股票)
-    QQQ_OPTIONS_ENABLED = True  # 实盘已开启
-    if symbol == "QQQ":
-        if QQQ_OPTIONS_ENABLED:
+    # GCC-0256 S4: TSLA信号走期权垂直价差通道 (不走股票)
+    TSLA_OPTIONS_ENABLED = True  # 实盘已开启
+    if symbol == "TSLA":
+        if TSLA_OPTIONS_ENABLED:
             try:
                 from qqq_options import execute_signal as _qqq_execute
                 _qqq_result = _qqq_execute(final_action, dry_run=False)
@@ -54933,7 +54933,7 @@ try:
 except Exception as _e_irs:
     log_to_server(f"[IRS] 启动异常(非致命): {_e_irs}")
 
-# GCC-0256 S4: QQQ期权持仓自动管理线程 (每5分钟检查出场规则)
+# GCC-0256 S4: TSLA期权持仓自动管理线程 (每5分钟检查出场规则)
 _qqq_opt_thread = None
 _qqq_opt_stop = threading.Event()
 _QQQ_OPT_CHECK_INTERVAL = 300  # 5分钟
@@ -54941,20 +54941,19 @@ _QQQ_OPT_CHECK_INTERVAL = 300  # 5分钟
 _qqq_last_signal = {"direction": None, "time": 0}  # 防重复信号
 
 def _qqq_detect_trend() -> Optional[str]:
-    """主动调Vision API判断QQQ趋势, 返回 "BUY"/"SELL"/None
+    """主动调Vision API判断TSLA趋势, 返回 "BUY"/"SELL"/None
 
     每次进场/出场决策前独立调一次Vision API, 拿最新判断
     confidence>60%才触发信号
     """
     try:
-        # 获取OHLCV → 清内存缓存 → 强制调API拿最新
-        bars = fetch_ohlcv_from_api("QQQ", 240, limit=50)
+        bars = fetch_ohlcv_from_api("TSLA", 240, limit=50)
         if bars and len(bars) >= 15:
-            _vision_mem_cache.pop("QQQ", None)  # 清缓存, 强制调API
-            log_to_server("[QQQ_OPT][VISION] 主动调Vision API判断QQQ趋势...")
-            result = read_vision_result("QQQ", ohlcv_bars=bars)
+            _vision_mem_cache.pop("TSLA", None)
+            log_to_server("[TSLA_OPT][VISION] 主动调Vision API判断TSLA趋势...")
+            result = read_vision_result("TSLA", ohlcv_bars=bars)
         else:
-            result = read_vision_result("QQQ")
+            result = read_vision_result("TSLA")
 
         if not result or not result.get("current"):
             return None
@@ -54967,14 +54966,14 @@ def _qqq_detect_trend() -> Optional[str]:
             return None
 
         if direction in ("UP", "BULLISH"):
-            log_to_server(f"[QQQ_OPT][VISION] QQQ趋势=UP conf={confidence:.0%}")
+            log_to_server(f"[TSLA_OPT][VISION] TSLA趋势=UP conf={confidence:.0%}")
             return "BUY"
         elif direction in ("DOWN", "BEARISH"):
-            log_to_server(f"[QQQ_OPT][VISION] QQQ趋势=DOWN conf={confidence:.0%}")
+            log_to_server(f"[TSLA_OPT][VISION] TSLA趋势=DOWN conf={confidence:.0%}")
             return "SELL"
         return None
     except Exception as _e:
-        log_to_server(f"[QQQ_OPT][VISION] 调API异常: {_e}")
+        log_to_server(f"[TSLA_OPT][VISION] 调API异常: {_e}")
         return None
 
 _qqq_vision_last_check = {"time": 0}  # Vision读取频率控制
@@ -55010,16 +55009,15 @@ def _qqq_options_manager_worker():
                     get_option_chain as _qqq_chain,
                 )
 
-                QQQ_OPTIONS_ENABLED = True  # 实盘已开启
+                TSLA_OPTIONS_ENABLED = True  # 实盘已开启
 
                 # ── (1) 确认平仓成交 ──────────────────────────────────
                 pending_status = _qqq_check_pending()
                 if pending_status == "PENDING":
-                    # 有平仓订单在等待，本轮什么都不做
                     _qqq_opt_stop.wait(_QQQ_OPT_CHECK_INTERVAL)
                     continue
                 elif pending_status == "FAILED":
-                    log_to_server("[QQQ_OPT][AUTO] 平仓订单失败，恢复open等下轮重试")
+                    log_to_server("[TSLA_OPT][AUTO] 平仓订单失败，恢复open等下轮重试")
 
                 pos = _qqq_pos()
 
@@ -55029,14 +55027,14 @@ def _qqq_options_manager_worker():
                     exit_result = _qqq_auto(dry_run=False)
                     if exit_result:
                         log_to_server(
-                            f"[QQQ_OPT][EXIT] {exit_result['action']}: {exit_result['reason']} "
+                            f"[TSLA_OPT][EXIT] {exit_result['action']}: {exit_result['reason']} "
                             f"PnL=${exit_result.get('pnl', 0):.0f} "
                             f"success={exit_result['result'].get('success')}"
                         )
                     else:
                         # 2b. Vision反转检测 (每4小时)
                         _now_ts = _t.time()
-                        if QQQ_OPTIONS_ENABLED and _now_ts - _qqq_vision_last_check["time"] >= _QQQ_VISION_INTERVAL:
+                        if TSLA_OPTIONS_ENABLED and _now_ts - _qqq_vision_last_check["time"] >= _QQQ_VISION_INTERVAL:
                             _qqq_vision_last_check["time"] = _now_ts
                             vision_dir = _qqq_detect_trend()
                             if vision_dir:
@@ -55047,14 +55045,14 @@ def _qqq_options_manager_worker():
                                 )
                                 if is_reversal:
                                     log_to_server(
-                                        f"[QQQ_OPT][REVERSAL] Vision={vision_dir} 但持仓={spread_type}"
+                                        f"[TSLA_OPT][REVERSAL] Vision={vision_dir} 但持仓={spread_type}"
                                         f" → 平仓(下轮再开新方向)"
                                     )
                                     _qqq_close(pos["spread"], dry_run=False, market_order=True)
                                     # 不立即开新仓! 等pending_close确认后下轮step(3)开
 
                 # ── (3) 无仓: 检查进场 ────────────────────────────────
-                elif QQQ_OPTIONS_ENABLED:
+                elif TSLA_OPTIONS_ENABLED:
                     _now_ts = _t.time()
                     if _now_ts - _qqq_vision_last_check["time"] >= _QQQ_VISION_INTERVAL:
                         _qqq_vision_last_check["time"] = _now_ts
@@ -55063,14 +55061,14 @@ def _qqq_options_manager_worker():
                             # 信号去重: 同方向30分钟内不重复
                             if (direction != _qqq_last_signal["direction"] or
                                     _now_ts - _qqq_last_signal["time"] > 1800):
-                                log_to_server(f"[QQQ_OPT][ENTRY] Vision={direction}，开始选spread开仓")
+                                log_to_server(f"[TSLA_OPT][ENTRY] Vision={direction}，开始选spread开仓")
                                 chain = _qqq_chain()
                                 if chain:
                                     spread = _qqq_select(direction, chain)
                                     if spread:
                                         result = _qqq_place(spread, dry_run=False)
                                         log_to_server(
-                                            f"[QQQ_OPT][ENTRY] {spread['type']} "
+                                            f"[TSLA_OPT][ENTRY] {spread['type']} "
                                             f"{spread['long_strike']}/{spread['short_strike']} "
                                             f"x{spread['contracts']} cost=${spread['total_cost']:.0f} "
                                             f"success={result.get('success')}"
@@ -55079,7 +55077,7 @@ def _qqq_options_manager_worker():
                                         _qqq_last_signal["time"] = _now_ts
 
         except Exception as _e_qqq:
-            log_to_server(f"[QQQ_OPT][AUTO][ERROR] {_e_qqq}")
+            log_to_server(f"[TSLA_OPT][AUTO][ERROR] {_e_qqq}")
         _qqq_opt_stop.wait(_QQQ_OPT_CHECK_INTERVAL)
 
 def _start_qqq_options_manager():
@@ -55092,7 +55090,7 @@ def _start_qqq_options_manager():
             name="QQQOptionsManager",
         )
         _qqq_opt_thread.start()
-        log_to_server("[QQQ_OPT] 自动管理线程已启动 (每5分钟检查持仓出场规则)")
+        log_to_server("[TSLA_OPT] 自动管理线程已启动 (每5分钟检查持仓出场规则)")
 
 _start_qqq_options_manager()
 
