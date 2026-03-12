@@ -1,6 +1,6 @@
 """
-QQQ期权垂直价差交易模块 (GCC-0256 S4)
-版本: v2.0
+TSLA期权垂直价差交易模块 (GCC-0256 S4)
+版本: v2.1
 
 策略:
   BUY信号 → Bull Call Spread (买低Call + 卖高Call)
@@ -16,7 +16,7 @@ QQQ期权垂直价差交易模块 (GCC-0256 S4)
 资金控制:
   - 严格 ≤ $1000/笔，向下取整
   - 同时最多1个持仓 (避免资金分散)
-  - 持仓状态持久化到 state/qqq_options_position.json
+  - 持仓状态持久化到 state/tsla_options_position.json
 
 依赖:
   - schwab_data_provider.py
@@ -31,7 +31,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger("qqq_options")
+logger = logging.getLogger("tsla_options")
 
 # 线程锁: 防止后台线程和主线程同时操作持仓文件
 _position_lock = threading.Lock()
@@ -147,7 +147,7 @@ def check_pending_close() -> Optional[str]:
             status = order_data.get("status", "")
             if status == "FILLED":
                 _clear_position()
-                logger.info(f"[QQQ_OPT] 平仓订单{close_order_id}已FILLED，持仓已清除")
+                logger.info(f"[TSLA_OPT] 平仓订单{close_order_id}已FILLED，持仓已清除")
                 return "FILLED"
             elif status in ("CANCELED", "REJECTED", "EXPIRED"):
                 # 平仓失败，恢复为open状态让auto_manage重试
@@ -156,7 +156,7 @@ def check_pending_close() -> Optional[str]:
                     del data["close_order_id"]
                     del data["close_submitted_at"]
                     STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-                logger.warning(f"[QQQ_OPT] 平仓订单{close_order_id}状态={status}，恢复为open重试")
+                logger.warning(f"[TSLA_OPT] 平仓订单{close_order_id}状态={status}，恢复为open重试")
                 return "FAILED"
             else:
                 # PENDING/WORKING/QUEUED等
@@ -167,7 +167,7 @@ def check_pending_close() -> Optional[str]:
                     if elapsed > 600:
                         try:
                             client.cancel_order(int(close_order_id), account_hash)
-                            logger.warning(f"[QQQ_OPT] 平仓订单{close_order_id}超时10min，已取消")
+                            logger.warning(f"[TSLA_OPT] 平仓订单{close_order_id}超时10min，已取消")
                         except Exception:
                             pass
                         with _position_lock:
@@ -180,7 +180,7 @@ def check_pending_close() -> Optional[str]:
                         return "FAILED"
                 return "PENDING"
     except Exception as e:
-        logger.error(f"[QQQ_OPT] 查询平仓订单{close_order_id}异常: {e}")
+        logger.error(f"[TSLA_OPT] 查询平仓订单{close_order_id}异常: {e}")
         return "PENDING"
 
 
@@ -198,7 +198,7 @@ def _get_schwab_client():
 # ── 期权链 ───────────────────────────────────────────────────────────────
 
 def get_option_chain(client=None) -> dict:
-    """获取QQQ期权链 (MIN_DTE ~ MAX_DTE, ATM附近)"""
+    """获取TSLA期权链 (MIN_DTE ~ MAX_DTE, ATM附近)"""
     if client is None:
         client, _ = _get_schwab_client()
 
@@ -215,7 +215,7 @@ def get_option_chain(client=None) -> dict:
     )
 
     if resp.status_code != 200:
-        logger.error(f"[QQQ_OPT] get_option_chain失败: HTTP {resp.status_code}")
+        logger.error(f"[TSLA_OPT] get_option_chain失败: HTTP {resp.status_code}")
         return {}
 
     data = resp.json()
@@ -273,7 +273,7 @@ def select_spread(direction: str, chain: dict = None) -> Optional[dict]:
         chain = get_option_chain()
 
     if not chain or not chain.get("expirations"):
-        logger.error("[QQQ_OPT] 无可用期权链")
+        logger.error("[TSLA_OPT] 无可用期权链")
         return None
 
     price = chain["underlying_price"]
@@ -400,11 +400,11 @@ def place_spread(spread: dict, dry_run: bool = True) -> dict:
             option_bp = bal.get("option_buying_power", 0)
             if option_bp < BUDGET:
                 msg = f"账户期权购买力${option_bp:.0f} < 预算${BUDGET}，跳过下单"
-                logger.warning(f"[QQQ_OPT] {msg}")
+                logger.warning(f"[TSLA_OPT] {msg}")
                 return {"success": False, "error": msg}
-            logger.info(f"[QQQ_OPT] 资金检查通过: option_buying_power=${option_bp:.0f}")
+            logger.info(f"[TSLA_OPT] 资金检查通过: option_buying_power=${option_bp:.0f}")
         except Exception as _bal_e:
-            logger.error(f"[QQQ_OPT] 资金检查异常: {_bal_e}")
+            logger.error(f"[TSLA_OPT] 资金检查异常: {_bal_e}")
             return {"success": False, "error": f"资金检查失败: {_bal_e}"}
 
     try:
@@ -434,7 +434,7 @@ def place_spread(spread: dict, dry_run: bool = True) -> dict:
 
         if dry_run:
             resp = client.preview_order(account_hash, order_spec)
-            logger.info(f"[QQQ_OPT] PREVIEW {label} x{contracts} cost=${spread['total_cost']:.0f} → HTTP {resp.status_code}")
+            logger.info(f"[TSLA_OPT] PREVIEW {label} x{contracts} cost=${spread['total_cost']:.0f} → HTTP {resp.status_code}")
             return {"success": resp.status_code == 200, "dry_run": True, "label": label,
                     "status_code": resp.status_code, "spread": spread}
 
@@ -442,7 +442,7 @@ def place_spread(spread: dict, dry_run: bool = True) -> dict:
         if resp.status_code == 201:
             location = resp.headers.get("Location", "")
             order_id = location.split("/")[-1] if location else ""
-            logger.info(f"[QQQ_OPT] PLACED {label} x{contracts} cost=${spread['total_cost']:.0f} order_id={order_id}")
+            logger.info(f"[TSLA_OPT] PLACED {label} x{contracts} cost=${spread['total_cost']:.0f} order_id={order_id}")
 
             # 保存持仓
             _save_position({
@@ -464,7 +464,7 @@ def place_spread(spread: dict, dry_run: bool = True) -> dict:
             return {"success": False, "error": f"HTTP {resp.status_code}: {error_body}", "spread": spread}
 
     except Exception as e:
-        logger.error(f"[QQQ_OPT] place_spread异常: {e}")
+        logger.error(f"[TSLA_OPT] place_spread异常: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -518,7 +518,7 @@ def close_spread(spread: dict, credit: float = None, dry_run: bool = True,
             order_id = location.split("/")[-1] if location else ""
             # 标记为pending_close, 不立刻清除 — 等确认FILLED后再清
             _mark_pending_close(order_id)
-            logger.info(f"[QQQ_OPT] CLOSE SUBMITTED {label} credit=${float(net_credit)*100*contracts:.0f} order_id={order_id}")
+            logger.info(f"[TSLA_OPT] CLOSE SUBMITTED {label} credit=${float(net_credit)*100*contracts:.0f} order_id={order_id}")
             return {"success": True, "order_id": order_id, "label": label}
         else:
             error_body = ""
@@ -597,7 +597,7 @@ def get_spread_current_value(spread: dict) -> Optional[float]:
 
         return None
     except Exception as e:
-        logger.error(f"[QQQ_OPT] 查询spread当前价值失败: {e}")
+        logger.error(f"[TSLA_OPT] 查询spread当前价值失败: {e}")
         return None
 
 
@@ -643,7 +643,7 @@ def check_exit_rules() -> Optional[dict]:
     # 2. 查询当前价值
     current_value = get_spread_current_value(spread)
     if current_value is None:
-        logger.warning("[QQQ_OPT] 无法获取当前spread价值，跳过检查")
+        logger.warning("[TSLA_OPT] 无法获取当前spread价值，跳过检查")
         return None
 
     pnl_per_contract = current_value - entry_cost
@@ -728,7 +728,7 @@ def auto_manage(dry_run: bool = True) -> Optional[dict]:
     use_market = action in ("STOP_LOSS", "TIME_EXIT", "TRAILING_STOP")
 
     logger.info(
-        f"[QQQ_OPT] 卖出触发: {action} — {exit_signal['reason']} "
+        f"[TSLA_OPT] 卖出触发: {action} — {exit_signal['reason']} "
         f"PnL=${pnl:.0f} market_order={use_market}"
     )
 
@@ -752,7 +752,13 @@ def execute_signal(direction: str, dry_run: bool = True) -> dict:
         direction: "BUY" 或 "SELL"
         dry_run: True=干跑, False=实盘
     """
-    logger.info(f"[QQQ_OPT] 收到{direction}信号, dry_run={dry_run}")
+    logger.info(f"[TSLA_OPT] 收到{direction}信号, dry_run={dry_run}")
+
+    # 0. 检查是否有pending_close (旧仓等确认中, 不开新仓)
+    pending_pos = _load_position(include_pending=True)
+    if pending_pos and pending_pos.get("status") == "pending_close":
+        logger.info("[TSLA_OPT] 旧仓pending_close等确认中，跳过开仓")
+        return {"success": True, "action": "WAIT_PENDING", "reason": "旧仓平仓等确认中"}
 
     # 资金检查统一在 place_spread() 内完成，此处不重复
 
@@ -763,15 +769,15 @@ def execute_signal(direction: str, dry_run: bool = True) -> dict:
         # 同向: 已有持仓，不重复开
         if (direction == "BUY" and existing_type == "BULL_CALL") or \
            (direction == "SELL" and existing_type == "BEAR_PUT"):
-            logger.info(f"[QQQ_OPT] 已有同向持仓 {existing_type}，跳过")
+            logger.info(f"[TSLA_OPT] 已有同向持仓 {existing_type}，跳过")
             return {"success": True, "action": "HOLD", "reason": "已有同向持仓"}
 
         # 反向: 平旧仓, 不立即开新仓 (等pending_close确认后下轮再开)
-        logger.info(f"[QQQ_OPT] 信号反转 {existing_type} → {direction}，平仓等确认")
+        logger.info(f"[TSLA_OPT] 信号反转 {existing_type} → {direction}，平仓等确认")
         old_spread = position["spread"]
         close_result = close_spread(old_spread, dry_run=dry_run, market_order=True)
         if not close_result.get("success") and not dry_run:
-            logger.error(f"[QQQ_OPT] 平仓失败: {close_result}")
+            logger.error(f"[TSLA_OPT] 平仓失败: {close_result}")
             return {"success": False, "error": "旧仓平仓失败", "close_result": close_result}
         # 旧仓进入pending_close，新仓等下轮开
         return {"success": True, "action": "REVERSAL_CLOSE", "reason": f"反转平仓 {existing_type}→{direction}，等确认后再开新仓"}
@@ -791,7 +797,7 @@ def execute_signal(direction: str, dry_run: bool = True) -> dict:
         return {"success": False, "error": f"总成本${spread['total_cost']:.0f}超预算${BUDGET}"}
 
     logger.info(
-        f"[QQQ_OPT] 选中: {spread['type']} {spread['long_strike']}/{spread['short_strike']} "
+        f"[TSLA_OPT] 选中: {spread['type']} {spread['long_strike']}/{spread['short_strike']} "
         f"DTE={spread['dte']} x{spread['contracts']} "
         f"cost=${spread['total_cost']:.0f} max_profit=${spread['total_max_profit']:.0f} "
         f"RR={spread['risk_reward']}:1"
@@ -814,7 +820,7 @@ if __name__ == "__main__":
     if action == "scan":
         chain = get_option_chain()
         if chain:
-            print(f"QQQ = ${chain['underlying_price']}")
+            print(f"TSLA = ${chain['underlying_price']}")
             print(f"到期日: {len(chain['expirations'])}个")
             print(f"预算: ${BUDGET} | 价差: ${SPREAD_WIDTH} | DTE: {MIN_DTE}-{MAX_DTE}天\n")
 
@@ -876,7 +882,7 @@ if __name__ == "__main__":
 
     elif action in ("buy-live", "sell-live"):
         direction = "BUY" if "buy" in action else "SELL"
-        print(f"⚠️  即将实盘下单 {direction} QQQ spread (预算${BUDGET})!")
+        print(f"⚠️  即将实盘下单 {direction} TSLA spread (预算${BUDGET})!")
         confirm = input("确认? (yes/no): ")
         if confirm.lower() == "yes":
             result = execute_signal(direction, dry_run=False)

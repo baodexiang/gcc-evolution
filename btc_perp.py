@@ -455,6 +455,12 @@ def execute_signal(direction: str, dry_run: bool = True) -> dict:
     """完整执行: 检查持仓 → 反向则平 → 开仓"""
     logger.info(f"[BTC_PERP] 收到{direction}信号, dry_run={dry_run}")
 
+    # 0. 检查是否有pending_close (旧仓等确认中, 不开新仓)
+    pending_pos = _load_position(include_pending=True)
+    if pending_pos and pending_pos.get("status") == "pending_close":
+        logger.info("[BTC_PERP] 旧仓pending_close等确认中，跳过开仓")
+        return {"success": True, "action": "WAIT_PENDING", "reason": "旧仓平仓等确认中"}
+
     position = _load_position()
     if position:
         existing_dir = position["direction"]
