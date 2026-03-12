@@ -129,6 +129,8 @@ SYMBOLS_BASE_CONFIG = {
     "OPEN": {"yf_symbol": "OPEN", "type": "stock"},
     "ONDS": {"yf_symbol": "ONDS", "type": "stock"},
     "PLTR": {"yf_symbol": "PLTR", "type": "stock"},
+    # ETF (QQQ期权用)
+    "QQQ": {"yf_symbol": "QQQ", "type": "stock"},
 }
 
 # 默认L1周期 (当主程序配置不可用时)

@@ -296,6 +296,31 @@ class SchwabDataProvider:
                 return self._account_hash
         raise RuntimeError(f"[SCHWAB] 获取account_hash失败: HTTP {resp.status_code}")
 
+    def get_account_balance(self) -> dict:
+        """获取账户余额信息 (GCC-0256 S4: 期权下单前资金检查)
+
+        Returns:
+            {"available_funds": float, "buying_power": float, "cash": float}
+        """
+        try:
+            client = self._get_client()
+            account_hash = self._get_account_hash()
+            resp = client.get_account(account_hash, fields=[client.Account.Fields.POSITIONS])
+            if resp.status_code == 200:
+                data = resp.json()
+                bal = data.get("securitiesAccount", {}).get("currentBalances", {})
+                return {
+                    "available_funds": bal.get("availableFunds", 0),
+                    "buying_power": bal.get("buyingPower", 0),
+                    "cash": bal.get("cashBalance", 0),
+                    "option_buying_power": bal.get("optionBuyingPower", bal.get("buyingPower", 0)),
+                }
+            logger.error(f"[SCHWAB] get_account_balance失败: HTTP {resp.status_code}")
+            return {"available_funds": 0, "buying_power": 0, "cash": 0, "option_buying_power": 0}
+        except Exception as e:
+            logger.error(f"[SCHWAB] get_account_balance异常: {e}")
+            return {"available_funds": 0, "buying_power": 0, "cash": 0, "option_buying_power": 0}
+
     def place_equity_order(self, symbol: str, action: str, quantity: int,
                            order_type: str = "MARKET", dry_run: bool = False) -> dict:
         """

@@ -39860,6 +39860,29 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
     if final_action not in ["BUY", "SELL"]:
         return False
 
+    # GCC-0256 S4: QQQ信号走期权垂直价差通道 (不走股票)
+    QQQ_OPTIONS_ENABLED = True  # 实盘已开启
+    if symbol == "QQQ":
+        if QQQ_OPTIONS_ENABLED:
+            try:
+                from qqq_options import execute_signal as _qqq_execute
+                _qqq_result = _qqq_execute(final_action, dry_run=False)
+                log_to_server(
+                    f"[QQQ_OPT] {final_action} → "
+                    f"success={_qqq_result.get('success')} "
+                    f"spread={_qqq_result.get('spread', {}).get('type', 'N/A')}"
+                )
+                return _qqq_result.get("success", False)
+            except Exception as _qqq_e:
+                log_to_server(f"[QQQ_OPT][ERROR] {final_action}: {_qqq_e}")
+                return False
+        else:
+            log_to_server(
+                f"[QQQ_OPT][观察] {final_action} signal_type={signal_type} "
+                f"→ 期权通道未开启，仅记录"
+            )
+            return None
+
     # GCC-0254: GCC-TM 独占模式 — 白名单美股主路径信号转为观察记录
     if _HAS_GCC_TM and symbol in _GCC_TM_EXECUTE_SYMBOLS and source != "gcc_tm":
         log_to_server(
@@ -54886,3 +54909,160 @@ try:
     log_to_server("[IRS] DivergenceMonitor + ReasoningTraceLog 已启动 (v5.340)")
 except Exception as _e_irs:
     log_to_server(f"[IRS] 启动异常(非致命): {_e_irs}")
+
+# GCC-0256 S4: QQQ期权持仓自动管理线程 (每5分钟检查出场规则)
+_qqq_opt_thread = None
+_qqq_opt_stop = threading.Event()
+_QQQ_OPT_CHECK_INTERVAL = 300  # 5分钟
+
+_qqq_last_signal = {"direction": None, "time": 0}  # 防重复信号
+
+def _qqq_detect_trend() -> Optional[str]:
+    """读取QQQ Vision缓存结果判断趋势方向, 返回 "BUY"/"SELL"/None
+
+    共用主程序4H baseline刷新周期(QQQ已加入SYMBOLS_BASE_CONFIG)
+    不额外调API, 直接读 read_vision_result 缓存
+    只有confidence>60%的明确方向才触发信号
+    """
+    try:
+        # 直接读缓存 — 主程序baseline每4H已刷新QQQ的Vision结果
+        result = read_vision_result("QQQ")
+        if not result or not result.get("current"):
+            return None
+
+        current = result["current"]
+        direction = current.get("direction", "").upper()
+        confidence = current.get("confidence", 0)
+
+        if confidence < 0.6:
+            return None
+
+        if direction in ("UP", "BULLISH"):
+            log_to_server(f"[QQQ_OPT][VISION] QQQ趋势=UP conf={confidence:.0%}")
+            return "BUY"
+        elif direction in ("DOWN", "BEARISH"):
+            log_to_server(f"[QQQ_OPT][VISION] QQQ趋势=DOWN conf={confidence:.0%}")
+            return "SELL"
+        return None
+    except Exception as _e:
+        log_to_server(f"[QQQ_OPT][VISION] 读取缓存异常: {_e}")
+        return None
+
+_qqq_vision_last_check = {"time": 0}  # Vision读取频率控制
+_QQQ_VISION_INTERVAL = 14400  # 每4小时读一次Vision缓存(匹配baseline刷新周期, 不额外调API)
+
+def _qqq_options_manager_worker():
+    """后台线程: 盘中每5分钟循环
+
+    进场: Vision(GPT-5.2) 每4小时检测QQQ趋势 → 开仓(匹配baseline刷新周期)
+    出场: 每5分钟检查4条出场规则 + Vision反转检测
+    确认: 每5分钟确认pending_close订单是否FILLED
+
+    流程设计:
+      - 进场调用一次Vision判断方向 → 开仓
+      - 出场调用一次Vision确认反转 → 平仓
+      - 价格止盈/止损/时间止损不需要Vision
+      - 反转时只平仓不立即开新仓(等pending_close确认后下轮再开)
+    """
+    import time as _t
+    _t.sleep(60)  # 启动延迟1分钟
+    while not _qqq_opt_stop.is_set():
+        try:
+            # 只在美股盘中运行 (9:30-15:50 ET, 留10分钟给平仓成交)
+            _now_et = get_ny_now()
+            _mkt_open = _now_et.replace(hour=9, minute=30, second=0)
+            _mkt_close = _now_et.replace(hour=15, minute=50, second=0)
+            _is_weekday = _now_et.weekday() < 5
+            if _is_weekday and _mkt_open <= _now_et <= _mkt_close:
+                from qqq_options import (
+                    auto_manage as _qqq_auto, _load_position as _qqq_pos,
+                    close_spread as _qqq_close, check_pending_close as _qqq_check_pending,
+                    place_spread as _qqq_place, select_spread as _qqq_select,
+                    get_option_chain as _qqq_chain,
+                )
+
+                QQQ_OPTIONS_ENABLED = True  # 实盘已开启
+
+                # ── (1) 确认平仓成交 ──────────────────────────────────
+                pending_status = _qqq_check_pending()
+                if pending_status == "PENDING":
+                    # 有平仓订单在等待，本轮什么都不做
+                    _qqq_opt_stop.wait(_QQQ_OPT_CHECK_INTERVAL)
+                    continue
+                elif pending_status == "FAILED":
+                    log_to_server("[QQQ_OPT][AUTO] 平仓订单失败，恢复open等下轮重试")
+
+                pos = _qqq_pos()
+
+                # ── (2) 有仓: 检查出场 ────────────────────────────────
+                if pos:
+                    # 2a. 价格止盈/止损/时间止损 (每5分钟, 不需要Vision)
+                    exit_result = _qqq_auto(dry_run=False)
+                    if exit_result:
+                        log_to_server(
+                            f"[QQQ_OPT][EXIT] {exit_result['action']}: {exit_result['reason']} "
+                            f"PnL=${exit_result.get('pnl', 0):.0f} "
+                            f"success={exit_result['result'].get('success')}"
+                        )
+                    else:
+                        # 2b. Vision反转检测 (每4小时)
+                        _now_ts = _t.time()
+                        if QQQ_OPTIONS_ENABLED and _now_ts - _qqq_vision_last_check["time"] >= _QQQ_VISION_INTERVAL:
+                            _qqq_vision_last_check["time"] = _now_ts
+                            vision_dir = _qqq_detect_trend()
+                            if vision_dir:
+                                spread_type = pos["spread"]["type"]
+                                is_reversal = (
+                                    (vision_dir == "SELL" and spread_type == "BULL_CALL") or
+                                    (vision_dir == "BUY" and spread_type == "BEAR_PUT")
+                                )
+                                if is_reversal:
+                                    log_to_server(
+                                        f"[QQQ_OPT][REVERSAL] Vision={vision_dir} 但持仓={spread_type}"
+                                        f" → 平仓(下轮再开新方向)"
+                                    )
+                                    _qqq_close(pos["spread"], dry_run=False, market_order=True)
+                                    # 不立即开新仓! 等pending_close确认后下轮step(3)开
+
+                # ── (3) 无仓: 检查进场 ────────────────────────────────
+                elif QQQ_OPTIONS_ENABLED:
+                    _now_ts = _t.time()
+                    if _now_ts - _qqq_vision_last_check["time"] >= _QQQ_VISION_INTERVAL:
+                        _qqq_vision_last_check["time"] = _now_ts
+                        direction = _qqq_detect_trend()
+                        if direction:
+                            # 信号去重: 同方向30分钟内不重复
+                            if (direction != _qqq_last_signal["direction"] or
+                                    _now_ts - _qqq_last_signal["time"] > 1800):
+                                log_to_server(f"[QQQ_OPT][ENTRY] Vision={direction}，开始选spread开仓")
+                                chain = _qqq_chain()
+                                if chain:
+                                    spread = _qqq_select(direction, chain)
+                                    if spread:
+                                        result = _qqq_place(spread, dry_run=False)
+                                        log_to_server(
+                                            f"[QQQ_OPT][ENTRY] {spread['type']} "
+                                            f"{spread['long_strike']}/{spread['short_strike']} "
+                                            f"x{spread['contracts']} cost=${spread['total_cost']:.0f} "
+                                            f"success={result.get('success')}"
+                                        )
+                                        _qqq_last_signal["direction"] = direction
+                                        _qqq_last_signal["time"] = _now_ts
+
+        except Exception as _e_qqq:
+            log_to_server(f"[QQQ_OPT][AUTO][ERROR] {_e_qqq}")
+        _qqq_opt_stop.wait(_QQQ_OPT_CHECK_INTERVAL)
+
+def _start_qqq_options_manager():
+    global _qqq_opt_thread
+    if _qqq_opt_thread is None or not _qqq_opt_thread.is_alive():
+        _qqq_opt_stop.clear()
+        _qqq_opt_thread = threading.Thread(
+            target=_qqq_options_manager_worker,
+            daemon=True,
+            name="QQQOptionsManager",
+        )
+        _qqq_opt_thread.start()
+        log_to_server("[QQQ_OPT] 自动管理线程已启动 (每5分钟检查持仓出场规则)")
+
+_start_qqq_options_manager()
