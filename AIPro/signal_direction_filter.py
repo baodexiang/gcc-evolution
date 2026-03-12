@@ -21,7 +21,8 @@ class ValidSignal:
     timestamp: str
     direction: str
     source: str
-
+    symbol: str = ""
+    price: float = 0.0
 
 @dataclass
 class DirectionResult:
@@ -119,6 +120,29 @@ class SignalDirectionFilter:
         kept = [s for s in signals if self._parse_ts(s.get("timestamp", "1970-01-01T00:00:00+00:00")) >= cutoff]
         if len(kept) != len(signals):
             self._rewrite_jsonl(self.valid_path, kept)
+
+    def weekly_reset(self) -> bool:
+        """每周一NY 8AM清空信号数据，恢复中性方向。返回True表示已重置。"""
+        reset_marker = self.data_dir / "last_weekly_reset.txt"
+        from zoneinfo import ZoneInfo
+        now_ny = datetime.now(ZoneInfo("America/New_York"))
+        if now_ny.weekday() != 0:  # 0=Monday
+            return False
+        if now_ny.hour < 8:
+            return False
+        # 本周一已重置过？
+        reset_date = now_ny.strftime("%Y-%m-%d")
+        if reset_marker.exists():
+            last = reset_marker.read_text(encoding="utf-8").strip()
+            if last == reset_date:
+                return False
+        # 清空信号数据
+        if self.valid_path.exists():
+            self.valid_path.write_text("", encoding="utf-8")
+        if self.filtered_path.exists():
+            self.filtered_path.write_text("", encoding="utf-8")
+        reset_marker.write_text(reset_date, encoding="utf-8")
+        return True
 
     def record_signal(self, signal: ValidSignal) -> None:
         self._cleanup_old_signals()
@@ -246,11 +270,14 @@ class SignalDirectionFilter:
                     "signal_id": signal.signal_id,
                     "source": signal.source,
                     "direction": signal_dir,
+                    "symbol": signal.symbol,
+                    "price": signal.price,
                     "result": direction_result.direction,
                     "reason": direction_result.reason,
                     "observe_only": self.observe_only,
                     "would_block": True,
                     "blocked": blocked,
+                    "outcome": "pending",
                     "buy_ratio_4h": direction_result.buy_ratio_4h,
                     "buy_ratio_week": direction_result.buy_ratio_week,
                     "sell_ratio_4h": direction_result.sell_ratio_4h,
@@ -259,3 +286,55 @@ class SignalDirectionFilter:
             )
 
         return not blocked
+
+    def backfill_outcomes(self, price_map: Dict[str, float]) -> int:
+        """
+        4H 反事实价格回填: 对 outcome=pending 且已过 4H 的 block 记录，
+        根据 price_map 中该 symbol 当前价格判定 correct/incorrect。
+
+        判定逻辑:
+        - Block 了 SELL + 价格涨了 → correct（避免了错卖）
+        - Block 了 SELL + 价格跌了 → incorrect（错过了正确卖出）
+        - Block 了 BUY + 价格跌了 → correct（避免了错买）
+        - Block 了 BUY + 价格涨了 → incorrect（错过了正确买入）
+
+        Returns: 本次回填的记录数。
+        """
+        rows = self._read_jsonl(self.filtered_path)
+        if not rows:
+            return 0
+
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=4)
+        updated = 0
+
+        for row in rows:
+            if row.get("outcome") != "pending":
+                continue
+            block_price = row.get("price", 0)
+            sym = row.get("symbol", "")
+            if not sym or not block_price:
+                continue
+            ts = self._parse_ts(row.get("timestamp", "1970-01-01T00:00:00+00:00"))
+            if ts > cutoff:
+                continue  # 不满4H，跳过
+            current_price = price_map.get(sym)
+            if current_price is None:
+                continue
+            change_pct = (current_price - block_price) / block_price if block_price else 0.0
+            sig_dir = row.get("direction", "")
+            if sig_dir == "sell":
+                outcome = "correct" if change_pct > 0 else "incorrect"
+            elif sig_dir == "buy":
+                outcome = "correct" if change_pct < 0 else "incorrect"
+            else:
+                continue
+            row["outcome"] = outcome
+            row["backfill_price"] = current_price
+            row["backfill_ts"] = now.isoformat()
+            row["price_change_pct"] = round(change_pct * 100, 2)
+            updated += 1
+
+        if updated:
+            self._rewrite_jsonl(self.filtered_path, rows)
+        return updated

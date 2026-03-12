@@ -6044,15 +6044,8 @@ class PriceScanEngine:
                 return {"executed": False, "reason": "v21.2: P0发送失败冷却中"}
             else:
                 del self._p0_fail_cooldown[symbol]
-        # v21.19: P0每日限次回流检查 (server已限次今日不再发)
-        if not _p0_safety_exempt and hasattr(self, '_p0_daily_banned'):
-            _action = signal_data.get("signal", "")
-            _ban_key = f"{symbol}_{_action}"
-            _ban_date = self._p0_daily_banned.get(_ban_key)
-            if _ban_date == get_today_date_ny():
-                logger.info(f"[v21.19] {symbol} {_action} 今日已限次，跳过发送")
-                _record_key004_trade(False)
-                return {"executed": False, "reason": "v21.19: 今日P0限次已满"}
+        # v21.19: P0每日限次回流检查 — v3.670: 已取消(server侧限次已移除)
+        # 原逻辑: server回告今日限次已满则跳过，现在不再检查
 
         # v21.21: Signal Gate 微观结构过滤 (Phase1: 仅观察不拦截)
         # 绿色通道: 移动止损/移动止盈/暴跌平仓 直接放行
@@ -8555,11 +8548,7 @@ class PriceScanEngine:
             logger.info(f"[v19] {symbol} SuperTrend {action} → HOLD | {pos_reason}")
             return
 
-        # v21.20: 分型过滤
-        frac_ok, frac_reason = check_fractal_filter(bars, action)
-        if not frac_ok:
-            logger.info(f"[v21.20] {symbol} SuperTrend {action} 被分型过滤: {frac_reason}")
-            return
+        # v21.20: 分型过滤 — v3.670: 已取消
 
         # 触发信号!
         logger.info(f"[v19] {symbol} SuperTrend触发{action}!")
@@ -9463,11 +9452,7 @@ class PriceScanEngine:
             logger.info(f"[NStructPlugin] {main_symbol} {action} 配额限制: {limit_reason}")
             return
 
-        # v21.20: 分型过滤
-        frac_ok, frac_reason = check_fractal_filter(bars, action)
-        if not frac_ok:
-            logger.info(f"[v21.20] {main_symbol} N字 {action} 被分型过滤: {frac_reason}")
-            return
+        # v21.20: 分型过滤 — v3.670: 已取消
 
         # KEY-004: 因子观测台记录
         try:
@@ -9650,11 +9635,7 @@ class PriceScanEngine:
             logger.info("=" * 70)
             return
 
-        # v21.20: 分型过滤
-        frac_ok, frac_reason = check_fractal_filter(bars, action)
-        if not frac_ok:
-            logger.info(f"[v21.20] {symbol} 缠论BS {action} 被分型过滤: {frac_reason}")
-            return
+        # v21.20: 分型过滤 — v3.670: 已取消
 
         # 触发信号!
         logger.info(f"[v21.1] {symbol} 缠论BS触发{action}!")

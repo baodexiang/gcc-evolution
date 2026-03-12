@@ -50324,6 +50324,23 @@ def key009_dashboard():
         _phase, _slot, _retries = "UNKNOWN", "", 0
     _sf_mode = _get_signal_filter_mode()
     _ds_health = _get_data_source_health_snapshot()
+    # KEY-010: 方向过滤器实时状态
+    _sf_detail = {"mode": _sf_mode}
+    if signal_filter:
+        try:
+            _dir_result = signal_filter.evaluate_direction()
+            _sf_detail.update({
+                "direction": _dir_result.direction,
+                "reason": _dir_result.reason,
+                "buy_ratio_4h": round(_dir_result.buy_ratio_4h, 3),
+                "sell_ratio_4h": round(_dir_result.sell_ratio_4h, 3),
+                "buy_ratio_week": round(_dir_result.buy_ratio_week, 3),
+                "sell_ratio_week": round(_dir_result.sell_ratio_week, 3),
+                "sample_4h": _dir_result.sample_4h,
+                "sample_week": _dir_result.sample_week,
+            })
+        except Exception:
+            pass
     for _rk in ("24h", "1w", "1m"):
         d = multi_data.get(_rk)
         if isinstance(d, dict):
@@ -50334,6 +50351,7 @@ def key009_dashboard():
                 "signal_filter": _sf_mode
             }
             d["data_source_health"] = _ds_health
+            d["signal_direction_filter"] = _sf_detail
     multi_data = _repair_key009_evo_memory(multi_data)
 
     # 读取dashboard HTML模板并注入多范围数据
@@ -51129,6 +51147,14 @@ def handle_p0_signal():
         }
         symbol = REVERSE_SYMBOL_MAP.get(scan_symbol, scan_symbol)
 
+        # KEY-010: 每周一NY 8AM重置方向过滤器（恢复中性）
+        if signal_filter:
+            try:
+                if signal_filter.weekly_reset():
+                    log_to_server("[SignalFilter] 每周一重置完成，方向恢复中性")
+            except Exception as _wr_e:
+                log_to_server(f"[SignalFilter] weekly_reset失败: {_wr_e}")
+
         # KEY-010 S6: 记录有效信号（观察模式，进入下单逻辑前）
         if signal_filter and ValidSignal and signal in ("BUY", "SELL"):
             try:
@@ -51214,42 +51240,15 @@ def handle_p0_signal():
         
         log_to_server(f"[P0] {symbol} 资产类型: {'加密货币' if is_crypto else '美股'} 仓位:{position_units}")
 
-        # v3.499: 剥头皮每日偏向检查
-        scalp_allowed, scalp_reason = check_scalp_signal_allowed(symbol, signal, signal_type)
-        if not scalp_allowed:
-            log_to_server(f"[P0][剥头皮过滤] {symbol} {signal} → 拒绝 ({scalp_reason})")
-            daily_bias = get_scalp_daily_bias(symbol)
-            return jsonify({
-                "success": False,
-                "symbol": symbol,
-                "signal": signal,
-                "signal_type": signal_type,
-                "reason": scalp_reason,
-                "daily_bias": daily_bias,
-                "executed": False,
-            })
-        else:
-            log_to_server(f"[P0][剥头皮通过] {symbol} {signal} ({scalp_reason})")
+        # v3.499: 剥头皮每日偏向检查 — v3.670: 已取消，所有P0信号放行
+        # scalp_allowed, scalp_reason = check_scalp_signal_allowed(symbol, signal, signal_type)
+        log_to_server(f"[P0][偏向检查已取消] {symbol} {signal} {signal_type}")
 
         # GCC-0194: N-Gate/HOLD_BAND/signal_gate/FilterChain 已在扫描引擎统一过滤
 
-        # v21.18: P0每日同方向发送限次 (最多3次/品种/方向)
-        global _p0_daily_send_count, _p0_daily_send_date
-        from zoneinfo import ZoneInfo as _p0_zi
-        _today = datetime.now(_p0_zi("America/New_York")).strftime("%Y-%m-%d")
-        if _p0_daily_send_date != _today:
-            _p0_daily_send_count = {}
-            _p0_daily_send_date = _today
-        _p0_dc_key = f"{symbol}_{signal}"
-        _p0_dc_val = _p0_daily_send_count.get(_p0_dc_key, 0)
-        _P0_DAILY_MAX = 3
-        if _p0_dc_val >= _P0_DAILY_MAX:
-            log_to_server(f"[P0限次] {symbol} {signal} 今日已发送{_p0_dc_val}次，超限拦截")
-            return jsonify({
-                "success": False, "symbol": symbol, "signal": signal,
-                "signal_type": signal_type, "reason": f"P0每日限次({_p0_dc_val}/{_P0_DAILY_MAX})",
-                "executed": False,
-            })
+        # v21.18: P0每日同方向发送限次 — v3.670: 已取消，不再限次
+        # 原逻辑: 最多3次/品种/方向，现在放行所有
+        log_to_server(f"[P0] {symbol} {signal} {signal_type} (每日限次已取消)")
 
         # 执行交易
         executed = False
@@ -51309,6 +51308,7 @@ def handle_p0_signal():
                         except Exception as _sf_buy_e:
                             log_to_server(f"[SignalFilter] BUY过滤调用失败: {_sf_buy_e}")
 
+                if not reason:
                     # 执行买入
                     log_to_server(f"[P0] 执行买入: {symbol} pos={position_units}")
                     try:
@@ -51445,6 +51445,7 @@ def handle_p0_signal():
                         except Exception as _sf_sell_e:
                             log_to_server(f"[SignalFilter] SELL过滤调用失败: {_sf_sell_e}")
 
+                if not reason:
                     log_to_server(f"[P0] 执行卖出: {symbol} pos={position_units}")
                     try:
                         if is_crypto:

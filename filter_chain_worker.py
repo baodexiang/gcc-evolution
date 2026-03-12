@@ -263,9 +263,9 @@ def run_once():
                 if v_decision == "HOLD":
                     weight = 0.0
 
-                # Step 3: Volume健康加成
-                if not vol_blocked and vol_score >= 0.7:
-                    weight = round(weight * 1.1, 3)
+                # Step 3: Volume健康加成 — v3.670: 已取消(量经常出意外)
+                # if not vol_blocked and vol_score >= 0.7:
+                #     weight = round(weight * 1.1, 3)
 
                 # Step 4: 计算 execution_size
                 # v1.3: SKIP阈值从0.5降至0.35 — 防止双降权(0.7*0.7=0.49)误杀

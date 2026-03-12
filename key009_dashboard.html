@@ -369,6 +369,8 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <!-- Tab: 仓位控制 -->
 <div class="tab-content" id="tab-baseline">
 <div class="summary" id="bl-summary"></div>
+<h2>方向过滤器 (SignalFilter)</h2>
+<div class="summary" id="sf-summary"></div>
 <h2>基准K线 + 唐安琪周期</h2>
 <table><thead><tr><th>品种</th><th>Buy基准</th><th>Sell基准</th><th>Buy距今</th><th>Sell距今</th><th>DC hl_avg</th><th>周期趋势</th><th>成熟度</th><th>周期计数</th><th>更新时间</th></tr></thead>
 <tbody id="bl-state-body"></tbody></table>
@@ -411,7 +413,6 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 
 <!-- 美股执行区域 -->
 <h2>🟢 美股 GCC-TM 执行</h2>
-<div id="gcctm-us-status" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
 <table>
 <thead><tr>
   <th>时间</th><th>品种</th><th>GCC裁决</th><th>主程序</th><th>一致</th>
@@ -420,22 +421,27 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <tbody id="gcctm-us-body"></tbody>
 </table>
 
-<!-- 加密观察区域 -->
-<h2 style="margin-top:24px">🔍 加密货币 GCC-TM 观察</h2>
-<div id="gcctm-crypto-status" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
+<!-- crypto execute -->
+<h2 style="margin-top:24px">Crypto GCC-TM Execute</h2>
 <table>
 <thead><tr>
-  <th>时间</th><th>品种</th><th>GCC裁决</th><th>主程序</th><th>一致</th>
-  <th>买票</th><th>卖票</th><th>最强信号源</th><th>树搜索</th><th>共识</th>
+  <th>Time</th><th>Symbol</th><th>GCC</th><th>Main</th><th>Match</th>
+  <th>Buy</th><th>Sell</th><th>Source</th><th>Tree</th><th>Consensus</th>
+</tr></thead>
+<tbody id="gcctm-crypto-exec-body"></tbody>
+</table>
+
+<!-- crypto observe -->
+<h2 style="margin-top:24px">Crypto GCC-TM Observe</h2>
+<table>
+<thead><tr>
+  <th>Time</th><th>Symbol</th><th>GCC</th><th>Main</th><th>Match</th>
+  <th>Buy</th><th>Sell</th><th>Source</th><th>Tree</th><th>Consensus</th>
 </tr></thead>
 <tbody id="gcctm-crypto-body"></tbody>
 </table>
 
 <!-- Pipeline 任务 -->
-<h2 style="margin-top:24px">Pipeline 任务</h2>
-<div id="gcctm-summary" style="margin-bottom:12px;font-size:0.9em;color:#656d76"></div>
-<div id="gcctm-pipeline" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:18px"></div>
-
 <h2 style="margin-top:20px">KNN经验卡片</h2>
 <div id="gcctm-knn-cards" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px"></div>
 </div>
@@ -1117,28 +1123,34 @@ function _doRender() {
     $('bv-pattern-body').innerHTML = bvpHTML || '<tr><td colspan="3" style="color:#656d76">无数据</td></tr>';
 
     // ── 门控拦截 Tab ──
-    const gTotals = gt.totals || {};
-    const gDetail = gt.detail || {};
+    const gateBox = (gt && (gt.totals || gt.detail)) ? gt : (DATA.gates || {});
+    const gateValidated = DATA.block_validation || {};
+    const gTotals = gateBox.totals_adjusted || gateBox.totals || {};
+    const gDetail = gateBox.detail || {};
     const totalGates = Object.values(gTotals).reduce((a,b)=>a+b, 0);
     const gateNames = Object.entries(gTotals).sort((a,b)=>b[1]-a[1]);
-    // Summary cards
-    let gateSummaryHTML = `<div class="card"><div class="label">总拦截</div><div class="value ${totalGates>0?'yellow':'green'}">${totalGates}</div></div>`;
+    let gateSummaryHTML = `<div class="card"><div class="label">Gate Blocks</div><div class="value ${totalGates>0?'yellow':'green'}">${totalGates}</div></div>`;
+    if ((gateValidated.total_blocked||0) > 0) {
+        gateSummaryHTML += `<div class="card"><div class="label">Validated Blocks</div><div class="value blue">${gateValidated.total_blocked||0}</div><div class="sub">${gateValidated.validated||0} reviewed</div></div>`;
+    }
     for (const [gn, gc] of gateNames) {
         if (gc > 0) {
             const symCount = Object.keys(gDetail[gn] || {}).length;
-            gateSummaryHTML += `<div class="card"><div class="label">${gn}</div><div class="value yellow">${gc}</div><div class="sub">${symCount}个品种</div></div>`;
+            gateSummaryHTML += `<div class="card"><div class="label">${gn}</div><div class="value yellow">${gc}</div><div class="sub">${symCount} symbols</div></div>`;
         }
     }
-    if (totalGates === 0) gateSummaryHTML += `<div class="card"><div class="label">状态</div><div class="value green">无拦截</div></div>`;
+    if (totalGates === 0) gateSummaryHTML += `<div class="card"><div class="label">Status</div><div class="value green">No gate blocks</div></div>`;
     $('gate-summary').innerHTML = gateSummaryHTML;
 
-    // Gate funnel (distribution)
     const maxGate = Math.max(...Object.values(gTotals), 1);
     $('gate-funnel').innerHTML = gateNames.filter(e=>e[1]>0).map(([gn, gc]) =>
         `<div style="margin:4px 0;font-size:0.85em">${gn}: ${barHTML(gc,maxGate,'yellow',250)} <strong>${gc}</strong> (${(gc/totalGates*100).toFixed(0)}%)</div>`
-    ).join('') || '<div style="color:#1a7f37;padding:10px">无拦截</div>';
+    ).join('') || (
+        (gateValidated.total_blocked||0) > 0
+            ? `<div style="color:#9a6700;padding:10px">Gate aggregate is 0, but block validation has ${gateValidated.total_blocked||0} historical blocked records</div>`
+            : '<div style="color:#1a7f37;padding:10px">No gate blocks</div>'
+    );
 
-    // Gate detail table
     let gHTML = '';
     for (const [gname, cnt] of gateNames) {
         if (cnt === 0) continue;
@@ -1146,9 +1158,12 @@ function _doRender() {
         const pct = totalGates > 0 ? (cnt/totalGates*100).toFixed(0)+'%' : '-';
         gHTML += `<tr><td><strong>${gname}</strong></td><td>${barHTML(cnt,maxGate,'yellow',120)} ${cnt}</td><td>${pct}</td><td style="font-size:0.78em;color:#656d76">${topSymbols(detail,5)}</td></tr>`;
     }
-    $('gate-body').innerHTML = gHTML || '<tr><td colspan="4" style="color:#1a7f37">无拦截</td></tr>';
+    $('gate-body').innerHTML = gHTML || (
+        (gateValidated.total_blocked||0) > 0
+            ? `<tr><td colspan="4" style="color:#9a6700">Gate aggregate detail is empty; validated blocked records = ${gateValidated.total_blocked||0}. See Block Validation tab.</td></tr>`
+            : '<tr><td colspan="4" style="color:#1a7f37">No gate blocks</td></tr>'
+    );
 
-    // Gate heatmap: gate × symbol
     const allGateSyms = new Set();
     for (const detail of Object.values(gDetail)) {
         for (const sym of Object.keys(detail || {})) allGateSyms.add(sym);
@@ -1156,10 +1171,9 @@ function _doRender() {
     const gateSymList = [...allGateSyms].sort();
     const activeGates = gateNames.filter(e=>e[1]>0).map(e=>e[0]);
     if (activeGates.length && gateSymList.length) {
-        let hmHTML = '<table><thead><tr><th>品种</th>';
+        let hmHTML = '<table><thead><tr><th>Symbol</th>';
         activeGates.forEach(g => hmHTML += `<th>${g}</th>`);
-        hmHTML += '<th>合计</th></tr></thead><tbody>';
-        // find max for color intensity
+        hmHTML += '<th>Symbol</th></tr></thead><tbody>';
         const maxCell = Math.max(...gateSymList.map(sym => activeGates.reduce((s,g)=>s+(gDetail[g]||{})[sym]||0, 0)), 1);
         for (const sym of gateSymList) {
             let rowTotal = 0;
@@ -1175,10 +1189,10 @@ function _doRender() {
         hmHTML += '</tbody></table>';
         $('gate-heatmap').innerHTML = hmHTML;
     } else {
-        $('gate-heatmap').innerHTML = '<div style="color:#656d76;padding:10px">无拦截数据</div>';
+        $('gate-heatmap').innerHTML = (gateValidated.total_blocked||0) > 0
+            ? `<div style="color:#9a6700;padding:10px">Gate heatmap detail is empty; validated blocked records = ${gateValidated.total_blocked||0}</div>`
+            : '<div style="color:#656d76;padding:10px">?????</div>';
     }
-
-    // ── GCC任务 Tab ──
     let mhtml = '';
     if (m.vf_acc_avg !== undefined) mhtml += `<div class="metric"><div class="k">VF Accuracy</div><div class="v">${(m.vf_acc_avg*100).toFixed(1)}%</div></div>`;
     if (m.nc_scored !== undefined) mhtml += `<div class="metric"><div class="k">NC Scored</div><div class="v">${m.nc_scored}</div></div>`;
@@ -1454,6 +1468,25 @@ function _doRender() {
             <div class="card"><div class="label">第二名</div><div class="value" style="color:${second && second.accRaw != null && second.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${secondText}</div><div class="sub">${secondSub}</div></div>`);
     }
 
+    // ── 方向过滤器 SignalFilter ──
+    const sf = DATA.signal_direction_filter || {};
+    const sfMode = sf.mode || 'OFF';
+    const sfDir = sf.direction || 'N/A';
+    const sfDirColor = sfDir === 'BUY_DOMINANT' ? '#1a7f37' : sfDir === 'SELL_DOMINANT' ? '#cf222e' : sfDir === 'NEUTRAL' ? '#0969da' : '#656d76';
+    const sfModeColor = sfMode === 'ENFORCE' ? '#1a7f37' : sfMode === 'OBSERVE' ? '#9a6700' : '#656d76';
+    const sfBuy4h = sf.buy_ratio_4h != null ? (sf.buy_ratio_4h * 100).toFixed(1) + '%' : '-';
+    const sfSell4h = sf.sell_ratio_4h != null ? (sf.sell_ratio_4h * 100).toFixed(1) + '%' : '-';
+    const sfBuyW = sf.buy_ratio_week != null ? (sf.buy_ratio_week * 100).toFixed(1) + '%' : '-';
+    const sfSellW = sf.sell_ratio_week != null ? (sf.sell_ratio_week * 100).toFixed(1) + '%' : '-';
+    const sfSample4h = sf.sample_4h != null ? sf.sample_4h : '-';
+    const sfSampleW = sf.sample_week != null ? sf.sample_week : '-';
+    $('sf-summary').innerHTML = `
+        <div class="card"><div class="label">模式</div><div class="value" style="color:${sfModeColor}">${sfMode}</div><div class="sub">ENFORCE=真拦截</div></div>
+        <div class="card"><div class="label">当前方向</div><div class="value" style="color:${sfDirColor}">${sfDir}</div><div class="sub">${sf.reason || ''}</div></div>
+        <div class="card"><div class="label">4H Buy/Sell</div><div class="value blue">${sfBuy4h} / ${sfSell4h}</div><div class="sub">样本 ${sfSample4h}</div></div>
+        <div class="card"><div class="label">本周 Buy/Sell</div><div class="value blue">${sfBuyW} / ${sfSellW}</div><div class="sub">样本 ${sfSampleW}</div></div>
+    `;
+
     const bl = DATA.baseline || {};
     const blStats = bl.stats || {};
     const blState = bl.state || {};
@@ -1607,8 +1640,20 @@ function _doRender() {
             const wrPct = (r.win_rate*100).toFixed(1);
             const wrC = r.win_rate>=0.5?'#1a7f37':r.win_rate>=0.35?'#9a6700':'#cf222e';
             const scoreC = r.score>70?'#1a7f37':r.score>=50?'#9a6700':'#cf222e';
-            const actionBg = r.action==='加强'?'#dafbe1':r.action==='维持'?'#fff8c5':r.action==='降低频次'?'#ffebe9':'#ddf4ff';
-            const actionColor = r.action==='加强'?'#1a7f37':r.action==='维持'?'#9a6700':r.action==='降低频次'?'#cf222e':'#0969da';
+            let adviceText = r.action || '??';
+            const rawAdvice = String(r.action || '').toUpperCase();
+            const isWatchMode = rawAdvice.includes('WATCH') || rawAdvice.includes('??') || rawAdvice.includes('??????');
+            let actionBg = r.action==='??'?'#dafbe1':r.action==='??'?'#fff8c5':r.action==='????'?'#ffebe9':'#ddf4ff';
+            let actionColor = r.action==='??'?'#1a7f37':r.action==='??'?'#9a6700':r.action==='????'?'#cf222e':'#0969da';
+            if ((r.trades || 0) < 5) {
+                adviceText = isWatchMode ? `?????(${r.trades}?, WATCH)` : `?????(${r.trades}?)`;
+                actionBg = '#f6f8fa';
+                actionColor = '#656d76';
+            } else if ((r.trades || 0) < 10) {
+                adviceText = isWatchMode ? `????(${r.trades}?, WATCH)` : `????(${r.trades}?)`;
+                actionBg = '#fff8c5';
+                actionColor = '#9a6700';
+            }
             return `<tr>
                 <td style="font-weight:700;text-align:center">${r.rank}</td>
                 <td><strong>${r.source}</strong></td>
@@ -1617,7 +1662,7 @@ function _doRender() {
                 <td style="color:${r.avg_pnl>=0?'#1a7f37':'#cf222e'}">${r.avg_pnl>=0?'+':''}${r.avg_pnl.toFixed(2)}%</td>
                 <td style="color:${r.total_pnl>=0?'#1a7f37':'#cf222e'}">${r.total_pnl>=0?'+':''}${r.total_pnl.toFixed(1)}%</td>
                 <td style="color:${scoreC};font-weight:700;font-size:1.1em">${r.score}</td>
-                <td><span class="badge" style="background:${actionBg};color:${actionColor}">${r.action}</span></td>
+                <td><span class="badge" style="background:${actionBg};color:${actionColor}">${adviceText}</span></td>
             </tr>`;
         }).join('');
     } else {
@@ -1824,14 +1869,55 @@ function _doRender() {
         collabList.innerHTML = '<div style="color:#1a7f37;font-size:0.85em">No collaboration issues detected</div>';
     }
     // Memory history
+    const repairMojibake = (value) => {
+        if (typeof value !== 'string' || !value) return value;
+        const CP1252_MAP = {
+            0x20AC: 0x80, 0x201A: 0x82, 0x0192: 0x83, 0x201E: 0x84, 0x2026: 0x85,
+            0x2020: 0x86, 0x2021: 0x87, 0x02C6: 0x88, 0x2030: 0x89, 0x0160: 0x8A,
+            0x2039: 0x8B, 0x0152: 0x8C, 0x017D: 0x8E, 0x2018: 0x91, 0x2019: 0x92,
+            0x201C: 0x93, 0x201D: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97,
+            0x02DC: 0x98, 0x2122: 0x99, 0x0161: 0x9A, 0x203A: 0x9B, 0x0153: 0x9C,
+            0x017E: 0x9E, 0x0178: 0x9F
+        };
+        const toBytes1252 = (text) => Uint8Array.from(Array.from(text), ch => {
+            const cp = ch.codePointAt(0);
+            if (cp <= 0xFF) return cp;
+            if (CP1252_MAP[cp] !== undefined) return CP1252_MAP[cp];
+            return 0x3F;
+        });
+        const score = (s) => {
+            const cjk = (s.match(/[\u3400-\u9fff]/g) || []).length;
+            const bad = (s.match(/[ÃÂâ€œâ€â€™â€”çåäéèêëï¼½œ™]/g) || []).length;
+            return cjk * 2 - bad * 3;
+        };
+        let best = value;
+        let bestScore = score(value);
+        let current = value;
+        for (let i = 0; i < 2; i++) {
+            try {
+                const bytes = toBytes1252(current);
+                const candidate = new TextDecoder('utf-8', { fatal: false }).decode(bytes).replace(/\u0000/g, '').trim();
+                if (!candidate || candidate === current) break;
+                const candScore = score(candidate);
+                if (candScore > bestScore) {
+                    best = candidate;
+                    bestScore = candScore;
+                }
+                current = candidate;
+            } catch {
+                break;
+            }
+        }
+        return best;
+    };
     const memList = $('evo-memory-list');
     const mems = evo.memory_history || [];
     if (mems.length) {
         memList.innerHTML = mems.map(m => {
             const fields = m.fields || {};
-            const fieldHtml = Object.entries(fields).map(([k,v]) => `<div style="font-size:0.8em;color:#656d76;margin-left:12px"><strong>${k}</strong>: ${v}</div>`).join('');
+            const fieldHtml = Object.entries(fields).map(([k,v]) => `<div style="font-size:0.8em;color:#656d76;margin-left:12px"><strong>${repairMojibake(k)}</strong>: ${repairMojibake(String(v))}</div>`).join('');
             return `<details style="margin:4px 0;border:1px solid #eaeef2;border-radius:6px;padding:6px 10px">
-                <summary style="cursor:pointer;font-weight:600;font-size:0.85em"><span class="badge badge-ok">${m.priority}</span> ${m.date} ${m.title}</summary>
+                <summary style="cursor:pointer;font-weight:600;font-size:0.85em"><span class="badge badge-ok">${m.priority}</span> ${m.date} ${repairMojibake(m.title || '')}</summary>
                 ${fieldHtml}
             </details>`;
         }).join('');
@@ -1846,19 +1932,79 @@ function loadGccTm() {
     // KNN 9维特征名称 (与 gcc_trading_module.py KNNExperience.feature_names 对齐)
     const FEAT_NAMES = ['vision_conf','scan_conf','n_gate_buy','filter_passed',
         'filter_vol_score','win_rate','vol_ratio','topology_score','geometry_score'];
-    const CRYPTO_SYMS = new Set(['BTCUSDC','ETHUSDC','SOLUSDC','ZECUSDC','DOGEUSDC','BNBUSDC','XRPUSDC','ADAUSDC','DOTUSDC']);
+    const CRYPTO_SYMS = new Set(['BTCUSDC','ETHUSDC','SOLUSDC','ZECUSDC']);
     const US_EXECUTE = new Set(['TSLA','CRWV','NBIS','ONDS','OPEN']);
+    const formatGccTmTimestamp = (rawTs) => {
+        if (!rawTs) return '-';
+        try {
+            const hasZone = /Z$|[+-]\d{2}:\d{2}$/.test(rawTs);
+            if (hasZone) {
+                const dt = new Date(rawTs);
+                if (!Number.isNaN(dt.getTime())) {
+                    const parts = new Intl.DateTimeFormat('sv-SE', {
+                        timeZone: 'America/New_York',
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                    }).formatToParts(dt);
+                    const m = Object.fromEntries(parts.filter(p => p.type !== 'literal').map(p => [p.type, p.value]));
+                    return `${m.year}-${m.month}-${m.day} ${m.hour}:${m.minute} ET`;
+                }
+            }
+        } catch (e) {}
+        return rawTs.replace('T', ' ').slice(0, 16) + ' ET';
+    };
+    const strongestSourceFrom = (dec) => {
+        const bnScores = (dec.best_node && dec.best_node.scores_by_source) || {};
+        const bnKeys = Object.keys(bnScores).filter(k => !k.startsWith('_'));
+        if (bnKeys.length) {
+            return bnKeys.reduce((a, b) => (Number(bnScores[a] || 0) >= Number(bnScores[b] || 0) ? a : b));
+        }
+        const ctx = dec.context || {};
+        const candidates = [
+            ['scan', Array.isArray(ctx.scan) ? Number(ctx.scan[1] || 0) : -1],
+            ['vision', Array.isArray(ctx.vision) ? Number(ctx.vision[1] || 0) : -1],
+            ['filter_buy', ctx.filter_buy && ctx.filter_buy.passed ? Number(ctx.filter_buy.volume_score || 0) : -1],
+            ['filter_sell', ctx.filter_sell && ctx.filter_sell.passed ? Number(ctx.filter_sell.volume_score || 0) : -1],
+        ].filter(x => x[1] >= 0);
+        return candidates.length ? candidates.sort((a, b) => b[1] - a[1])[0][0] : '-';
+    };
+    const inferredVote = (dec, side) => {
+        const ctx = dec.context || {};
+        const key = side === 'BUY' ? 'filter_buy' : 'filter_sell';
+        if (ctx[key]) return ctx[key].passed ? 'PASS' : 'BLOCK';
+        const bnAction = String((dec.best_node && dec.best_node.action) || '').toUpperCase();
+        if (bnAction === side) return 'CAND';
+        const rejected = Array.isArray(dec.rejected_nodes) ? dec.rejected_nodes : [];
+        if (rejected.some(x => String(x.action || '').toUpperCase() === side)) return 'BLOCK';
+        return '-';
+    };
+    const inferredMainAction = (dec) => {
+        const ctx = dec.context || {};
+        if (Array.isArray(ctx.scan) && ctx.scan[0]) return ctx.scan[0];
+        const bnAction = String((dec.best_node && dec.best_node.action) || '').toUpperCase();
+        if (bnAction && bnAction !== 'HOLD') return bnAction;
+        return dec.main_action || '-';
+    };
 
     const renderDecisionRow = (dec) => {
-        const ts = (dec.ts || '').slice(0, 16);
+        const ctx = dec.context || {};
+        const ts = formatGccTmTimestamp(dec.ts || '');
         const gcc = dec.gcc_action || dec.final_action || '-';
-        const main = dec.main_action || '-';
-        const match = dec.match;
+        const main = inferredMainAction(dec);
+        const match = dec.match != null ? dec.match : (
+            main && main !== '-' && main !== 'NONE' && gcc && gcc !== '-'
+                ? (String(main).toUpperCase() === String(gcc).toUpperCase())
+                : null
+        );
         const matchIcon = match === true ? '✅' : match === false ? '❌' : '-';
         const gccColor = gcc === 'BUY' ? '#3fb950' : gcc === 'SELL' ? '#f85149' : '#656d76';
-        const bv = dec.buy_votes != null ? dec.buy_votes : '-';
-        const sv = dec.sell_votes != null ? dec.sell_votes : '-';
-        const src = dec.strongest_source || '-';
+        const bv = dec.buy_votes != null ? dec.buy_votes : inferredVote(dec, 'BUY');
+        const sv = dec.sell_votes != null ? dec.sell_votes : inferredVote(dec, 'SELL');
+        const src = dec.strongest_source || strongestSourceFrom(dec);
         const tree = dec.tree_score != null ? Number(dec.tree_score).toFixed(3) : (dec.best_node && dec.best_node.aggregate != null ? dec.best_node.aggregate.toFixed(3) : '-');
         const con = dec.consensus != null ? `${dec.consensus}/3` : '-';
         return `<tr>
@@ -1910,23 +2056,26 @@ function loadGccTm() {
                 const items = groups[g];
                 const done = items.filter(x => x.status === 'done').length;
                 const total = items.length;
-                const body = items.length
-                    ? items.map(step => {
-                        const doneFlag = step.status === 'done';
-                        const color = doneFlag ? '#238636' : '#d29922';
-                        const marker = doneFlag ? '✅ 完成' : '⏳ 待做';
-                        return `<div style="padding:8px 10px;border-top:1px solid #eaeef2">
-                            <div style="font-size:0.9em;font-weight:600">${step.title}</div>
-                            <div style="font-size:0.8em;color:#656d76;margin-top:2px">${step.note || ''}</div>
-                            <div style="font-size:0.78em;color:${color};margin-top:4px">${marker}</div>
-                        </div>`;
-                    }).join('')
-                    : '<div style="padding:8px 10px;border-top:1px solid #eaeef2;color:#656d76;font-size:0.85em">暂无步骤</div>';
-                return `<div style="border:1px solid #eaeef2;border-radius:8px;overflow:hidden;background:#fff">
-                    <div style="padding:8px 10px;background:#f6f8fa;font-weight:700;font-size:0.9em">${groupConfig[g].title} <span style="float:right;color:#656d76;font-weight:600">${done}/${total}</span></div>
-                    ${body}
-                </div>`;
-            }).join('');
+                if (!items.length) return '';
+                const body = items.map(step => {
+                    const doneFlag = step.status === 'done';
+                    const color = doneFlag ? '#238636' : '#d29922';
+                    const marker = doneFlag ? 'DONE' : 'TODO';
+                    return [
+                        `<div style="padding:8px 10px;border-top:1px solid #eaeef2">`,
+                        `<div style="font-size:0.9em;font-weight:600">${step.title}</div>`,
+                        `<div style="font-size:0.8em;color:#656d76;margin-top:2px">${step.note || ''}</div>`,
+                        `<div style="font-size:0.78em;color:${color};margin-top:4px">${marker}</div>`,
+                        `</div>`
+                    ].join('');
+                }).join('');
+                return [
+                    `<div style="border:1px solid #eaeef2;border-radius:8px;overflow:hidden;background:#fff">`,
+                    `<div style="padding:8px 10px;background:#f6f8fa;font-weight:700;font-size:0.9em">${groupConfig[g].title} <span style="float:right;color:#656d76;font-weight:600">${done}/${total}</span></div>`,
+                    `${body}`,
+                    `</div>`
+                ].join('');
+            }).filter(Boolean).join('');
             return `<div style="border:1px solid #d0d7de;border-radius:12px;padding:14px;background:#ffffff">
                 <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
                     <div>
@@ -1952,13 +2101,22 @@ function loadGccTm() {
         // 分离美股 vs 加密决策（同时支持 gcc_trading_decisions 和 process() 两种数据源）
         const usDec = decisions.filter(x => US_EXECUTE.has(x.symbol));
         const cryptoDec = decisions.filter(x => CRYPTO_SYMS.has(x.symbol));
+        const cryptoExecDec = cryptoDec.filter(x => String(x.phase || '').toLowerCase() === 'execute');
+        const cryptoObsDec = cryptoDec.filter(x => String(x.phase || '').toLowerCase() !== 'execute');
         const otherDec = decisions.filter(x => !US_EXECUTE.has(x.symbol) && !CRYPTO_SYMS.has(x.symbol));
 
+        const summarizeSymbols = (poolSet, decs) => {
+            const pool = [...poolSet];
+            const hit = [...new Set(decs.map(d => d.symbol).filter(Boolean))];
+            const exec = [...new Set(decs.filter(d => String(d.phase || '').toLowerCase() === 'execute').map(d => d.symbol).filter(Boolean))];
+            const observe = [...new Set(decs.filter(d => String(d.phase || '').toLowerCase() !== 'execute').map(d => d.symbol).filter(Boolean))];
+            return { pool, hit, exec, observe };
+        };
+
         // 美股执行区域
-        const usStatus = $('gcctm-us-status');
         const usBuys = usDec.filter(x => (x.gcc_action||x.final_action) === 'BUY').length;
         const usSells = usDec.filter(x => (x.gcc_action||x.final_action) === 'SELL').length;
-        usStatus.textContent = `执行品种: ${[...US_EXECUTE].join(', ')} | 共 ${usDec.length} 条 | BUY:${usBuys} SELL:${usSells}`;
+        const usMeta = summarizeSymbols(US_EXECUTE, usDec);
         const usBody = $('gcctm-us-body');
         if (!usDec.length) {
             usBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">暂无美股执行数据 (等待4H K线结束)</td></tr>';
@@ -1966,22 +2124,27 @@ function loadGccTm() {
             usBody.innerHTML = usDec.map(renderDecisionRow).join('');
         }
 
-        // 加密观察区域
-        const cryptoStatus = $('gcctm-crypto-status');
+        // crypto execute area
+        const cryptoExecBody = $('gcctm-crypto-exec-body');
+        if (!cryptoExecDec.length) {
+            cryptoExecBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">No crypto execute data</td></tr>';
+        } else {
+            cryptoExecBody.innerHTML = cryptoExecDec.map(renderDecisionRow).join('');
+        }
+
+        // crypto observe area
         const crBuys = cryptoDec.filter(x => (x.gcc_action||x.final_action) === 'BUY').length;
         const crSells = cryptoDec.filter(x => (x.gcc_action||x.final_action) === 'SELL').length;
-        cryptoStatus.textContent = `观察品种: ${[...CRYPTO_SYMS].filter(s => cryptoDec.some(d => d.symbol === s)).join(', ') || '全部'} | 共 ${cryptoDec.length} 条 | BUY:${crBuys} SELL:${crSells}`;
+        const cryptoMeta = summarizeSymbols(CRYPTO_SYMS, cryptoDec);
         const cryptoBody = $('gcctm-crypto-body');
-        if (!cryptoDec.length) {
-            cryptoBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">暂无加密观察数据</td></tr>';
+        if (!cryptoObsDec.length) {
+            cryptoBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">No crypto observe data</td></tr>';
         } else {
-            cryptoBody.innerHTML = cryptoDec.map(renderDecisionRow).join('');
+            cryptoBody.innerHTML = cryptoObsDec.map(renderDecisionRow).join('');
         }
 
         // Summary
-        const summary = $('gcctm-summary');
         summary.textContent = `共 ${decisions.length} 条决策 | 美股执行:${usDec.length} | 加密观察:${cryptoDec.length} | 其他:${otherDec.length} | KNN:${knn.length} | 任务:${pipelineTasks.length}`;
-        renderPipelineTasks(pipelineTasks);
         // KNN cards — features 是 List[float] 长度9, outcome 是 bool|null
         const cardsEl = $('gcctm-knn-cards');
         if (!knn.length) {
@@ -2014,7 +2177,6 @@ function loadGccTm() {
             }).join('');
         }
     }).catch(err => {
-        const pipeline = $('gcctm-pipeline');
         if (pipeline) {
             pipeline.innerHTML = `<div style="border:1px solid #eaeef2;border-radius:10px;padding:14px;color:#f85149">任务清单加载失败: ${err}</div>`;
         }
