@@ -50093,6 +50093,15 @@ L2门卫交易触发
             else:
                 print(f"[v3.460] 🚫 {symbol} 门卫拒绝: {gate_reason}")
 
+        # GCC-0255: OF-Filter 量价过滤 — 在 gcc_observe 之前运行(Phase0观察)
+        if (is_crypto_symbol(symbol) or is_us_stock(symbol)) and ohlcv_bars:
+            try:
+                from order_flow.of_filter import run_of_filter
+                run_of_filter(symbol, "BUY")
+                run_of_filter(symbol, "SELL")
+            except Exception as _of_err:
+                log_to_server(f"[OF-FILTER] {symbol} error: {_of_err}")
+
         # GCC-TM: 扫描引擎信号推送 — 全部美股+加密货币
         # GCC-0254: 白名单品种 observe_only=False(实盘); 其余美股 observe_only=True(观察)
         if _HAS_GCC_TM and (is_crypto_symbol(symbol) or is_us_stock(symbol)) and ohlcv_bars:
