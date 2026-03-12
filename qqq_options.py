@@ -6,11 +6,12 @@ QQQ期权垂直价差交易模块 (GCC-0256 S4)
   BUY信号 → Bull Call Spread (买低Call + 卖高Call)
   SELL信号 → Bear Put Spread (买高Put + 卖低Put)
 
-卖出规则 (自动平仓):
-  1. 止盈: spread当前价值 ≥ 成本 + 50%最大盈利 → 平仓
-  2. 止损: spread当前价值 ≤ 成本 × 50% → 平仓 (亏50%止损)
-  3. 时间止损: DTE ≤ 1天 → 到期前平仓
-  4. 信号反转: 收到反向信号 → 先平旧仓再开新仓
+卖出规则 (自动平仓, 优先级从高到低):
+  1. 时间止损: DTE ≤ 1天 → 到期前强制平仓
+  2. 止损: spread价值跌到成本50%以下 → 市价平仓
+  3. 止盈: 盈利达最大盈利50% → 限价平仓
+  4. 追踪止损: 盈利达最大盈利25%后激活, 从最高回撤40%平仓
+  5. 信号反转: Vision方向反转 → 先平旧仓(下轮再开)
 
 资金控制:
   - 严格 ≤ $1000/笔，向下取整
@@ -48,6 +49,10 @@ SYMBOL = "QQQ"          # 标的
 TAKE_PROFIT_PCT = 0.50  # 止盈: 达到最大盈利的50%平仓
 STOP_LOSS_PCT = 0.50    # 止损: 亏损成本的50%平仓
 EXIT_DTE = 1            # 时间止损: 到期前1天平仓
+
+# 追踪止损 (Trailing Stop)
+TRAILING_ACTIVATE_PCT = 0.25  # 盈利达最大盈利25%后激活追踪
+TRAILING_PULLBACK_PCT = 0.40  # 从最高价值回撤40%就平仓
 
 # 持仓状态文件
 STATE_FILE = Path(__file__).parent / "state" / "qqq_options_position.json"
@@ -446,6 +451,7 @@ def place_spread(spread: dict, dry_run: bool = True) -> dict:
                 "spread": spread,
                 "opened_at": datetime.now().isoformat(),
                 "entry_cost": spread["total_cost"],
+                "peak_value": spread["cost_per_contract"],  # 追踪止损用
             })
 
             return {"success": True, "order_id": order_id, "label": label, "spread": spread}
@@ -597,12 +603,14 @@ def get_spread_current_value(spread: dict) -> Optional[float]:
 
 def check_exit_rules() -> Optional[dict]:
     """
-    检查卖出规则，返回建议动作
+    检查卖出规则 (优先级: TIME_EXIT > STOP_LOSS > TAKE_PROFIT > TRAILING_STOP)
+
+    同时更新peak_value用于追踪止损
 
     Returns:
         None = 无持仓或不需要操作
-        {"action": "TAKE_PROFIT/STOP_LOSS/TIME_EXIT", "reason": str,
-         "current_value": float, "credit": float, "spread": dict}
+        {"action": str, "reason": str, "current_value": float,
+         "credit": float, "pnl": float, "spread": dict}
     """
     position = _load_position()
     if not position:
@@ -613,7 +621,7 @@ def check_exit_rules() -> Optional[dict]:
     max_profit = spread.get("max_profit_per_contract", 0)
     contracts = spread.get("contracts", 0)
 
-    # 1. 时间止损: DTE ≤ EXIT_DTE
+    # 1. 时间止损: DTE ≤ EXIT_DTE (最高优先级)
     try:
         exp_date = datetime.strptime(spread["expiration"], "%Y-%m-%d")
         days_left = (exp_date - datetime.now()).days
@@ -641,19 +649,19 @@ def check_exit_rules() -> Optional[dict]:
     pnl_per_contract = current_value - entry_cost
     pnl_total = pnl_per_contract * 100 * contracts
 
-    # 3. 止盈: 盈利 ≥ 最大盈利的 TAKE_PROFIT_PCT
-    take_profit_threshold = entry_cost + max_profit * TAKE_PROFIT_PCT
-    if current_value >= take_profit_threshold:
-        return {
-            "action": "TAKE_PROFIT",
-            "reason": f"达到{TAKE_PROFIT_PCT*100:.0f}%止盈线 (当前${current_value:.2f} ≥ 目标${take_profit_threshold:.2f})",
-            "current_value": current_value,
-            "credit": current_value,
-            "pnl": round(pnl_total, 2),
-            "spread": spread,
-        }
+    # 更新peak_value (追踪止损用)
+    peak_value = position.get("peak_value", entry_cost)
+    if current_value > peak_value:
+        peak_value = current_value
+        with _position_lock:
+            try:
+                data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+                data["peak_value"] = round(peak_value, 2)
+                STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
 
-    # 4. 止损: 亏损 ≥ 成本的 STOP_LOSS_PCT
+    # 3. 止损: 亏损 ≥ 成本的 STOP_LOSS_PCT
     stop_loss_threshold = entry_cost * (1 - STOP_LOSS_PCT)
     if current_value <= stop_loss_threshold:
         credit = max(current_value, 0.01)
@@ -666,7 +674,34 @@ def check_exit_rules() -> Optional[dict]:
             "spread": spread,
         }
 
-    # 不触发任何规则
+    # 4. 止盈: 盈利 ≥ 最大盈利的 TAKE_PROFIT_PCT
+    take_profit_threshold = entry_cost + max_profit * TAKE_PROFIT_PCT
+    if current_value >= take_profit_threshold:
+        return {
+            "action": "TAKE_PROFIT",
+            "reason": f"达到{TAKE_PROFIT_PCT*100:.0f}%止盈线 (当前${current_value:.2f} ≥ 目标${take_profit_threshold:.2f})",
+            "current_value": current_value,
+            "credit": current_value,
+            "pnl": round(pnl_total, 2),
+            "spread": spread,
+        }
+
+    # 5. 追踪止损: 价值曾涨过激活线, 从最高回撤TRAILING_PULLBACK_PCT
+    trailing_activate = entry_cost + max_profit * TRAILING_ACTIVATE_PCT
+    if peak_value >= trailing_activate and current_value > entry_cost:
+        pullback = peak_value - current_value
+        pullback_pct = pullback / (peak_value - entry_cost) if peak_value > entry_cost else 0
+        if pullback_pct >= TRAILING_PULLBACK_PCT:
+            return {
+                "action": "TRAILING_STOP",
+                "reason": (f"追踪止损: 最高${peak_value:.2f} → 当前${current_value:.2f} "
+                           f"回撤{pullback_pct*100:.0f}% ≥ {TRAILING_PULLBACK_PCT*100:.0f}%"),
+                "current_value": current_value,
+                "credit": current_value,
+                "pnl": round(pnl_total, 2),
+                "spread": spread,
+            }
+
     return None
 
 
@@ -689,8 +724,8 @@ def auto_manage(dry_run: bool = True) -> Optional[dict]:
     credit = exit_signal.get("credit", 0.01)
     pnl = exit_signal.get("pnl", 0)
 
-    # 止损/时间止损用市价单(必须成交), 止盈用限价单(锁定利润)
-    use_market = action in ("STOP_LOSS", "TIME_EXIT")
+    # 止损/时间止损/追踪止损用市价单(必须成交), 止盈用限价单(锁定利润)
+    use_market = action in ("STOP_LOSS", "TIME_EXIT", "TRAILING_STOP")
 
     logger.info(
         f"[QQQ_OPT] 卖出触发: {action} — {exit_signal['reason']} "

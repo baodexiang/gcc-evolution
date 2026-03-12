@@ -54941,15 +54941,21 @@ _QQQ_OPT_CHECK_INTERVAL = 300  # 5分钟
 _qqq_last_signal = {"direction": None, "time": 0}  # 防重复信号
 
 def _qqq_detect_trend() -> Optional[str]:
-    """读取QQQ Vision缓存结果判断趋势方向, 返回 "BUY"/"SELL"/None
+    """主动调Vision API判断QQQ趋势, 返回 "BUY"/"SELL"/None
 
-    共用主程序4H baseline刷新周期(QQQ已加入SYMBOLS_BASE_CONFIG)
-    不额外调API, 直接读 read_vision_result 缓存
-    只有confidence>60%的明确方向才触发信号
+    每次进场/出场决策前独立调一次Vision API, 拿最新判断
+    confidence>60%才触发信号
     """
     try:
-        # 直接读缓存 — 主程序baseline每4H已刷新QQQ的Vision结果
-        result = read_vision_result("QQQ")
+        # 获取OHLCV → 清内存缓存 → 强制调API拿最新
+        bars = fetch_ohlcv_from_api("QQQ", 240, limit=50)
+        if bars and len(bars) >= 15:
+            _vision_mem_cache.pop("QQQ", None)  # 清缓存, 强制调API
+            log_to_server("[QQQ_OPT][VISION] 主动调Vision API判断QQQ趋势...")
+            result = read_vision_result("QQQ", ohlcv_bars=bars)
+        else:
+            result = read_vision_result("QQQ")
+
         if not result or not result.get("current"):
             return None
 
@@ -54968,7 +54974,7 @@ def _qqq_detect_trend() -> Optional[str]:
             return "SELL"
         return None
     except Exception as _e:
-        log_to_server(f"[QQQ_OPT][VISION] 读取缓存异常: {_e}")
+        log_to_server(f"[QQQ_OPT][VISION] 调API异常: {_e}")
         return None
 
 _qqq_vision_last_check = {"time": 0}  # Vision读取频率控制
@@ -55098,13 +55104,20 @@ _BTC_PERP_CHECK_INTERVAL = 300  # 5分钟
 _btc_perp_last_signal = {"direction": None, "time": 0}
 
 def _btc_detect_trend() -> Optional[str]:
-    """读取BTCUSDC Vision缓存结果判断趋势, 返回 "BUY"/"SELL"/None
+    """主动调Vision API判断BTCUSDC趋势, 返回 "BUY"/"SELL"/None
 
-    共用主程序4H baseline刷新周期, 不额外调API
+    每次进场/出场决策前独立调一次Vision API, 拿最新判断
     confidence>60%才触发
     """
     try:
-        result = read_vision_result("BTCUSDC")
+        bars = fetch_ohlcv_from_api("BTCUSDC", 240, limit=50)
+        if bars and len(bars) >= 15:
+            _vision_mem_cache.pop("BTCUSDC", None)
+            log_to_server("[BTC_PERP][VISION] 主动调Vision API判断BTCUSDC趋势...")
+            result = read_vision_result("BTCUSDC", ohlcv_bars=bars)
+        else:
+            result = read_vision_result("BTCUSDC")
+
         if not result or not result.get("current"):
             return None
 
@@ -55123,7 +55136,7 @@ def _btc_detect_trend() -> Optional[str]:
             return "SELL"
         return None
     except Exception as _e:
-        log_to_server(f"[BTC_PERP][VISION] 读取缓存异常: {_e}")
+        log_to_server(f"[BTC_PERP][VISION] 调API异常: {_e}")
         return None
 
 _btc_vision_last_check = {"time": 0}
