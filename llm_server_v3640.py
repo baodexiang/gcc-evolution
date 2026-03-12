@@ -54940,11 +54940,81 @@ _QQQ_OPT_CHECK_INTERVAL = 300  # 5分钟
 
 _qqq_last_signal = {"direction": None, "time": 0}  # 防重复信号
 
-def _qqq_detect_trend() -> Optional[str]:
-    """主动调Vision API判断TSLA趋势, 返回 "BUY"/"SELL"/None
+def _brooks_confirm(symbol: str, vision_direction: str, tag: str) -> bool:
+    """Brooks确认: Vision方向必须与Brooks信号一致才放行
 
-    每次进场/出场决策前独立调一次Vision API, 拿最新判断
-    confidence>60%才触发信号
+    Args:
+        symbol: 品种名 (TSLA / BTCUSDC)
+        vision_direction: Vision判断的方向 "BUY"/"SELL"
+        tag: 日志标签 (TSLA_OPT / BTC_PERP)
+    Returns:
+        True = Brooks同意, False = Brooks不同意或无数据
+    """
+    try:
+        from brooks_vision import radar_scan
+        bv_result = radar_scan(symbol, {})
+        if not bv_result:
+            log_to_server(f"[{tag}][BROOKS] {symbol} 无Brooks数据，跳过确认")
+            return False
+        bv_signal = bv_result.get("signal", "NONE")
+        bv_conf = bv_result.get("confidence", 0)
+        bv_pattern = bv_result.get("brooks_pattern", "NONE")
+        if bv_signal == vision_direction:
+            log_to_server(
+                f"[{tag}][BROOKS] 确认通过: Vision={vision_direction} Brooks={bv_signal} "
+                f"pattern={bv_pattern} conf={bv_conf}"
+            )
+            return True
+        else:
+            log_to_server(
+                f"[{tag}][BROOKS] 方向不一致: Vision={vision_direction} Brooks={bv_signal} "
+                f"pattern={bv_pattern} → 跳过"
+            )
+            return False
+    except Exception as _e:
+        log_to_server(f"[{tag}][BROOKS] 检查异常: {_e}")
+        return False
+
+
+def _volume_confirm(symbol: str, direction: str, tag: str) -> bool:
+    """量价确认: VolumeAnalyzer检查量价关系, REJECT则拦截
+
+    Returns:
+        True = 量价放行(PASS/UPGRADE), False = 量价拒绝(REJECT/DOWNGRADE)
+    """
+    try:
+        from models.volume_analyzer import VolumeAnalyzer
+        bars = fetch_ohlcv_from_api(symbol, 240, limit=30)
+        if not bars or len(bars) < 5:
+            log_to_server(f"[{tag}][VOL] {symbol} OHLCV不足，跳过量价检查")
+            return True  # 数据不足不拦截
+
+        va = VolumeAnalyzer()
+        vf_result = va.volume_filter(direction, bars)
+        rel_vol = va.get_relative_volume(bars)
+        sqs = va.get_signal_quality(bars, direction)
+
+        log_to_server(
+            f"[{tag}][VOL] {symbol} {direction}: filter={vf_result} "
+            f"rel_vol={rel_vol:.2f} SQS={sqs:.2f}"
+        )
+
+        if vf_result == "REJECT":
+            log_to_server(f"[{tag}][VOL] 极度缩量REJECT → 拦截")
+            return False
+        if vf_result == "DOWNGRADE" and sqs < 0.3:
+            log_to_server(f"[{tag}][VOL] CVD背离+SQS={sqs:.2f}<0.3 → 拦截")
+            return False
+        return True
+    except Exception as _e:
+        log_to_server(f"[{tag}][VOL] 量价检查异常: {_e}")
+        return True  # 异常不拦截
+
+
+def _qqq_detect_trend() -> Optional[str]:
+    """Vision + Brooks + 量价 三重确认判断TSLA趋势, 返回 "BUY"/"SELL"/None
+
+    流程: Vision API判断方向 → Brooks确认同向 → 量价确认 → 才返回信号
     """
     try:
         bars = fetch_ohlcv_from_api("TSLA", 240, limit=50)
@@ -54966,18 +55036,29 @@ def _qqq_detect_trend() -> Optional[str]:
             return None
 
         if direction in ("UP", "BULLISH"):
-            log_to_server(f"[TSLA_OPT][VISION] TSLA趋势=UP conf={confidence:.0%}")
-            return "BUY"
+            vision_dir = "BUY"
         elif direction in ("DOWN", "BEARISH"):
-            log_to_server(f"[TSLA_OPT][VISION] TSLA趋势=DOWN conf={confidence:.0%}")
-            return "SELL"
-        return None
+            vision_dir = "SELL"
+        else:
+            return None
+
+        log_to_server(f"[TSLA_OPT][VISION] TSLA趋势={direction} conf={confidence:.0%}")
+
+        # Brooks确认
+        if not _brooks_confirm("TSLA", vision_dir, "TSLA_OPT"):
+            return None
+
+        # 量价确认
+        if not _volume_confirm("TSLA", vision_dir, "TSLA_OPT"):
+            return None
+
+        return vision_dir
     except Exception as _e:
         log_to_server(f"[TSLA_OPT][VISION] 调API异常: {_e}")
         return None
 
 _qqq_vision_last_check = {"time": 0}  # Vision读取频率控制
-_QQQ_VISION_INTERVAL = 14400  # 每4小时读一次Vision缓存(匹配baseline刷新周期, 不额外调API)
+_QQQ_VISION_INTERVAL = 3600  # 每1小时读一次Vision (美股盘中约6.5小时, 每天最多7次)
 
 def _qqq_options_manager_worker():
     """后台线程: 盘中每5分钟循环
@@ -55102,10 +55183,9 @@ _BTC_PERP_CHECK_INTERVAL = 300  # 5分钟
 _btc_perp_last_signal = {"direction": None, "time": 0}
 
 def _btc_detect_trend() -> Optional[str]:
-    """主动调Vision API判断BTCUSDC趋势, 返回 "BUY"/"SELL"/None
+    """Vision + Brooks + 量价 三重确认判断BTCUSDC趋势, 返回 "BUY"/"SELL"/None
 
-    每次进场/出场决策前独立调一次Vision API, 拿最新判断
-    confidence>60%才触发
+    流程: Vision API判断方向 → Brooks确认同向 → 量价确认 → 才返回信号
     """
     try:
         bars = fetch_ohlcv_from_api("BTCUSDC", 240, limit=50)
@@ -55127,12 +55207,23 @@ def _btc_detect_trend() -> Optional[str]:
             return None
 
         if direction in ("UP", "BULLISH"):
-            log_to_server(f"[BTC_PERP][VISION] BTCUSDC趋势=UP conf={confidence:.0%}")
-            return "BUY"
+            vision_dir = "BUY"
         elif direction in ("DOWN", "BEARISH"):
-            log_to_server(f"[BTC_PERP][VISION] BTCUSDC趋势=DOWN conf={confidence:.0%}")
-            return "SELL"
-        return None
+            vision_dir = "SELL"
+        else:
+            return None
+
+        log_to_server(f"[BTC_PERP][VISION] BTCUSDC趋势={direction} conf={confidence:.0%}")
+
+        # Brooks确认
+        if not _brooks_confirm("BTCUSDC", vision_dir, "BTC_PERP"):
+            return None
+
+        # 量价确认
+        if not _volume_confirm("BTCUSDC", vision_dir, "BTC_PERP"):
+            return None
+
+        return vision_dir
     except Exception as _e:
         log_to_server(f"[BTC_PERP][VISION] 调API异常: {_e}")
         return None
