@@ -8,10 +8,9 @@ BTC永续合约交易模块 (GCC-0256 S5)
 
 卖出规则 (自动平仓, 优先级从高到低):
   1. 止损: 亏损 ≥ 保证金30% ($300) — BTC反向6%, 及时止损
-  2. 止盈: 盈利 ≥ 保证金50% ($500) — BTC同向10%
-  3. 追踪止损: 盈利>$200后激活, 从最高盈利回撤40%平仓
-  4. 超时强平: 持仓超72小时 — 限制funding rate累积
-  5. 信号反转: Vision方向反转 → 先平仓(下轮再开)
+  2. 追踪止损: 盈利>$200后激活, 从最高盈利回撤40%平仓 (让利润跑)
+  3. 超时强平: 持仓超72小时 — 限制funding rate累积
+  4. 信号反转: Vision方向反转 → 先平仓(下轮再开)
 
 资金控制:
   - 保证金严格 ≤ $1000
@@ -41,11 +40,10 @@ LEVERAGE = 5            # 杠杆倍数 (Coinbase max 10x, 用户限制5x)
 PRODUCT_ID = "BTC-PERP-INTX"
 MARGIN_TYPE = "CROSS"
 
-# 卖出策略参数
-TAKE_PROFIT_PCT = 0.50  # 止盈: 保证金的50% ($500) — BTC涨/跌10%
+# 卖出策略参数 (无固定止盈, 让利润跑)
 STOP_LOSS_PCT = 0.30    # 止损: 保证金的30% ($300) — BTC反向6%，及时止损
 
-# 追踪止损 (Trailing Stop)
+# 追踪止损 (Trailing Stop) — 主要获利退出机制
 TRAILING_ACTIVATE_PCT = 0.20  # 盈利达保证金20%($200)后激活追踪
 TRAILING_PULLBACK_PCT = 0.40  # 从最高盈利回撤40%就平仓
 
@@ -341,7 +339,7 @@ def close_position(dry_run: bool = True) -> dict:
 # ── 止盈止损 ─────────────────────────────────────────────────────────────
 
 def check_exit_rules() -> Optional[dict]:
-    """检查退出规则 (优先级: 止损 > 止盈 > 追踪止损 > 超时)
+    """检查退出规则 (优先级: 止损 > 追踪止损 > 超时, 无固定止盈让利润跑)
 
     同时更新peak_pnl用于追踪止损
     """
@@ -387,17 +385,7 @@ def check_exit_rules() -> Optional[dict]:
             "current_price": price,
         }
 
-    # 2. 止盈: 盈利 ≥ 保证金 × TAKE_PROFIT_PCT
-    tp_amount = margin * TAKE_PROFIT_PCT
-    if pnl >= tp_amount:
-        return {
-            "action": "TAKE_PROFIT",
-            "reason": f"盈利${pnl:.0f} ≥ 止盈${tp_amount:.0f} (保证金{TAKE_PROFIT_PCT*100:.0f}%)",
-            "pnl": round(pnl, 2),
-            "current_price": price,
-        }
-
-    # 3. 追踪止损: 盈利曾达$200+, 从最高点回撤40%
+    # 2. 追踪止损: 盈利曾达$200+, 从最高点回撤40% (让利润跑)
     trailing_activate = margin * TRAILING_ACTIVATE_PCT
     if peak_pnl >= trailing_activate and pnl > 0:
         pullback = peak_pnl - pnl
@@ -411,7 +399,7 @@ def check_exit_rules() -> Optional[dict]:
                 "current_price": price,
             }
 
-    # 4. 超时强平: 持仓超MAX_HOLD_HOURS
+    # 3. 超时强平: 持仓超MAX_HOLD_HOURS
     opened_at = position.get("opened_at", "")
     if opened_at:
         try:
@@ -507,7 +495,7 @@ if __name__ == "__main__":
                 if opened:
                     hours = (datetime.now() - datetime.fromisoformat(opened)).total_seconds() / 3600
                     print(f"持仓时长: {hours:.1f}h / {MAX_HOLD_HOURS}h上限")
-                print(f"退出规则: 止损{STOP_LOSS_PCT*100:.0f}% | 止盈{TAKE_PROFIT_PCT*100:.0f}% | "
+                print(f"退出规则: 止损{STOP_LOSS_PCT*100:.0f}% | "
                       f"追踪{TRAILING_PULLBACK_PCT*100:.0f}%回撤 | {MAX_HOLD_HOURS}h超时")
         else:
             print("无持仓")

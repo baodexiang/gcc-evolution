@@ -9,9 +9,8 @@ TSLA期权垂直价差交易模块 (GCC-0256 S4)
 卖出规则 (自动平仓, 优先级从高到低):
   1. 时间止损: DTE ≤ 1天 → 到期前强制平仓
   2. 止损: spread价值跌到成本50%以下 → 市价平仓
-  3. 止盈: 盈利达最大盈利50% → 限价平仓
-  4. 追踪止损: 盈利达最大盈利25%后激活, 从最高回撤40%平仓
-  5. 信号反转: Vision方向反转 → 先平旧仓(下轮再开)
+  3. 追踪止损: 盈利达最大盈利25%后激活, 从最高回撤40%平仓 (让利润跑)
+  4. 信号反转: Vision方向反转 → 先平旧仓(下轮再开)
 
 资金控制:
   - 严格 ≤ $1000/笔，向下取整
@@ -45,12 +44,11 @@ TARGET_DELTA = 0.50     # 目标delta (ATM)
 MAX_CONTRACTS = 5       # 单次最大合约数
 SYMBOL = "TSLA"         # 标的
 
-# 卖出策略参数
-TAKE_PROFIT_PCT = 0.50  # 止盈: 达到最大盈利的50%平仓
+# 卖出策略参数 (无固定止盈, 让利润跑)
 STOP_LOSS_PCT = 0.50    # 止损: 亏损成本的50%平仓
 EXIT_DTE = 1            # 时间止损: 到期前1天平仓
 
-# 追踪止损 (Trailing Stop)
+# 追踪止损 (Trailing Stop) — 主要获利退出机制
 TRAILING_ACTIVATE_PCT = 0.25  # 盈利达最大盈利25%后激活追踪
 TRAILING_PULLBACK_PCT = 0.40  # 从最高价值回撤40%就平仓
 
@@ -603,7 +601,7 @@ def get_spread_current_value(spread: dict) -> Optional[float]:
 
 def check_exit_rules() -> Optional[dict]:
     """
-    检查卖出规则 (优先级: TIME_EXIT > STOP_LOSS > TAKE_PROFIT > TRAILING_STOP)
+    检查卖出规则 (优先级: TIME_EXIT > STOP_LOSS > TRAILING_STOP)
 
     同时更新peak_value用于追踪止损
 
@@ -674,19 +672,7 @@ def check_exit_rules() -> Optional[dict]:
             "spread": spread,
         }
 
-    # 4. 止盈: 盈利 ≥ 最大盈利的 TAKE_PROFIT_PCT
-    take_profit_threshold = entry_cost + max_profit * TAKE_PROFIT_PCT
-    if current_value >= take_profit_threshold:
-        return {
-            "action": "TAKE_PROFIT",
-            "reason": f"达到{TAKE_PROFIT_PCT*100:.0f}%止盈线 (当前${current_value:.2f} ≥ 目标${take_profit_threshold:.2f})",
-            "current_value": current_value,
-            "credit": current_value,
-            "pnl": round(pnl_total, 2),
-            "spread": spread,
-        }
-
-    # 5. 追踪止损: 价值曾涨过激活线, 从最高回撤TRAILING_PULLBACK_PCT
+    # 4. 追踪止损: 价值曾涨过激活线, 从最高回撤TRAILING_PULLBACK_PCT (让利润跑)
     trailing_activate = entry_cost + max_profit * TRAILING_ACTIVATE_PCT
     if peak_value >= trailing_activate and current_value > entry_cost:
         pullback = peak_value - current_value
@@ -724,8 +710,8 @@ def auto_manage(dry_run: bool = True) -> Optional[dict]:
     credit = exit_signal.get("credit", 0.01)
     pnl = exit_signal.get("pnl", 0)
 
-    # 止损/时间止损/追踪止损用市价单(必须成交), 止盈用限价单(锁定利润)
-    use_market = action in ("STOP_LOSS", "TIME_EXIT", "TRAILING_STOP")
+    # 所有退出都用市价单(必须成交)
+    use_market = True
 
     logger.info(
         f"[TSLA_OPT] 卖出触发: {action} — {exit_signal['reason']} "
@@ -837,7 +823,7 @@ if __name__ == "__main__":
                     print(f"  盈亏比: {spread['risk_reward']}:1")
                     print(f"  合约: {spread['contracts']}张")
                     print(f"  总计: 成本${spread['total_cost']:.0f} / 最大盈利${spread['total_max_profit']:.0f}")
-                    print(f"  卖出规则: 止盈{TAKE_PROFIT_PCT*100:.0f}% | 止损{STOP_LOSS_PCT*100:.0f}% | DTE≤{EXIT_DTE}天")
+                    print(f"  卖出规则: 止损{STOP_LOSS_PCT*100:.0f}% | 追踪{TRAILING_PULLBACK_PCT*100:.0f}%回撤 | DTE≤{EXIT_DTE}天")
                     print()
 
     elif action == "position":
