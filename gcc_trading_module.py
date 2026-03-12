@@ -1924,29 +1924,44 @@ _gcc_modules: dict = {}   # {symbol: GCCTradingModule}
 
 
 def _load_algebra_history(mod: "GCCTradingModule") -> int:
-    """从 KNN 经验文件加载已回填的历史 outcome → 喂给 Algebra verifier。"""
-    count = 0
-    if not _KNN_EXP_FILE.exists():
-        return count
+    """从 gcc-evo L4 KNN (plugin_knn_history.npz) 加载历史 returns → 喂给 Algebra verifier。
+    v3.670: 统一使用 gcc-evo L4 KNN 数据（modules/knn/store.py 管理），
+    不再维护独立 gcc_knn_experience.jsonl。
+    key格式: generic_{symbol}（品种整体KNN历史）
+    """
+    _KNN_NPZ = _STATE_DIR / "plugin_knn_history.npz"
+    if not _KNN_NPZ.exists():
+        return 0
     try:
-        for line in _KNN_EXP_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
-            if not line.strip():
+        import numpy as np
+        data = np.load(str(_KNN_NPZ), allow_pickle=True)
+        db = data["db"].item() if data["db"].shape == () else data["db"]
+        # gcc-evo plugin_knn key格式: generic_{symbol}
+        knn_key = f"generic_{mod.symbol}"
+        if knn_key not in db:
+            return 0
+        returns = db[knn_key].get("returns")
+        if returns is None or len(returns) == 0:
+            return 0
+        # 取最近200条（algebra verifier上限），跳过中性（|return| < 0.5%）
+        # 每条return记录两个方向的outcome:
+        #   涨(r>0) → BUY=True, SELL=False
+        #   跌(r<0) → BUY=False, SELL=True
+        recent = returns[-200:]
+        count = 0
+        for r in recent:
+            r_val = float(r)
+            if abs(r_val) < 0.005:
                 continue
-            try:
-                rec = json.loads(line)
-            except Exception:
-                continue
-            if (rec.get("symbol") == mod.symbol
-                    and rec.get("outcome") is not None):
-                mod._verifier.algebra.record_outcome(
-                    float(rec.get("price") or rec.get("ref_price") or 0),
-                    rec.get("action", "HOLD"),
-                    bool(rec["outcome"]),
-                )
-                count += 1
+            buy_outcome = r_val > 0    # 涨了=BUY正确
+            sell_outcome = r_val < 0   # 跌了=SELL正确
+            mod._verifier.algebra.record_outcome(100.0, "BUY", buy_outcome)
+            mod._verifier.algebra.record_outcome(100.0, "SELL", sell_outcome)
+            count += 1
+        return count
     except Exception as e:
         logger.debug("[GCC-TM] load_algebra_history %s: %s", mod.symbol, e)
-    return count
+        return 0
 
 
 # B1: 品种级 phase 配置 — 加密 OBSERVE / 美股 EXECUTE
@@ -2397,38 +2412,8 @@ def gcc_observe(
             except Exception:
                 pass
 
-        # KNN经验卡 → gcc-evo循环消费
-        if gcc_action != "HOLD":
-            ver_results_raw = result.get("verifier_results", [])
-            ver_results = [
-                VerifierResult(
-                    perspective=r["perspective"], ok=r["ok"],
-                    score=r["score"], reasoning=r.get("reasoning", "")
-                )
-                for r in ver_results_raw
-            ]
-            ctx = mod._build_context(bars)
-            ctx.signal_pool = signal_pool_data
-            features = _build_knn_features(ctx, ver_results)
-            exp = KNNExperience(
-                symbol=symbol,
-                action=gcc_action,
-                features=features,
-                outcome=None,
-                ts=ts_now,
-                price=current_price,
-                ref_price=current_price,
-            )
-            exp_dict = exp.as_dict()
-            exp_dict["strongest_source"] = strongest_source
-            exp_dict["vote_detail"] = vote_detail
-            exp_dict["signals_count"] = len(signals)
-            _write_knn_experience_dict(exp_dict)
-            filled = _backfill_outcome(symbol, current_price)
-            for fr in filled:
-                mod._verifier.algebra.record_outcome(
-                    fr["price"], fr["action"], fr["outcome"]
-                )
+        # v3.670: KNN经验统一由 gcc-evo L4 管理（plugin_knn_history.npz）
+        # gcc-tm 不再独立写入/回填 gcc_knn_experience.jsonl
 
         logger.info(
             "[GCC-TM] %s action=%s verdict=%s signals=%d(B%d/S%d) src=%s",
@@ -2578,19 +2563,11 @@ if __name__ == "__main__":
 
     # S47-S49: gcc_observe 接入测试
     gcc_observe("BTCUSDC", bars50, main_decision="BUY")
-    print(f"S45 knn_experience file exists: {_KNN_EXP_FILE.exists()}")
-    if _KNN_EXP_FILE.exists():
-        last = _KNN_EXP_FILE.read_text().strip().split('\n')[-1]
-        import json as _jj
-        exp_rec = _jj.loads(last)
-        print(f"  last entry: action={exp_rec['action']} features={exp_rec['features'][:3]}... outcome={exp_rec['outcome']}")
 
-    # S46: backfill 测试
-    _backfill_outcome("BTCUSDC", 110.0)   # 10% 涨 → BUY经验=True
-    if _KNN_EXP_FILE.exists():
-        last2 = _KNN_EXP_FILE.read_text().strip().split('\n')[-1]
-        exp_rec2 = _jj.loads(last2)
-        print(f"S46 backfill: outcome={exp_rec2['outcome']} (expected True for BUY+price up)")
+    # v3.670: KNN统一由gcc-evo L4管理（plugin_knn_history.npz），验证algebra加载
+    mod_knn = _get_gcc_module("BTCUSDC")
+    alg_hist = len(mod_knn._verifier.algebra._history)
+    print(f"S45 algebra history from gcc-evo KNN: {alg_hist} records")
 
     # S50: 验证 decisions.jsonl 写入
     mod50 = _get_gcc_module("ETHUSDC")
