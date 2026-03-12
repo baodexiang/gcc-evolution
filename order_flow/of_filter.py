@@ -75,6 +75,7 @@ class OFFilter:
         # 获取数据
         obi_cvd = self._get_obi_cvd(symbol)
         rvol = self._get_rvol(symbol)
+        vp = self._calc_volume_profile(symbol)
 
         obi = obi_cvd.get("obi", 0.0)
         obi_bias = obi_cvd.get("obi_bias", "UNKNOWN")
@@ -113,6 +114,10 @@ class OFFilter:
             "obi": round(obi, 4),
             "cvd_bias": cvd_bias,
             "rvol": round(rvol, 4),
+            "vp_position": vp.get("vp_position", "UNKNOWN"),
+            "poc": vp.get("poc", 0),
+            "val": vp.get("val", 0),
+            "vah": vp.get("vah", 0),
             "updated_ts": datetime.now(timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             ),
@@ -382,7 +387,9 @@ class OFFilter:
         entry = existing[symbol][direction]
         # 保留 vision 字段（由 Vision 模块独立写入）
         for key in ("passed", "volume_score", "micro_go", "blocked_by",
-                     "obi", "cvd_bias", "rvol", "updated_ts"):
+                     "obi", "cvd_bias", "rvol",
+                     "vp_position", "poc", "val", "vah",
+                     "updated_ts"):
             entry[key] = result.get(key)
 
         # 原子写入
@@ -394,6 +401,139 @@ class OFFilter:
         os.replace(str(tmp_file), str(_STATE_FILE))
 
     # ══════════════════════════════════════════════════════════
+    # Volume Profile — POC / VAL / VAH / LVN / HVN
+    # ══════════════════════════════════════════════════════════
+    def _calc_volume_profile(self, symbol: str) -> dict:
+        """
+        计算 Volume Profile 节点。
+        返回: {"poc": float, "val": float, "vah": float,
+               "lvn": list[float], "hvn": list[float],
+               "vp_position": str}
+        vp_position: 价格相对VAL/VAH位置 — ABOVE_VAH / IN_VALUE / BELOW_VAL / UNKNOWN
+        """
+        cache_key = f"vp_{symbol}"
+        ttl = (self.CACHE_TTL_CRYPTO if _is_crypto(symbol)
+               else self.CACHE_TTL_STOCK) * 4  # VP 缓存4倍TTL
+        if (cache_key in self._cache
+                and time.time() - self._cache_ts.get(cache_key, 0) < ttl):
+            return self._cache[cache_key]
+
+        result = self._build_volume_profile(symbol)
+        self._cache[cache_key] = result
+        self._cache_ts[cache_key] = time.time()
+        return result
+
+    def _build_volume_profile(self, symbol: str) -> dict:
+        """用 OHLCV 构建 volume-by-price 直方图。"""
+        default = {"poc": 0, "val": 0, "vah": 0,
+                   "lvn": [], "hvn": [], "vp_position": "UNKNOWN"}
+        try:
+            # 取 OHLCV 数据
+            if _is_crypto(symbol):
+                from price_scan_engine_v21 import YFinanceDataFetcher
+                raw = YFinanceDataFetcher.get_ohlcv(symbol, 240, 20)
+            else:
+                from schwab_data_provider import SchwabDataProvider
+                provider = SchwabDataProvider()
+                raw = provider.get_kline(symbol, interval="5m", bars=240)
+
+            if raw is None or len(raw) < 10:
+                return default
+
+            # 统一为 list[dict] 格式（Schwab返回DataFrame，crypto返回list）
+            if hasattr(raw, "iterrows"):
+                bars = [{"low": float(r["low"]), "high": float(r["high"]),
+                         "close": float(r["close"]), "volume": float(r["volume"])}
+                        for _, r in raw.iterrows()]
+            else:
+                bars = raw  # 已经是 list[dict]
+
+            if len(bars) < 10:
+                return default
+
+            # 构建 volume-by-price 直方图（20个价格桶）
+            price_low = min(float(b["low"]) for b in bars)
+            price_high = max(float(b["high"]) for b in bars)
+            if price_high <= price_low:
+                return default
+
+            n_bins = 20
+            bin_size = (price_high - price_low) / n_bins
+            bins = [0.0] * n_bins
+            bin_prices = [price_low + (i + 0.5) * bin_size for i in range(n_bins)]
+
+            for bar in bars:
+                bar_low = float(bar["low"])
+                bar_high = float(bar["high"])
+                bar_vol = float(bar["volume"])
+                if bar_vol <= 0 or bar_high <= bar_low:
+                    continue
+                bar_range = bar_high - bar_low
+                for i in range(n_bins):
+                    bucket_lo = price_low + i * bin_size
+                    bucket_hi = bucket_lo + bin_size
+                    overlap = max(0, min(bar_high, bucket_hi) - max(bar_low, bucket_lo))
+                    if overlap > 0:
+                        bins[i] += bar_vol * (overlap / bar_range)
+
+            if max(bins) <= 0:
+                return default
+
+            # POC = 最大成交量价格
+            poc_idx = bins.index(max(bins))
+            poc = bin_prices[poc_idx]
+
+            # Value Area = 70% 成交量围绕 POC
+            total_vol = sum(bins)
+            va_target = total_vol * 0.70
+            va_vol = bins[poc_idx]
+            lo_idx, hi_idx = poc_idx, poc_idx
+
+            while va_vol < va_target and (lo_idx > 0 or hi_idx < n_bins - 1):
+                expand_lo = bins[lo_idx - 1] if lo_idx > 0 else 0
+                expand_hi = bins[hi_idx + 1] if hi_idx < n_bins - 1 else 0
+                if expand_lo >= expand_hi and lo_idx > 0:
+                    lo_idx -= 1
+                    va_vol += expand_lo
+                elif hi_idx < n_bins - 1:
+                    hi_idx += 1
+                    va_vol += expand_hi
+                else:
+                    lo_idx -= 1
+                    va_vol += expand_lo
+
+            val = price_low + lo_idx * bin_size           # Value Area Low
+            vah = price_low + (hi_idx + 1) * bin_size     # Value Area High
+
+            # LVN/HVN: 低于/高于均量的显著节点
+            avg_bin = total_vol / n_bins
+            lvn = [round(bin_prices[i], 4) for i in range(n_bins)
+                   if bins[i] < avg_bin * 0.4]
+            hvn = [round(bin_prices[i], 4) for i in range(n_bins)
+                   if bins[i] > avg_bin * 1.8]
+
+            # 当前价格相对 VA 位置
+            current_price = float(bars[-1]["close"])
+            if current_price > vah:
+                vp_position = "ABOVE_VAH"
+            elif current_price < val:
+                vp_position = "BELOW_VAL"
+            else:
+                vp_position = "IN_VALUE"
+
+            return {
+                "poc": round(poc, 4),
+                "val": round(val, 4),
+                "vah": round(vah, 4),
+                "lvn": lvn[:5],
+                "hvn": hvn[:5],
+                "vp_position": vp_position,
+            }
+        except Exception as e:
+            logger.debug("[OF-FILTER] Volume Profile %s: %s", symbol, e)
+            return default
+
+    # ══════════════════════════════════════════════════════════
     # 辅助
     # ══════════════════════════════════════════════════════════
     @staticmethod
@@ -402,6 +542,7 @@ class OFFilter:
             "passed": None, "vision": None, "volume_score": 0.5,
             "micro_go": None, "blocked_by": "", "obi": 0.0,
             "cvd_bias": "UNKNOWN", "rvol": 1.0,
+            "vp_position": "UNKNOWN", "poc": 0, "val": 0, "vah": 0,
             "updated_ts": datetime.now(timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             ),

@@ -154,7 +154,8 @@ def _read_n_gate(symbol: str, direction: str) -> str:
 def _read_filter_chain(symbol: str, direction: str) -> dict:
     """读取三道过滤链结果。"""
     default = {"passed": None, "vision": None, "volume_score": 0.5,
-                "micro_go": None, "blocked_by": ""}
+                "micro_go": None, "blocked_by": "",
+                "vp_position": "UNKNOWN", "rvol": 1.0}
     if not _FILTER_FILE.exists():
         return default
     try:
@@ -168,6 +169,8 @@ def _read_filter_chain(symbol: str, direction: str) -> dict:
             "volume_score": float(entry.get("volume_score") or 0.5),
             "micro_go":     entry.get("micro_go"),
             "blocked_by":   entry.get("blocked_by") or "",
+            "vp_position":  entry.get("vp_position", "UNKNOWN"),
+            "rvol":         float(entry.get("rvol") or 1.0),
         }
     except Exception as e:
         logger.debug("[GCC-TRADE] _read_filter_chain %s %s: %s", symbol, direction, e)
@@ -626,6 +629,24 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
     else:
         scores["signal_pool"] = 0.0
 
+    # GCC-0255 S7: Volume Profile — 价格位于VAH上方支持BUY(突破), VAL下方反对
+    vp_pos = filter_res.get("vp_position", "UNKNOWN")
+    if vp_pos == "ABOVE_VAH":
+        scores["volume_profile"] = +0.06   # 突破价值区上沿 → 多头强势
+    elif vp_pos == "BELOW_VAL":
+        scores["volume_profile"] = -0.04   # 跌破价值区下沿 → BUY风险
+    else:
+        scores["volume_profile"] = 0.0     # IN_VALUE / UNKNOWN
+
+    # GCC-0255 S7: RVOL — 放量确认(>1.5x)支持, 缩量(<0.5x)反对
+    of_rvol = filter_res.get("rvol", 1.0)
+    if of_rvol >= 1.5:
+        scores["rvol_score"] = +0.04
+    elif of_rvol <= 0.5:
+        scores["rvol_score"] = -0.03
+    else:
+        scores["rvol_score"] = 0.0
+
     return scores
 
 
@@ -715,6 +736,24 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
     else:
         scores["signal_pool"] = 0.0
 
+    # GCC-0255 S7: Volume Profile — BELOW_VAL支持SELL(跌破), ABOVE_VAH反对
+    vp_pos = filter_res.get("vp_position", "UNKNOWN")
+    if vp_pos == "BELOW_VAL":
+        scores["volume_profile"] = +0.06   # 跌破价值区下沿 → 空头强势
+    elif vp_pos == "ABOVE_VAH":
+        scores["volume_profile"] = -0.04   # 突破价值区上沿 → SELL风险
+    else:
+        scores["volume_profile"] = 0.0
+
+    # GCC-0255 S7: RVOL — 放量确认(>1.5x)支持, 缩量(<0.5x)反对
+    of_rvol = filter_res.get("rvol", 1.0)
+    if of_rvol >= 1.5:
+        scores["rvol_score"] = +0.04
+    elif of_rvol <= 0.5:
+        scores["rvol_score"] = -0.03
+    else:
+        scores["rvol_score"] = 0.0
+
     return scores
 
 
@@ -725,7 +764,8 @@ def _score_hold_candidate() -> dict:
     """HOLD 路径固定中性分 0.0，作为基线竞争者。"""
     return {"vision": 0.0, "scan": 0.0, "filter": 0.0,
             "win_rate": 0.0, "volume": 0.0, "vwap": 0.0,
-            "obi": 0.0, "cvd": 0.0, "signal_pool": 0.0}
+            "obi": 0.0, "cvd": 0.0, "signal_pool": 0.0,
+            "volume_profile": 0.0, "rvol_score": 0.0}
 
 
 # ══════════════════════════════════════════════════════════════
