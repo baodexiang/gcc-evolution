@@ -133,10 +133,11 @@ def build_jwt(uri: str) -> str:
 
     return token
 
-def api_request(method: str, path: str) -> dict:
+def api_request(method: str, path: str, body: dict = None) -> dict:
     """
     通用 API 请求
     v6更新: 添加 timeout 和重试机制，防止卡死
+    v7更新: 支持 POST body (用于下单等写操作)
     """
     uri = f"{method} api.coinbase.com{path}"
 
@@ -152,13 +153,15 @@ def api_request(method: str, path: str) -> dict:
             if method == "GET":
                 response = requests.get(BASE_URL + path, headers=headers, timeout=API_TIMEOUT)
             else:
-                response = requests.post(BASE_URL + path, headers=headers, timeout=API_TIMEOUT)
+                response = requests.post(BASE_URL + path, headers=headers, json=body, timeout=API_TIMEOUT)
 
-            if response.status_code == 200:
+            if response.status_code in (200, 201):
                 return response.json()
 
-            # 非200状态码，记录并返回None
+            # 非200/201状态码，记录并返回None
             print(f"  [API] {method} {path} 返回 HTTP {response.status_code}")
+            if response.text:
+                print(f"  [API] 响应: {response.text[:300]}")
             return None
 
         except requests.exceptions.Timeout:
@@ -180,6 +183,81 @@ def api_request(method: str, path: str) -> dict:
             return None
 
     return None
+
+def place_order(product_id: str, side: str, quote_size: float = None,
+                base_size: float = None, limit_price: float = None) -> dict:
+    """
+    Coinbase Advanced Trade 下单 (v7新增)
+
+    Args:
+        product_id: 交易对, 如 "BTC-USDC"
+        side: "BUY" 或 "SELL"
+        quote_size: 买入时的USDC金额 (市价买入用)
+        base_size: 卖出时的币数量 (市价卖出用) 或限价单数量
+        limit_price: 限价, 不传=市价单
+
+    Returns:
+        {"success": True, "order_id": str, ...} 或 {"success": False, "error": str}
+    """
+    import uuid
+    client_order_id = str(uuid.uuid4())
+
+    if limit_price:
+        # 限价单 GTC
+        order_config = {
+            "limit_limit_gtc": {
+                "base_size": str(base_size),
+                "limit_price": str(limit_price),
+            }
+        }
+    elif side == "BUY" and quote_size:
+        # 市价买入 — 用USDC金额
+        order_config = {
+            "market_market_ioc": {
+                "quote_size": str(quote_size),
+            }
+        }
+    elif side == "SELL" and base_size:
+        # 市价卖出 — 用币数量
+        order_config = {
+            "market_market_ioc": {
+                "base_size": str(base_size),
+            }
+        }
+    else:
+        return {"success": False, "error": "需要 quote_size(买) 或 base_size(卖)"}
+
+    payload = {
+        "client_order_id": client_order_id,
+        "product_id": product_id,
+        "side": side,
+        "order_configuration": order_config,
+    }
+
+    result = api_request("POST", "/api/v3/brokerage/orders", body=payload)
+    if result:
+        order_id = result.get("order_id", result.get("success_response", {}).get("order_id", ""))
+        return {
+            "success": True,
+            "order_id": order_id,
+            "client_order_id": client_order_id,
+            "product_id": product_id,
+            "side": side,
+            "raw": result,
+        }
+    return {"success": False, "error": "API请求失败", "product_id": product_id, "side": side}
+
+
+def get_order(order_id: str) -> dict:
+    """查询订单状态 (v7新增)"""
+    return api_request("GET", f"/api/v3/brokerage/orders/historical/{order_id}") or {}
+
+
+def cancel_order(order_id: str) -> dict:
+    """取消订单 (v7新增)"""
+    return api_request("POST", "/api/v3/brokerage/orders/batch_cancel",
+                       body={"order_ids": [order_id]}) or {}
+
 
 def get_accounts() -> list:
     """获取所有账户余额"""

@@ -25902,18 +25902,21 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
         except Exception as _me:
             log_to_server(f"[KEY001-MASTER][ERROR] {symbol}: {_me} → fail-open放行")
 
-    if not THREECOMMAS_WEBHOOK_URL:
-        log_to_server("[3Commas] THREECOMMAS_WEBHOOK_URL 未设置，跳过下单。")
-        return False
-
-    if not THREECOMMAS_SECRET:
-        log_to_server("[3Commas] THREECOMMAS_SECRET 未设置，跳过下单。")
-        return False
+    # GCC-0256 S1: Coinbase直连模式 (True=直接API下单, False=3Commas webhook)
+    COINBASE_DIRECT_MODE = False  # 观察中，验证通过后开启
 
     cfg = PAIR_CONFIG.get(symbol)
     if not cfg:
         log_to_server(f"[3Commas] 未在 PAIR_CONFIG 中找到 {symbol}，跳过下单。")
         return False
+
+    if not COINBASE_DIRECT_MODE:
+        if not THREECOMMAS_WEBHOOK_URL:
+            log_to_server("[3Commas] THREECOMMAS_WEBHOOK_URL 未设置，跳过下单。")
+            return False
+        if not THREECOMMAS_SECRET:
+            log_to_server("[3Commas] THREECOMMAS_SECRET 未设置，跳过下单。")
+            return False
 
     # v21.18: 60秒信号冷却 (对齐SignalStack)
     import time as time_module
@@ -25949,11 +25952,76 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
         log_to_server(f"[3Commas] Duplicate: {request_id}")
         return True
 
+    # ── GCC-0256 S1: Coinbase直连下单 ──────────────────────────────────────
+    if COINBASE_DIRECT_MODE:
+        try:
+            from coinbase_sync_v6 import place_order as _cb_place_order, UNIT_AMOUNTS as _CB_UNIT_AMOUNTS
+
+            # 从coinbase_sync_v6读取标准交易数量，优先于PAIR_CONFIG的unit_size
+            _coin_base = symbol.replace("USDC", "") if symbol.endswith("USDC") else symbol
+            unit_size = float(_CB_UNIT_AMOUNTS.get(_coin_base, cfg.get("unit_size", 1.0)))
+            # 转换品种格式: BTCUSDC → BTC-USDC (仅处理USDC结尾)
+            if symbol.endswith("USDC"):
+                _coin_product_id = symbol[:-4] + "-USDC"
+            else:
+                log_to_server(f"[Coinbase直连] {symbol} 品种格式无法转换，跳过")
+                return False
+
+            if final_action == "BUY":
+                # 零价保护
+                if not last_close or last_close <= 0:
+                    log_to_server(f"[Coinbase直连] {symbol} BUY 价格异常(last_close={last_close})，跳过")
+                    return False
+                # 市价买入: quote_size = unit_size * 当前价 (用USDC金额)
+                _cb_quote = round(unit_size * last_close, 2)
+                log_to_server(
+                    f"[Coinbase直连] {symbol} BUY market quote_size={_cb_quote} USDC "
+                    f"(unit={unit_size} × price={last_close:.2f})"
+                )
+                _cb_result = _cb_place_order(
+                    product_id=_coin_product_id, side="BUY", quote_size=_cb_quote
+                )
+            else:
+                # 市价卖出: base_size = unit_size (用币数量)
+                log_to_server(
+                    f"[Coinbase直连] {symbol} SELL market base_size={unit_size}"
+                )
+                _cb_result = _cb_place_order(
+                    product_id=_coin_product_id, side="SELL", base_size=unit_size
+                )
+
+            if _cb_result.get("success"):
+                state["last_3c_request_id"] = request_id
+                state[last_signal_key] = current_time
+                state["tc_fail_count"] = 0
+                _cb_oid = _cb_result.get("order_id", "")
+                log_to_server(
+                    f"[Coinbase直连] {symbol} {final_action} 成功 "
+                    f"order_id={_cb_oid}"
+                )
+                return True
+            else:
+                _cb_err = _cb_result.get("error", "未知错误")
+                log_to_server(f"[Coinbase直连] {symbol} {final_action} 失败: {_cb_err}")
+                # 继续到失败计数
+        except Exception as _cb_e:
+            log_to_server(f"[Coinbase直连] {symbol} {final_action} 异常: {_cb_e}")
+
+        # 直连失败: 连续失败计数+熔断
+        fail_count = state.get("tc_fail_count", 0) + 1
+        state["tc_fail_count"] = fail_count
+        if fail_count >= TC_MAX_CONSECUTIVE_FAILS:
+            state["tc_frozen_until"] = current_time + TC_FREEZE_SECONDS
+            log_to_server(f"[Coinbase直连] {symbol} 连续{fail_count}次失败，冻结{TC_FREEZE_SECONDS//60}分钟")
+        else:
+            log_to_server(f"[Coinbase直连] {symbol} 失败({fail_count}/{TC_MAX_CONSECUTIVE_FAILS})")
+        return False
+
+    # ── 3Commas webhook 模式 (COINBASE_DIRECT_MODE=False 时使用) ───────────
     if final_action == "BUY":
         bot_uuid = cfg.get("long_bot_uuid")
         action = "enter_long"
     else:
-        # v3.571fix: SELL信号发给Short bot执行卖出
         bot_uuid = cfg.get("short_bot_uuid")
         action = "enter_short"
 
@@ -39970,7 +40038,10 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
             log_to_server(f"[KEY-003][VALUE-GUARD][拦截] {symbol} BUY被拦截: {reason}")
             return None  # 门控拦截，非API失败
 
-    if not SIGNALSTACK_WEBHOOK_URL:
+    # GCC-0256 S2: Schwab直连模式 (True=schwab-py SDK直接下单, False=SignalStack webhook)
+    SCHWAB_DIRECT_MODE = False  # 观察中，验证通过后开启
+
+    if not SCHWAB_DIRECT_MODE and not SIGNALSTACK_WEBHOOK_URL:
         log_to_server("[SignalStack] SIGNALSTACK_WEBHOOK_URL 未设置，跳过下单。")
         return False
 
@@ -40009,8 +40080,73 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
         return True
 
     cfg = US_STOCK_CONFIG.get(symbol, {})
-    qty = int(cfg.get("quantity", 50))
+    qty = int(cfg.get("quantity", 0))
+    if qty <= 0:
+        log_to_server(f"[SignalStack] {symbol} 未配置quantity或为0，跳过下单")
+        return False
 
+    # ── GCC-0256 S2: Schwab直连下单 ───────────────────────────────────────
+    if SCHWAB_DIRECT_MODE:
+        try:
+            from schwab_data_provider import get_provider as _schwab_get_provider
+
+            _schwab_prov = _schwab_get_provider()
+            log_to_server(
+                f"[Schwab直连] {symbol} {final_action} qty={qty} 提交中..."
+            )
+            _schwab_result = _schwab_prov.place_equity_order(
+                symbol=symbol, action=final_action, quantity=qty
+            )
+
+            if _schwab_result.get("success"):
+                state["last_request_id"] = request_id
+                state["last_order_time"] = current_time
+                state[last_signal_key] = current_time
+                state["ss_fail_count"] = 0
+                if final_action == "BUY":
+                    _key003_record_buy_sent(symbol)
+                _schwab_oid = _schwab_result.get("order_id", "")
+                log_to_server(
+                    f"[Schwab直连] {symbol} {final_action} qty={qty} 成功 "
+                    f"order_id={_schwab_oid}"
+                )
+                return True
+            else:
+                _schwab_err = _schwab_result.get("error", "未知错误")
+                log_to_server(f"[Schwab直连] {symbol} {final_action} 失败: {_schwab_err}")
+        except Exception as _schwab_e:
+            log_to_server(f"[Schwab直连] {symbol} {final_action} 异常: {_schwab_e}")
+
+        # 直连失败: 连续失败计数+熔断
+        fail_count = state.get("ss_fail_count", 0) + 1
+        state["ss_fail_count"] = fail_count
+        if fail_count >= SS_MAX_CONSECUTIVE_FAILS:
+            state["ss_frozen_until"] = current_time + SS_FREEZE_SECONDS
+            log_to_server(f"[Schwab直连] {symbol} 连续{fail_count}次失败，冻结{SS_FREEZE_SECONDS//60}分钟")
+        else:
+            log_to_server(f"[Schwab直连] {symbol} 失败({fail_count}/{SS_MAX_CONSECUTIVE_FAILS})")
+
+        # Schwab Token过期检测 — 连续2次失败发邮件
+        if fail_count == 2:
+            try:
+                _ss_alert_key = "ss_reconnect_alert_ts"
+                _ss_last_alert = getattr(send_signalstack_order, _ss_alert_key, 0)
+                if current_time - _ss_last_alert > 3600:
+                    send_email_notification(
+                        "⚠️ Schwab直连失败 — 请刷新Token",
+                        f"品种: {symbol} {final_action}\n"
+                        f"连续失败: {fail_count}次\n\n"
+                        f"Schwab Token每7天需重新授权。\n"
+                        f"运行: python schwab_data_provider.py 重新授权。\n\n"
+                        f"冻结机制: 再失败1次将冻结{SS_FREEZE_SECONDS//60}分钟。"
+                    )
+                    setattr(send_signalstack_order, _ss_alert_key, current_time)
+                    log_to_server(f"[Schwab直连][ALERT] 已发送Token刷新提醒邮件")
+            except Exception as _ss_alert_e:
+                log_to_server(f"[Schwab直连][ALERT] 邮件发送失败: {_ss_alert_e}")
+        return False
+
+    # ── SignalStack webhook 模式 (SCHWAB_DIRECT_MODE=False 时使用) ─────────
     payload = {
         "symbol": symbol,
         "action": "Buy" if final_action == "BUY" else "Sell",
@@ -40028,11 +40164,8 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
             if 200 <= resp.status_code < 300:
                 state["last_request_id"] = request_id
                 state["last_order_time"] = current_time
-                # v3.411: 记录信号时间用于冷却
                 state[last_signal_key] = current_time
-                # v3.641: 成功→重置连续失败计数
                 state["ss_fail_count"] = 0
-                # v3.663 KEY-003: BUY成功→记录计数
                 if final_action == "BUY":
                     _key003_record_buy_sent(symbol)
                 log_to_server(f"[SignalStack] {symbol} {payload['action']} qty={qty} 成功")
@@ -40059,7 +40192,7 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
         try:
             _ss_alert_key = "ss_reconnect_alert_ts"
             _ss_last_alert = getattr(send_signalstack_order, _ss_alert_key, 0)
-            if current_time - _ss_last_alert > 3600:  # 1小时内不重复发
+            if current_time - _ss_last_alert > 3600:
                 send_email_notification(
                     "⚠️ SignalStack连续失败 — 请重连Schwab",
                     f"品种: {symbol} {final_action}\n"

@@ -217,6 +217,9 @@ class SchwabDataProvider:
         if self._client is not None:
             return self._client
 
+        # 重新初始化client时清除account_hash缓存，保证生命周期同步
+        self._account_hash = None
+
         _check_env()
 
         token_file = pathlib.Path(SCHWAB_TOKEN_PATH)
@@ -270,6 +273,122 @@ class SchwabDataProvider:
             raise
 
         return self._client
+
+    # ──────────────────────────────────────────
+    # GCC-0256 S2: 直接交易接口
+    # ──────────────────────────────────────────
+    _account_hash: Optional[str] = None
+
+    def _get_account_hash(self) -> str:
+        """获取Schwab账户hash (首次调用缓存)"""
+        if self._account_hash:
+            return self._account_hash
+        client = self._get_client()
+        resp = client.get_account_numbers()
+        if resp.status_code == 200:
+            accounts = resp.json()
+            if accounts:
+                hash_value = accounts[0].get("hashValue", "")
+                if not hash_value:
+                    raise RuntimeError("[SCHWAB] hashValue字段为空，账户数据异常")
+                self._account_hash = hash_value
+                logger.info(f"[SCHWAB] 获取account_hash成功: {self._account_hash[:8]}...")
+                return self._account_hash
+        raise RuntimeError(f"[SCHWAB] 获取account_hash失败: HTTP {resp.status_code}")
+
+    def place_equity_order(self, symbol: str, action: str, quantity: int,
+                           order_type: str = "MARKET", dry_run: bool = False) -> dict:
+        """
+        Schwab直连下单 (GCC-0256 S2)
+
+        Args:
+            symbol: 股票代码, 如 "TSLA"
+            action: "BUY" 或 "SELL"
+            quantity: 股数
+            order_type: "MARKET" (默认) 或 "LIMIT"
+            dry_run: True=preview_order干跑, False=真实下单
+
+        Returns:
+            {"success": True, "order_id": str, ...} 或 {"success": False, "error": str}
+        """
+        try:
+            from schwab.orders.equities import equity_buy_market, equity_sell_market
+
+            account_hash = self._get_account_hash()
+            client = self._get_client()
+
+            if action == "BUY":
+                order_spec = equity_buy_market(symbol, quantity)
+            elif action == "SELL":
+                order_spec = equity_sell_market(symbol, quantity)
+            else:
+                return {"success": False, "error": f"无效action: {action}"}
+
+            if dry_run:
+                resp = client.preview_order(account_hash, order_spec)
+                logger.info(f"[SCHWAB] preview_order {symbol} {action} qty={quantity} → HTTP {resp.status_code}")
+                return {
+                    "success": resp.status_code == 200,
+                    "dry_run": True,
+                    "status_code": resp.status_code,
+                    "symbol": symbol,
+                    "action": action,
+                    "quantity": quantity,
+                }
+
+            resp = client.place_order(account_hash, order_spec)
+            # place_order成功返回201, order_id在Location header中
+            if resp.status_code == 201:
+                location = resp.headers.get("Location", "")
+                order_id = location.split("/")[-1] if location else ""
+                logger.info(f"[SCHWAB] place_order成功 {symbol} {action} qty={quantity} order_id={order_id}")
+                return {
+                    "success": True,
+                    "order_id": order_id,
+                    "symbol": symbol,
+                    "action": action,
+                    "quantity": quantity,
+                }
+            else:
+                error_body = ""
+                try:
+                    error_body = resp.json()
+                except Exception:
+                    error_body = resp.text[:300]
+                logger.error(f"[SCHWAB] place_order失败 {symbol} {action} HTTP {resp.status_code}: {error_body}")
+                return {
+                    "success": False,
+                    "error": f"HTTP {resp.status_code}: {error_body}",
+                    "symbol": symbol,
+                    "action": action,
+                }
+        except Exception as e:
+            logger.error(f"[SCHWAB] place_equity_order异常 {symbol} {action}: {e}")
+            return {"success": False, "error": str(e), "symbol": symbol, "action": action}
+
+    def get_equity_order(self, order_id: str) -> dict:
+        """查询订单状态"""
+        try:
+            account_hash = self._get_account_hash()
+            client = self._get_client()
+            # schwab-py: get_order(order_id, account_hash) — 注意参数顺序与place_order不同
+            resp = client.get_order(int(order_id), account_hash)
+            if resp.status_code == 200:
+                return resp.json()
+            return {"error": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def cancel_equity_order(self, order_id: str) -> dict:
+        """取消订单"""
+        try:
+            account_hash = self._get_account_hash()
+            client = self._get_client()
+            # schwab-py: cancel_order(order_id, account_hash) — 注意参数顺序
+            resp = client.cancel_order(int(order_id), account_hash)
+            return {"success": resp.status_code in (200, 204), "status_code": resp.status_code}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     # ──────────────────────────────────────────
     # 核心接口
@@ -338,6 +457,94 @@ class SchwabDataProvider:
                     logger.warning(f"  {sym}: 返回空数据")
             except Exception as e:
                 logger.error(f"  {sym} 获取失败: {e}")
+        return result
+
+    # ──────────────────────────────────────────
+    # 实时报价 + VWAP 计算（docx P0）
+    # ──────────────────────────────────────────
+    def get_quote(self, symbol: str) -> dict:
+        """
+        获取实时报价扩展字段。
+        返回: {last, bid, ask, open, high, low, close_prev, volume,
+               week52_high, week52_low, pe_ratio, vwap, vwap_bias}
+        vwap_bias: "ABOVE" (价格在VWAP上方) / "BELOW" / "AT"
+        """
+        client = self._get_client()
+        try:
+            resp = client.get_quote(symbol)
+            assert resp.status_code == 200, f"HTTP {resp.status_code}"
+            data = resp.json().get(symbol, {})
+            quote = data.get("quote", {})
+            fundamental = data.get("fundamental", {})
+
+            last = float(quote.get("lastPrice", 0))
+            high = float(quote.get("highPrice", 0))
+            low = float(quote.get("lowPrice", 0))
+            volume = int(quote.get("totalVolume", 0))
+
+            # VWAP 计算: 用日内分钟线 typical_price × volume
+            vwap = self._calc_intraday_vwap(symbol)
+            if vwap <= 0 and high > 0 and low > 0:
+                # fallback: 典型价格近似
+                vwap = (high + low + last) / 3
+
+            # vwap_bias: 当前价与VWAP的关系
+            if vwap > 0 and last > 0:
+                pct_diff = (last - vwap) / vwap
+                if pct_diff > 0.002:
+                    vwap_bias = "ABOVE"
+                elif pct_diff < -0.002:
+                    vwap_bias = "BELOW"
+                else:
+                    vwap_bias = "AT"
+            else:
+                vwap_bias = "UNKNOWN"
+
+            result = {
+                "symbol": symbol,
+                "last": last,
+                "bid": float(quote.get("bidPrice", 0)),
+                "ask": float(quote.get("askPrice", 0)),
+                "open": float(quote.get("openPrice", 0)),
+                "high": high,
+                "low": low,
+                "close_prev": float(quote.get("closePrice", 0)),
+                "volume": volume,
+                "week52_high": float(quote.get("52WeekHigh", 0)),
+                "week52_low": float(quote.get("52WeekLow", 0)),
+                "pe_ratio": float(fundamental.get("peRatio", 0)),
+                "vwap": round(vwap, 4),
+                "vwap_bias": vwap_bias,
+            }
+            logger.info("[SCHWAB] quote %s: last=%.2f vwap=%.2f bias=%s",
+                        symbol, last, vwap, vwap_bias)
+            return result
+        except Exception as e:
+            logger.warning("[SCHWAB] get_quote %s failed: %s", symbol, e)
+            return {"symbol": symbol, "last": 0, "vwap": 0, "vwap_bias": "UNKNOWN"}
+
+    def _calc_intraday_vwap(self, symbol: str) -> float:
+        """用日内5分钟K线计算精确VWAP。"""
+        try:
+            df = self.get_kline(symbol, interval="5m", bars=80)
+            if df is None or df.empty:
+                return 0.0
+            # typical_price = (H + L + C) / 3
+            tp = (df["high"] + df["low"] + df["close"]) / 3
+            vol = df["volume"]
+            total_tpv = (tp * vol).sum()
+            total_vol = vol.sum()
+            if total_vol <= 0:
+                return 0.0
+            return float(total_tpv / total_vol)
+        except Exception:
+            return 0.0
+
+    def get_quote_batch(self, symbols: list) -> dict:
+        """批量获取多标的报价+VWAP，返回 {symbol: quote_dict}。"""
+        result = {}
+        for sym in symbols:
+            result[sym] = self.get_quote(sym)
         return result
 
     # ──────────────────────────────────────────
