@@ -201,14 +201,23 @@ def _load_prev_summary(symbol: str) -> dict:
 
 
 def _save_candle_summary(symbol: str, summary: dict) -> None:
-    """保存当前K线的8轮汇总结果(供下一K线读取)。"""
+    """保存当前K线的8轮汇总结果。
+    1. 覆盖写入 latest文件(供下一K线读取)
+    2. 追加写入 history文件(保留所有历史，重启不丢失)
+    """
     p = _candle_summary_path(symbol)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
+        # latest: 覆盖写入(下根K线只需最后一条)
         p.write_text(
             json.dumps(summary, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        # history: 追加写入(保留完整趋势链条)
+        history_file = _STATE_DIR / "gcc_candle_history.jsonl"
+        record = {**summary, "symbol": symbol}
+        with open(history_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:
         logger.debug("[GCC-TM] save_candle_summary: %s", e)
 
