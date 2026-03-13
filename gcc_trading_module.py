@@ -2655,6 +2655,7 @@ def gcc_push_signal(symbol: str, source: str, action: str,
     加密品种会检查方向锁：反向信号 Phase1 记 log 但仍入池，Phase2 拦截不入池。
     """
     if action not in ("BUY", "SELL"):
+        logger.info("[GCC-TM][DROP] %s %s action=%s 非BUY/SELL, 丢弃", symbol, source, action)
         return
 
     # A3: 方向锁检查
@@ -2671,6 +2672,12 @@ def gcc_push_signal(symbol: str, source: str, action: str,
     with _signal_pool_lock:
         if symbol not in _signal_pool:
             _signal_pool[symbol] = []
+        # v0.2.1: 同source同action去重 — 防止外挂30min内重复推送导致投票权重翻倍
+        _dup = any(s["source"] == source and s["action"] == action
+                    for s in _signal_pool[symbol])
+        if _dup:
+            logger.debug("[GCC-TM][DEDUP] %s %s %s 已在池中, 跳过", symbol, source, action)
+            return
         _signal_pool[symbol].append({
             "source": source, "action": action,
             "confidence": confidence, "ts": ts,
@@ -2706,6 +2713,25 @@ def gcc_consume_pending_order(symbol: str) -> Optional[dict]:
 
     if order.get("consumed"):
         return None
+
+    # v0.2.1: TTL检查 — 超过8小时的pending_order视为过期，防止崩溃恢复后执行陈旧订单
+    _order_ts = order.get("ts", "")
+    if _order_ts:
+        try:
+            _order_dt = datetime.strptime(_order_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_NY_TZ)
+            _age_hours = (datetime.now(_NY_TZ) - _order_dt).total_seconds() / 3600
+            if _age_hours > 8:
+                logger.warning(
+                    "[GCC-TM][EXPIRED] %s %s price_ref=%.2f age=%.1fh > 8h, 丢弃",
+                    symbol, order.get("action"), order.get("price_ref", 0), _age_hours,
+                )
+                order["consumed"] = True
+                order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+                order["expired"] = True
+                _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
+                return None
+        except Exception:
+            pass
 
     logger.info(
         "[GCC-TM][PEEK] %s %s price_ref=%.2f (未标记consumed,等待执行确认)",
