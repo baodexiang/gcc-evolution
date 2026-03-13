@@ -2981,11 +2981,22 @@ def gcc_observe(
         except Exception as _bf_e:
             logger.debug("[GCC-TRADE] knn backfill: %s", _bf_e)
 
+        # ── 自修复: 清除旧格式空BACKFILL条目(price=0, 无真实决策), 让下方逻辑重跑 ──
+        # 必须在already_done检查之前，否则当前轮已存在时直接return，永远不清旧条目
+        _stale = [r for r in state.round_decisions
+                  if r.get("verdict") == "BACKFILL" and r.get("price", 0) == 0]
+        if _stale:
+            for _sr in _stale:
+                state.round_decisions.remove(_sr)
+            logger.info("[GCC-TM] %s purged %d stale BACKFILL entries, will re-decide",
+                        symbol, len(_stale))
+            _save_candle_state(state)  # 立即持久化清除结果
+
         # ── 轮次去重: 检查当前round index是否已在round_decisions中 ──
         actual_round = _get_current_round(symbol=symbol)
         already_done = any(r.get("round") == actual_round for r in state.round_decisions)
-        if already_done:
-            # 同一30分钟内重复调用,跳过
+        if already_done and not _stale:
+            # 同一30分钟内重复调用且无旧条目需回填,跳过
             _save_candle_state(state)
             logger.debug("[GCC-TM] %s skip duplicate round %d (already recorded)",
                          symbol, actual_round)
@@ -3040,6 +3051,11 @@ def gcc_observe(
             logger.info("[GCC-TM] %s backfilled %d missed rounds with decisions (now round %d)",
                         symbol, _backfill_count, actual_round)
             _save_candle_state(state)
+
+        # 回填修复后当前轮已处理 → 跳过
+        if already_done:
+            _save_candle_state(state)
+            return
 
         # ── 轮次决策 ──
         result = mod.process_round(
