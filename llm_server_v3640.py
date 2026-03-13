@@ -42992,6 +42992,37 @@ def llm_decide():
                 _gcc_confirm(symbol, success=send_ok)
                 if send_ok:
                     log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单成功")
+                    # GCC-0257 S5: GCC-TM交易记录入KEY-009
+                    try:
+                        from timeframe_params import read_symbol_timeframe
+                        _gcc_tf = str(read_symbol_timeframe(symbol).get("timeframe_minutes", 240))
+                    except Exception:
+                        _gcc_tf = "240"
+                    try:
+                        _gcc_state = get_state_for_symbol(symbol) or {}
+                        _gcc_trade_rec = {
+                            "ts": _gcc_order.get("ts", get_ny_now().strftime("%Y-%m-%d %H:%M:%S")),
+                            "tz": "America/New_York",
+                            "symbol": symbol,
+                            "timeframe": _gcc_tf,
+                            "action": _gcc_act,
+                            "price": _gcc_cur_price,
+                            "signal_price": _gcc_price,
+                            "units": 1,
+                            "fee_rate": 0.001,
+                            "fee_usd": _gcc_cur_price * 0.001,
+                            "cycle_id": _gcc_state.get("cycle_id", ""),
+                            "trade_mode": "live",
+                            "pos_in_channel": 0.5,
+                            "source": "GCC-TM",
+                            "market_regime": _gcc_state.get("market_regime", "UNKNOWN"),
+                            "adx_value": 0.0,
+                            "trend_state": _gcc_state.get("current_trend", "SIDE"),
+                            "n_structure_confirmed": False,
+                        }
+                        _append_trade_record(_gcc_trade_rec)
+                    except Exception as _gcc_rec_e:
+                        log_to_server(f"[GCC-TM] {symbol} trade_record写入失败: {_gcc_rec_e}")
                     try:
                         send_email_notification(
                             f"[GCC-TM] {symbol} {_gcc_act}",
@@ -50010,6 +50041,34 @@ def handle_tv_l2_10m():
                     # v3.652: 写入server.log; KEY-004: 统一三段式标签+source
                     log_to_server(f"[L2_MACD][final] {symbol} BUY 执行成功 | {macd_div_type} 强度{_div_strength:.1f}% | 仓位{old_position}->{state['position_units']} @ {current_close:.4f} | source=MACD_L2")
 
+                    # GCC-0257 S4: MACD交易记录入KEY-009
+                    try:
+                        _macd_trade_rec = {
+                            "ts": time_str,
+                            "tz": "America/New_York",
+                            "symbol": symbol,
+                            "timeframe": "10",
+                            "action": "BUY",
+                            "price": current_close,
+                            "signal_price": current_close,
+                            "units": 1,
+                            "fee_rate": FEE_RATE if 'FEE_RATE' in dir() else 0.001,
+                            "fee_usd": current_close * 0.001,
+                            "cycle_id": state.get("cycle_id", ""),
+                            "trade_mode": "live",
+                            "pos_in_channel": 0.5,
+                            "source": "MACD_L2",
+                            "market_regime": state.get("market_regime", "UNKNOWN"),
+                            "adx_value": 0.0,
+                            "trend_state": state.get("current_trend", "SIDE"),
+                            "n_structure_confirmed": False,
+                            "macd_div_type": macd_div_type,
+                            "macd_strength": round(_div_strength, 1),
+                        }
+                        _append_trade_record(_macd_trade_rec)
+                    except Exception as _macd_rec_e:
+                        log_to_server(f"[L2_MACD] {symbol} BUY trade_record写入失败: {_macd_rec_e}")
+
                     # 发送邮件通知
                     try:
                         # 止损止盈信息
@@ -50091,6 +50150,34 @@ def handle_tv_l2_10m():
                     print(f"[MACD-L2] ✅ {symbol} 卖出成功: {old_position} -> {state['position_units']} @ {current_close:.4f}")
                     # v3.652: 写入server.log; KEY-004: 统一三段式标签+source
                     log_to_server(f"[L2_MACD][final] {symbol} SELL 执行成功 | {macd_div_type} 强度{_div_strength:.1f}% | 仓位{old_position}->{state['position_units']} @ {current_close:.4f} | source=MACD_L2")
+
+                    # GCC-0257 S4: MACD交易记录入KEY-009
+                    try:
+                        _macd_trade_rec = {
+                            "ts": time_str,
+                            "tz": "America/New_York",
+                            "symbol": symbol,
+                            "timeframe": "10",
+                            "action": "SELL",
+                            "price": current_close,
+                            "signal_price": current_close,
+                            "units": 1,
+                            "fee_rate": FEE_RATE if 'FEE_RATE' in dir() else 0.001,
+                            "fee_usd": current_close * 0.001,
+                            "cycle_id": state.get("cycle_id", ""),
+                            "trade_mode": "live",
+                            "pos_in_channel": 0.5,
+                            "source": "MACD_L2",
+                            "market_regime": state.get("market_regime", "UNKNOWN"),
+                            "adx_value": 0.0,
+                            "trend_state": state.get("current_trend", "SIDE"),
+                            "n_structure_confirmed": False,
+                            "macd_div_type": macd_div_type,
+                            "macd_strength": round(_div_strength, 1),
+                        }
+                        _append_trade_record(_macd_trade_rec)
+                    except Exception as _macd_rec_e:
+                        log_to_server(f"[L2_MACD] {symbol} SELL trade_record写入失败: {_macd_rec_e}")
 
                     # 发送邮件通知
                     try:
