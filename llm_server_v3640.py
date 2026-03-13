@@ -71,6 +71,7 @@ try:
         gcc_observe as _gcc_observe,
         gcc_push_signal as _gcc_push,
         gcc_consume_pending_order as _gcc_consume,
+        gcc_confirm_consumed as _gcc_confirm,
         _GCC_TM_EXECUTE_SYMBOLS,
     )
     _HAS_GCC_TM = True
@@ -80,6 +81,7 @@ except ImportError:
     def _gcc_observe(*a, **kw): pass
     def _gcc_push(*a, **kw): pass
     def _gcc_consume(*a, **kw): return None
+    def _gcc_confirm(*a, **kw): pass
 ValidSignal = None
 try:
     from modules.behavior_finance import evaluate_behavior_finance  # KEY-005: 行为金融增强层
@@ -42937,6 +42939,7 @@ def llm_decide():
                 f"source={_gcc_order.get('source','')}"
             )
             if _gcc_act in ("BUY", "SELL"):
+                send_ok = False
                 if symbol == "BTCUSDC":
                     # BTCUSDC走永续合约通道
                     try:
@@ -42965,9 +42968,20 @@ def llm_decide():
                         log_to_server(f"[TSLA_OPT][ERROR] GCC-TM {_gcc_act}: {_qqq_e}")
                         send_ok = False
                 elif is_us_stock(symbol):
-                    send_ok = send_signalstack_order(_gcc_act, symbol, source="gcc_tm")
+                    try:
+                        send_ok = send_signalstack_order(_gcc_act, symbol, source="gcc_tm")
+                    except Exception as _ss_e:
+                        log_to_server(f"[GCC-TM][ERROR] {symbol} SignalStack: {_ss_e}")
+                        send_ok = False
                 else:
-                    send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol, source="gcc_tm")
+                    # 加密货币走3Commas通道
+                    try:
+                        send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol, source="gcc_tm")
+                    except Exception as _3c_e:
+                        log_to_server(f"[GCC-TM][ERROR] {symbol} 3Commas: {_3c_e}")
+                        send_ok = False
+                # 成功后才标记consumed（失败保留pending_order供下次重试）
+                _gcc_confirm(symbol, success=send_ok)
                 if send_ok:
                     log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单成功")
                     try:
@@ -42984,8 +42998,7 @@ def llm_decide():
                     except Exception as _em_err:
                         log_to_server(f"[GCC-TM][EXECUTE] {symbol}: 邮件发送失败 - {_em_err}")
                 else:
-                    log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单失败")
-            # pending_order 已消费，不影响后续正常流程
+                    log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单失败,保留pending_order重试")
 
     trade_mode = str(data.get("trade_mode", "live")).lower().strip()
     if trade_mode not in ["live", "paper"]:

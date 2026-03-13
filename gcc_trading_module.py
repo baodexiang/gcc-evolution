@@ -2690,10 +2690,10 @@ def _drain_signals(symbol: str) -> list:
 # B2: pending_order 消费器 — 主程序每根 K 线开头调用
 # ══════════════════════════════════════════════════════════════
 def gcc_consume_pending_order(symbol: str) -> Optional[dict]:
-    """读取并消费 pending_order（如有）。
+    """读取 pending_order（如有），不立即标记consumed。
 
     返回: {"action": "BUY"/"SELL", "price_ref": float, ...} 或 None。
-    消费后标记 consumed=True 并重写文件。
+    调用方需在下单成功后调用 gcc_confirm_consumed(symbol) 标记已消费。
     由 llm_server 在每根 K 线开头调用。
     """
     pending_file = _STATE_DIR / f"gcc_pending_order_{symbol}.json"
@@ -2707,21 +2707,34 @@ def gcc_consume_pending_order(symbol: str) -> Optional[dict]:
     if order.get("consumed"):
         return None
 
-    # 标记已消费
-    order["consumed"] = True
-    order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        pending_file.write_text(
-            json.dumps(order, ensure_ascii=False, indent=2), encoding="utf-8",
-        )
-    except Exception:
-        pass
-
     logger.info(
-        "[GCC-TM][CONSUME] %s %s price_ref=%.2f",
+        "[GCC-TM][PEEK] %s %s price_ref=%.2f (未标记consumed,等待执行确认)",
         symbol, order.get("action"), order.get("price_ref", 0),
     )
     return order
+
+
+def gcc_confirm_consumed(symbol: str, success: bool = True) -> None:
+    """下单成功后标记 pending_order 为 consumed。
+    success=False 时不标记，下次 llm_decide 会重试。
+    """
+    if not success:
+        logger.warning("[GCC-TM][RETRY] %s 下单失败,保留pending_order供重试", symbol)
+        return
+    pending_file = _STATE_DIR / f"gcc_pending_order_{symbol}.json"
+    if not pending_file.exists():
+        return
+    try:
+        order = json.loads(pending_file.read_text(encoding="utf-8"))
+        order["consumed"] = True
+        order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
+        logger.info(
+            "[GCC-TM][CONSUMED] %s %s price_ref=%.2f confirmed",
+            symbol, order.get("action"), order.get("price_ref", 0),
+        )
+    except Exception as e:
+        logger.warning("[GCC-TM][CONSUMED] %s write error: %s", symbol, e)
 
 
 # ══════════════════════════════════════════════════════════════
