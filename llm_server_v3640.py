@@ -82,6 +82,8 @@ except ImportError:
     def _gcc_push(*a, **kw): pass
     def _gcc_consume(*a, **kw): return None
     def _gcc_confirm(*a, **kw): pass
+# v3.680: 期权品种白名单 — 各通道(S1-S4/P0)恢复执行，走options通道而非股票
+_OPTIONS_ELIGIBLE_SYMBOLS = {"TSLA"}
 ValidSignal = None
 try:
     from modules.behavior_finance import evaluate_behavior_finance  # KEY-005: 行为金融增强层
@@ -118,7 +120,7 @@ except ImportError:
 # -----------------------------------------------------------------------------
 class SystemConfig:
     """系统级配置"""
-    VERSION = "3.679"  # v3.679: 观察模式结构化日志+KEY-009四标签分析 | v3.678: S2/S3/S4/P0/CycleSwitch全部观察模式
+    VERSION = "3.680"  # v3.680: 期权品种(TSLA)各通道恢复执行 | v3.679: 观察模式结构化日志+KEY-009四标签分析
     LOG_DIR = "logs"
     STATE_FILE = "state.json"
     ENABLE_DEBUG = False
@@ -3490,10 +3492,14 @@ def _run_cycle_switch_analysis(symbol: str, timeframe: int):
                 print(f"[P0-CycleSwitch] {symbol}: {trade_reason}")
                 print(f"[v3.510] {symbol} 仓位门控生效: {trade_reason}")
             else:
-                # v3.678: CycleSwitch观察模式 — 不直接下单，只走GCC-TM
-                log_to_server(f"[v3.678][OBSERVE] CycleSwitch BUY: {symbol} @ {current_price:.4f} (观察模式,不下单)")
+                # v3.680: 期权品种恢复执行(走options通道)，其他品种观察
+                if symbol in _OPTIONS_ELIGIBLE_SYMBOLS:
+                    _opt_ok = send_signalstack_order("BUY", symbol)
+                    log_to_server(f"[v3.680][OPTIONS] CycleSwitch BUY: {symbol} @ {current_price:.4f} → options send_ok={_opt_ok}")
+                else:
+                    log_to_server(f"[v3.678][OBSERVE] CycleSwitch BUY: {symbol} @ {current_price:.4f} (观察模式,不下单)")
                 _log_observe_signal("P0", symbol, "BUY", current_price, "CycleSwitch")
-                send_ok = False
+                send_ok = False  # 股票通道不执行(期权独立追踪)
                 try:
                     if False:  # v3.678: 原执行路径保留
                         if is_crypto:
@@ -3528,10 +3534,14 @@ def _run_cycle_switch_analysis(symbol: str, timeframe: int):
                 print(f"[P0-CycleSwitch] {symbol}: {trade_reason}")
                 print(f"[v3.510] {symbol} 仓位门控生效: {trade_reason}")
             else:
-                # v3.678: CycleSwitch观察模式 — 不直接下单，只走GCC-TM
-                log_to_server(f"[v3.678][OBSERVE] CycleSwitch SELL: {symbol} @ {current_price:.4f} (观察模式,不下单)")
+                # v3.680: 期权品种恢复执行(走options通道)，其他品种观察
+                if symbol in _OPTIONS_ELIGIBLE_SYMBOLS:
+                    _opt_ok = send_signalstack_order("SELL", symbol)
+                    log_to_server(f"[v3.680][OPTIONS] CycleSwitch SELL: {symbol} @ {current_price:.4f} → options send_ok={_opt_ok}")
+                else:
+                    log_to_server(f"[v3.678][OBSERVE] CycleSwitch SELL: {symbol} @ {current_price:.4f} (观察模式,不下单)")
                 _log_observe_signal("P0", symbol, "SELL", current_price, "CycleSwitch")
-                send_ok = False
+                send_ok = False  # 股票通道不执行(期权独立追踪)
                 try:
                     if False:  # v3.678: 原执行路径保留
                         if is_crypto:
@@ -47933,18 +47943,27 @@ def llm_decide():
         # ===== v3.411: 仓位检查结束，继续正常发单流程 =====
         # ===== v3.651: 外挂信号绕过L1参考模式 =====
         elif plugin_bypass_l2:
-            # v3.678: S2观察模式 — 只走GCC-TM通道，外挂不直接下单
-            send_ok = False
+            # v3.680: 期权品种恢复执行(走options通道)，其他品种观察
+            if symbol in _OPTIONS_ELIGIBLE_SYMBOLS:
+                _opt_ok = send_signalstack_order(final_action, symbol, source="plugin_l2")
+                log_to_server(f"[v3.680][OPTIONS] S2外挂信号: {symbol} {final_action} bias={plugin_exec_bias} → options send_ok={_opt_ok}")
+            else:
+                log_to_server(f"[v3.678][OBSERVE] S2外挂信号: {symbol} {final_action} bias={plugin_exec_bias} (观察模式,不下单)")
+            send_ok = False  # 股票通道不执行(期权独立追踪)
             executed_qty = 0.0
-            log_to_server(f"[v3.678][OBSERVE] S2外挂信号: {symbol} {final_action} bias={plugin_exec_bias} (观察模式,不下单)")
             _log_observe_signal("S2", symbol, final_action, last_close, f"plugin_bias={plugin_exec_bias}")
         # ===== v3.650: L1参考模式 - 不执行实际交易 =====
         # L1的BUY/SELL只作为参考,交易执行保留给: L2门卫(STRONG) + MACD背离 + P0-CycleSwitch
+        # v3.680: 期权品种恢复执行(走options通道)
         else:
-            send_ok = False
+            if symbol in _OPTIONS_ELIGIBLE_SYMBOLS:
+                _opt_ok = send_signalstack_order(final_action, symbol, source="L1_ref")
+                log_to_server(f"[v3.680][OPTIONS] S1 L1参考: {symbol} {final_action} price={last_close:.4f} → options send_ok={_opt_ok}")
+            else:
+                print(f"[v3.650] L1参考信号: {symbol} {final_action} @ {last_close:.4f} (不下单)")
+                log_to_server(f"[v3.650] L1参考: {symbol} {final_action} price={last_close:.4f}")
+            send_ok = False  # 股票通道不执行(期权独立追踪)
             executed_qty = 0.0
-            print(f"[v3.650] L1参考信号: {symbol} {final_action} @ {last_close:.4f} (不下单)")
-            log_to_server(f"[v3.650] L1参考: {symbol} {final_action} price={last_close:.4f}")
             _log_observe_signal("S1", symbol, final_action, last_close, "L1_reference")
 
         # IRS-008 v5.340: 推理轨迹记录 — 每次决策后记录完整推理路径
@@ -50061,9 +50080,13 @@ def handle_tv_l2_10m():
             # GCC-0194: N-Gate/HOLD_BAND已移除
             if macd_action == "BUY" and position_units < max_units:
                 triggered_action = "BUY"
-                # v3.678: S3观察模式 — MACD不直接下单，只走GCC-TM
-                send_ok = False
-                log_to_server(f"[v3.678][OBSERVE] S3 MACD BUY: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                # v3.680: 期权品种恢复执行(走options通道)，其他品种观察
+                if symbol in _OPTIONS_ELIGIBLE_SYMBOLS:
+                    _opt_ok = send_signalstack_order("BUY", symbol, source="MACD_L2")
+                    log_to_server(f"[v3.680][OPTIONS] S3 MACD BUY: {symbol} @ {current_close:.4f} → options send_ok={_opt_ok}")
+                else:
+                    log_to_server(f"[v3.678][OBSERVE] S3 MACD BUY: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                send_ok = False  # 股票通道不执行(期权独立追踪)
                 _log_observe_signal("S3", symbol, "BUY", current_close, "MACD_divergence")
 
                 if send_ok is True:
@@ -50163,9 +50186,13 @@ def handle_tv_l2_10m():
 
             elif macd_action == "SELL" and position_units > 0:
                 triggered_action = "SELL"
-                # v3.678: S3观察模式 — MACD不直接下单，只走GCC-TM
-                send_ok = False
-                log_to_server(f"[v3.678][OBSERVE] S3 MACD SELL: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                # v3.680: 期权品种恢复执行(走options通道)，其他品种观察
+                if symbol in _OPTIONS_ELIGIBLE_SYMBOLS:
+                    _opt_ok = send_signalstack_order("SELL", symbol, source="MACD_L2")
+                    log_to_server(f"[v3.680][OPTIONS] S3 MACD SELL: {symbol} @ {current_close:.4f} → options send_ok={_opt_ok}")
+                else:
+                    log_to_server(f"[v3.678][OBSERVE] S3 MACD SELL: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                send_ok = False  # 股票通道不执行(期权独立追踪)
                 _log_observe_signal("S3", symbol, "SELL", current_close, "MACD_divergence")
 
                 if send_ok is True:
@@ -50305,9 +50332,13 @@ def handle_tv_l2_10m():
                     trade_result = {"success": False, "reason": "position_full"}
                 else:
                     triggered_action = "BUY"
-                    # v3.678: S4观察模式 — L2 Gate不直接下单，只走GCC-TM
-                    send_ok = False
-                    log_to_server(f"[v3.678][OBSERVE] S4 Gate BUY: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                    # v3.680: 期权品种恢复执行(走options通道)，其他品种观察
+                    if symbol in _OPTIONS_ELIGIBLE_SYMBOLS:
+                        _opt_ok = send_signalstack_order("BUY", symbol, source="L2_gate")
+                        log_to_server(f"[v3.680][OPTIONS] S4 Gate BUY: {symbol} @ {current_close:.4f} → options send_ok={_opt_ok}")
+                    else:
+                        log_to_server(f"[v3.678][OBSERVE] S4 Gate BUY: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                    send_ok = False  # 股票通道不执行(期权独立追踪)
                     _log_observe_signal("S4", symbol, "BUY", current_close, "L2_Gate")
 
                     if send_ok is True:  # v3.560 P2-1
@@ -50378,9 +50409,13 @@ L2门卫交易触发
                     trade_result = {"success": False, "reason": "no_position"}
                 else:
                     triggered_action = "SELL"
-                    # v3.678: S4观察模式 — L2 Gate不直接下单，只走GCC-TM
-                    send_ok = False
-                    log_to_server(f"[v3.678][OBSERVE] S4 Gate SELL: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                    # v3.680: 期权品种恢复执行(走options通道)，其他品种观察
+                    if symbol in _OPTIONS_ELIGIBLE_SYMBOLS:
+                        _opt_ok = send_signalstack_order("SELL", symbol, source="L2_gate")
+                        log_to_server(f"[v3.680][OPTIONS] S4 Gate SELL: {symbol} @ {current_close:.4f} → options send_ok={_opt_ok}")
+                    else:
+                        log_to_server(f"[v3.678][OBSERVE] S4 Gate SELL: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                    send_ok = False  # 股票通道不执行(期权独立追踪)
                     _log_observe_signal("S4", symbol, "SELL", current_close, "L2_Gate")
 
                     if send_ok is True:  # v3.560 P2-1
@@ -51975,10 +52010,14 @@ def handle_p0_signal():
                             log_to_server(f"[SignalFilter] BUY过滤调用失败: {_sf_buy_e}")
 
                 if not reason:
-                    # v3.678: P0观察模式 — 扫描引擎不直接下单，只走GCC-TM
-                    log_to_server(f"[v3.678][OBSERVE] P0 BUY: {symbol} @ {price:.4f} type={signal_type} (观察模式,不下单)")
+                    # v3.680: 期权品种恢复执行(走options通道)，其他品种观察
+                    if symbol in _OPTIONS_ELIGIBLE_SYMBOLS:
+                        _opt_ok = send_signalstack_order("BUY", symbol, signal_type=signal_type)
+                        log_to_server(f"[v3.680][OPTIONS] P0 BUY: {symbol} @ {price:.4f} type={signal_type} → options send_ok={_opt_ok}")
+                    else:
+                        log_to_server(f"[v3.678][OBSERVE] P0 BUY: {symbol} @ {price:.4f} type={signal_type} (观察模式,不下单)")
                     _log_observe_signal("P0", symbol, "BUY", price, f"scan_{signal_type}")
-                    send_ok = False
+                    send_ok = False  # 股票通道不执行(期权独立追踪)
                     try:
                         if False:  # v3.678: 原执行路径保留，观察期结束后恢复
                             if is_crypto:
@@ -52113,10 +52152,14 @@ def handle_p0_signal():
                             log_to_server(f"[SignalFilter] SELL过滤调用失败: {_sf_sell_e}")
 
                 if not reason:
-                    # v3.678: P0观察模式 — 扫描引擎不直接下单，只走GCC-TM
-                    log_to_server(f"[v3.678][OBSERVE] P0 SELL: {symbol} @ {price:.4f} type={signal_type} (观察模式,不下单)")
+                    # v3.680: 期权品种恢复执行(走options通道)，其他品种观察
+                    if symbol in _OPTIONS_ELIGIBLE_SYMBOLS:
+                        _opt_ok = send_signalstack_order("SELL", symbol, signal_type=signal_type)
+                        log_to_server(f"[v3.680][OPTIONS] P0 SELL: {symbol} @ {price:.4f} type={signal_type} → options send_ok={_opt_ok}")
+                    else:
+                        log_to_server(f"[v3.678][OBSERVE] P0 SELL: {symbol} @ {price:.4f} type={signal_type} (观察模式,不下单)")
                     _log_observe_signal("P0", symbol, "SELL", price, f"scan_{signal_type}")
-                    send_ok = False
+                    send_ok = False  # 股票通道不执行(期权独立追踪)
                     try:
                         if False:  # v3.678: 原执行路径保留，观察期结束后恢复
                             if is_crypto:
