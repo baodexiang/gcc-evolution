@@ -231,7 +231,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 </div>
 </div>
 
-<!-- Tab: 交易分析 (GCC-TM sim_trades) -->
+<!-- Tab: 交易分析 (GCC-TM trades) -->
 <div class="tab-content" id="tab-trades">
 <div class="summary" id="trade-sim-summary"></div>
 <h2>按品种统计</h2>
@@ -334,8 +334,8 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <tbody id="gcctm-summary-body"></tbody>
 </table>
 
-<!-- 模拟交易P&L -->
-<h2 style="margin-top:24px">模拟交易 P&amp;L</h2>
+<!-- GCC-TM交易P&L -->
+<h2 style="margin-top:24px">GCC-TM交易 P&amp;L</h2>
 <div id="gcctm-sim-summary" class="summary" style="margin-bottom:12px"></div>
 <table>
 <thead><tr><th>时间</th><th>品种</th><th>动作</th><th>入场价</th><th>出场价</th><th>P&amp;L%</th><th>结果</th><th>轮次</th></tr></thead>
@@ -1254,11 +1254,11 @@ function loadGccTm() {
         // Summary bar
         summary.textContent = `共 ${decisions.length} 条决策 | 活跃品种:${allSyms.size} | 已交易:${tradedSyms} | 模拟:${simTrades.length}笔 | KNN:${knn.length}`;
 
-        // ── 模拟交易 P&L ──
+        // ── GCC-TM交易 P&L ──
         const simBody = $('gcctm-sim-body');
         const simSummaryEl = $('gcctm-sim-summary');
         if (!simTrades.length) {
-            simBody.innerHTML = '<tr><td colspan="8" style="color:#656d76;text-align:center">暂无模拟交易数据</td></tr>';
+            simBody.innerHTML = '<tr><td colspan="8" style="color:#656d76;text-align:center">暂无GCC-TM交易数据</td></tr>';
             simSummaryEl.innerHTML = '';
         } else {
             // 统计
@@ -1346,8 +1346,8 @@ function loadGccTm() {
         {
             const el = $('trade-sim-summary');
             if (!simTrades2.length) {
-                el.innerHTML = '<div class="card"><div class="label">模拟交易</div><div class="value">0</div><div class="sub">暂无数据</div></div>';
-                $('trade-by-symbol-gcctm').innerHTML = '<tr><td colspan="6" style="color:#656d76">暂无模拟交易数据</td></tr>';
+                el.innerHTML = '<div class="card"><div class="label">GCC-TM交易</div><div class="value">0</div><div class="sub">暂无数据</div></div>';
+                $('trade-by-symbol-gcctm').innerHTML = '<tr><td colspan="6" style="color:#656d76">暂无GCC-TM交易数据</td></tr>';
                 $('trade-by-action-gcctm').innerHTML = '<tr><td colspan="4" style="color:#656d76">暂无数据</td></tr>';
                 $('trade-recent-gcctm').innerHTML = '<tr><td colspan="8" style="color:#656d76">暂无数据</td></tr>';
             } else {
