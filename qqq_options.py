@@ -42,13 +42,15 @@ TARGET_DELTA = 0.50     # 目标delta (ATM)
 MAX_CONTRACTS = 5       # 单次最大合约数，在BUDGET内买满
 SYMBOL = "TSLA"         # 标的
 
-# 卖出策略参数 (无固定止盈, 让利润跑)
-STOP_LOSS_PCT = 0.50    # 止损: 亏损成本的50%平仓
+# 卖出策略参数
+STOP_LOSS_PCT = 0.25    # 止损: 亏损成本的25%平仓
 EXIT_DTE = 1            # 时间止损: 到期前1天平仓
 
-# 追踪止损 (Trailing Stop) — 主要获利退出机制
-TRAILING_ACTIVATE_PCT = 0.25  # 盈利达成本25%后激活追踪
-TRAILING_PULLBACK_PCT = 0.40  # 从最高价值回撤40%就平仓
+# 分阶段止盈 — 到25%利润先卖一半，剩余用15%追踪止损
+TAKE_PROFIT_PCT = 0.25        # 第一阶段: 盈利达25%卖50%仓位
+TAKE_PROFIT_CLOSE_RATIO = 0.5 # 卖出比例: 50%
+TRAILING_ACTIVATE_PCT = 0.25  # 追踪止损激活门槛(剩余仓位)
+TRAILING_PULLBACK_PCT = 0.15  # 从最高价值回撤15%就平仓(剩余仓位)
 
 # 持仓状态文件
 STATE_FILE = Path(__file__).parent / "state" / "tsla_options_position.json"
@@ -547,12 +549,16 @@ def get_option_current_value(option: dict) -> Optional[float]:
 
 def check_exit_rules() -> Optional[dict]:
     """
-    检查卖出规则 (优先级: TIME_EXIT > STOP_LOSS > TRAILING_STOP)
+    检查卖出规则 (优先级: TIME_EXIT > STOP_LOSS > TAKE_PROFIT_PARTIAL > TRAILING_STOP)
+
+    分阶段止盈:
+      1) 盈利达25% → 卖掉一部分(单数卖1张, 偶数卖一半)
+      2) 剩余仓位 → 追踪止损(从峰值回撤15%平仓)
 
     Returns:
         None = 无持仓或不需要操作
         {"action": str, "reason": str, "current_value": float,
-         "pnl": float, "option": dict}
+         "pnl": float, "option": dict, "contracts": int (部分平仓张数)}
     """
     position = _load_position()
     if not position:
@@ -565,7 +571,7 @@ def check_exit_rules() -> Optional[dict]:
     entry_cost = position.get("entry_cost", option.get("cost_per_contract", 0))
     contracts = option.get("contracts", 0)
 
-    # 1. 时间止损: DTE ≤ EXIT_DTE (最高优先级)
+    # 1. 时间止损: DTE ≤ EXIT_DTE (最高优先级, 全部平仓)
     try:
         exp_date = datetime.strptime(option["expiration"], "%Y-%m-%d")
         days_left = (exp_date - datetime.now()).days
@@ -576,7 +582,7 @@ def check_exit_rules() -> Optional[dict]:
             pnl = (current_value - entry_cost) * 100 * contracts
             return {
                 "action": "TIME_EXIT",
-                "reason": f"到期前{days_left}天，强制平仓",
+                "reason": f"到期前{days_left}天，强制全部平仓",
                 "current_value": current_value,
                 "pnl": round(pnl, 2),
                 "option": option,
@@ -605,7 +611,7 @@ def check_exit_rules() -> Optional[dict]:
             except Exception:
                 pass
 
-    # 3. 止损: 亏损 ≥ 成本的 STOP_LOSS_PCT
+    # 3. 止损: 亏损 ≥ 成本的 STOP_LOSS_PCT (全部平仓)
     stop_loss_threshold = entry_cost * (1 - STOP_LOSS_PCT)
     if current_value <= stop_loss_threshold:
         return {
@@ -616,7 +622,24 @@ def check_exit_rules() -> Optional[dict]:
             "option": option,
         }
 
-    # 4. 追踪止损: 盈利达成本的TRAILING_ACTIVATE_PCT后激活, 回撤TRAILING_PULLBACK_PCT平仓
+    # 4. 分阶段止盈: 盈利达25% → 卖一部分(奇数卖1张, 偶数卖一半)
+    partial_tp_done = position.get("partial_tp_done", False)
+    take_profit_threshold = entry_cost * (1 + TAKE_PROFIT_PCT)
+    if not partial_tp_done and current_value >= take_profit_threshold and contracts >= 2:
+        # 奇数(3,5): 卖1张; 偶数(2,4): 卖一半
+        close_qty = 1 if contracts % 2 == 1 else contracts // 2
+        close_pnl = pnl_per_contract * 100 * close_qty
+        return {
+            "action": "TAKE_PROFIT_PARTIAL",
+            "reason": (f"盈利达{TAKE_PROFIT_PCT*100:.0f}% → 卖{close_qty}/{contracts}张锁利 "
+                       f"(当前${current_value:.2f} ≥ 阈值${take_profit_threshold:.2f})"),
+            "current_value": current_value,
+            "pnl": round(close_pnl, 2),
+            "option": option,
+            "contracts": close_qty,
+        }
+
+    # 5. 追踪止损: 盈利达25%后激活, 从峰值回撤15%平仓(剩余全部)
     trailing_activate = entry_cost * (1 + TRAILING_ACTIVATE_PCT)
     if peak_value >= trailing_activate and current_value > entry_cost:
         pullback = peak_value - current_value
@@ -637,7 +660,7 @@ def check_exit_rules() -> Optional[dict]:
 
 def auto_manage(dry_run: bool = True) -> Optional[dict]:
     """
-    自动持仓管理: 检查卖出规则 → 执行平仓
+    自动持仓管理: 检查卖出规则 → 执行平仓(支持部分平仓)
 
     Returns:
         None = 无操作
@@ -650,13 +673,33 @@ def auto_manage(dry_run: bool = True) -> Optional[dict]:
     action = exit_signal["action"]
     option = exit_signal["option"]
     pnl = exit_signal.get("pnl", 0)
+    close_qty = exit_signal.get("contracts")  # 部分平仓张数, None=全部
 
     logger.info(
         f"[TSLA_OPT] 卖出触发: {action} — {exit_signal['reason']} "
-        f"PnL=${pnl:.0f}"
+        f"PnL=${pnl:.0f} qty={close_qty or 'ALL'}"
     )
 
-    result = close_option(option, dry_run=dry_run, market_order=True)
+    result = close_option(option, contracts=close_qty, dry_run=dry_run, market_order=True)
+
+    # 部分止盈成功 → 更新持仓张数 + 标记partial_tp_done + 恢复status=open
+    # 注意: close_option会调_mark_pending_close设status=pending_close，
+    #       部分平仓必须恢复为open，否则check_pending_close确认后会清掉剩余仓位
+    if action == "TAKE_PROFIT_PARTIAL" and result.get("success") and not dry_run:
+        with _position_lock:
+            try:
+                data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+                opt_key = "option" if "option" in data else "spread"
+                old_qty = data[opt_key].get("contracts", 0)
+                data[opt_key]["contracts"] = old_qty - close_qty
+                data["partial_tp_done"] = True
+                data["status"] = "open"  # 恢复open，剩余仓位继续追踪
+                # 重置peak_value为当前值，让追踪止损从此刻起算
+                data["peak_value"] = round(exit_signal["current_value"], 2)
+                STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                logger.info(f"[TSLA_OPT] 部分止盈完成: {old_qty}→{old_qty - close_qty}张, 追踪止损已激活")
+            except Exception as _e:
+                logger.error(f"[TSLA_OPT] 更新部分止盈状态失败: {_e}")
 
     return {
         "action": action,
