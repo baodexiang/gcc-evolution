@@ -1094,7 +1094,7 @@ def call_claude_vision(image_base64: str, prompt: str = None,
     for attempt in range(max_retries):
         try:
             response = client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-4-6",
                 max_tokens=500,
                 messages=[
                     {
@@ -1142,7 +1142,7 @@ def call_claude_vision(image_base64: str, prompt: str = None,
                         "ts": datetime.now().isoformat(),
                         "symbol": symbol,
                         "mode": expected_mode,
-                        "model": "claude-sonnet-4-20250514",
+                        "model": "claude-sonnet-4-6",
                         "raw_text": text,
                         "parsed": result,
                     }
