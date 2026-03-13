@@ -1209,7 +1209,9 @@ function loadGccTm() {
                 const tradeRound = cs.trade_round >= 0 ? cs.trade_round : '-';
                 const dirColor = dir === 'BUY' ? '#1a7f37' : dir === 'SELL' ? '#cf222e' : '#9a6700';
                 const dirBg = dir === 'BUY' ? '#dafbe1' : dir === 'SELL' ? '#ffebe9' : '#fff8c5';
-                const isConflict = vDir !== '-' && prevSum !== '-' && vDir !== prevSum;
+                // 矛盾判定: 仅当Vision与上K完全相反(BUY vs SELL)才算矛盾
+                // 上K=HOLD时信任Vision (与gcc_trading_module.py:285一致)
+                const isConflict = vDir !== '-' && prevSum !== '-' && prevSum !== 'HOLD' && vDir !== prevSum;
 
                 // Stage 1: Vision门控
                 const stageVision = `
