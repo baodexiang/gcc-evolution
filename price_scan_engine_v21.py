@@ -4171,11 +4171,9 @@ class YFinanceDataFetcher:
     @staticmethod
     def get_15m_ohlcv(symbol: str, lookback_bars: int = 100) -> Optional[List[Dict]]:
         """
-        v3.565: 获取15分钟K线OHLCV数据 (用于MACD背离外挂)
+        v3.565: 获取15分钟K线OHLCV数据 (用于MACD背离外挂 + GCC-0258 S11多周期信号)
         v16.2: 增加扫描周期缓存
-
-        原主程序使用10分钟周期，但yfinance不支持10m interval，
-        使用15m作为最接近的替代。
+        GCC-0258 S11: 加密优先Coinbase FIFTEEN_MINUTE, 美股fallback Schwab 15min
 
         Args:
             symbol: 交易对符号
@@ -4188,10 +4186,15 @@ class YFinanceDataFetcher:
         # v16.2: 扫描周期缓存检查
         cached = YFinanceDataFetcher._get_ohlcv_cache(symbol, "15m", lookback_bars)
         if cached is not None:
-            logger.debug(f"[yf] {symbol} 15分钟数据命中缓存")
             return cached
 
-        logger.info(f"[yf] {symbol} 15分钟数据开始下载 (lookback={lookback_bars})...")
+        # GCC-0258 S11: 加密货币优先 Coinbase FIFTEEN_MINUTE (granularity=900)
+        if is_crypto_symbol(symbol):
+            cb_bars = _coinbase_fetch_candles(symbol, granularity=900, limit=min(lookback_bars, 300))
+            if cb_bars and len(cb_bars) >= min(lookback_bars, 10):
+                YFinanceDataFetcher._set_ohlcv_cache(symbol, "15m", lookback_bars, cb_bars)
+                return cb_bars
+            logger.info(f"[COINBASE] {symbol} 15m失败, 降级yfinance")
 
         def _fetch(sym):
             ticker = yf.Ticker(sym)
@@ -4223,7 +4226,13 @@ class YFinanceDataFetcher:
             return None
 
         result = YFinanceDataFetcher._retry_fetch(_fetch, symbol)
-        logger.info(f"[yf] {symbol} 15分钟数据下载完成 (bars={len(result) if result else 0})")
+        # GCC-0258 S11: 美股yfinance失败 → Schwab 15min fallback
+        if result is None:
+            schwab_bars = YFinanceDataFetcher._fetch_from_schwab_ohlcv(symbol, "15min", lookback_bars)
+            if schwab_bars:
+                logger.info(f"[SCHWAB_FALLBACK] 15m {symbol} success bars={len(schwab_bars)}")
+                if YFinanceDataFetcher._schwab_mode_active():
+                    result = schwab_bars
         # v16.2: 缓存结果
         if result is not None:
             YFinanceDataFetcher._set_ohlcv_cache(symbol, "15m", lookback_bars, result)
@@ -9978,6 +9987,111 @@ class PriceScanEngine:
 
     # v21.16: _scan_macd_divergence 已删除 (扫描引擎MACD移除, 仅保留L2小周期版本)
 
+    # ═══════════════════════════════════════════════════════════
+    # GCC-0258 S11: 15min多周期外挂扫描 — 填充GCC-TM信号池
+    # 复用现有外挂(Hoffman/缠论/SuperTrend), 喂15min K线产生高频信号
+    # ═══════════════════════════════════════════════════════════
+    def _scan_plugins_15m(self, symbol: str, market_type: str = "crypto"):
+        """
+        GCC-0258 S11: 15min子周期外挂扫描, 信号推入GCC-TM信号池。
+        不影响现有4H外挂逻辑和主程序交易路径。
+        每30分钟调用一次, 15min K线每次有2根新数据。
+        """
+        try:
+            from gcc_trading_module import gcc_push_signal as _gcc_push_15m
+        except ImportError:
+            return
+
+        main_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
+
+        # ── 获取15min K线 ──
+        bars_15m = YFinanceDataFetcher.get_15m_ohlcv(symbol, 60)  # 60根=15小时
+        if not bars_15m or len(bars_15m) < 30:
+            logger.debug(f"[S11] {symbol} 15m K线不足({len(bars_15m) if bars_15m else 0}根), 跳过")
+            return
+
+        # 趋势信息(大周期, 用于过滤)
+        trend_info = self._get_trend_for_plugin(symbol)
+        current_trend = trend_info.get("trend", "SIDE") if trend_info else "SIDE"
+        pos_in_channel = 0.5
+
+        try:
+            market_data = self._get_market_data_for_supertrend(symbol)
+            pos_in_channel = market_data.get("position_pct", 50) / 100.0
+        except Exception:
+            pass
+
+        pushed = 0
+
+        # ── 1. Hoffman 15m ──
+        if _rob_hoffman_available:
+            try:
+                plugin = get_rob_hoffman_plugin()
+                result = plugin.process_for_scan(
+                    symbol=symbol,
+                    ohlcv_bars=bars_15m,
+                    current_trend=current_trend,
+                    pos_in_channel=pos_in_channel,
+                    position_units=0,  # 15m信号不做仓位判断
+                )
+                if plugin.should_activate_for_scan(result):
+                    action = plugin.get_action_for_scan(result)
+                    if action in ("BUY", "SELL"):
+                        _gcc_push_15m(main_symbol, "Hoffman_15m", action, min(0.7, result.confidence))
+                        pushed += 1
+                        logger.info(f"[S11] {symbol} Hoffman_15m → {action} (conf={result.confidence:.2f})")
+            except Exception as e:
+                logger.debug(f"[S11] {symbol} Hoffman_15m error: {e}")
+
+        # ── 2. 缠论 15m ──
+        if _chan_bs_available:
+            try:
+                bars_15m_long = YFinanceDataFetcher.get_15m_ohlcv(symbol, 200)  # 缠论需要更多数据
+                if bars_15m_long and len(bars_15m_long) >= 60:
+                    chan_plugin = get_chan_bs_plugin()
+                    chan_result = chan_plugin.process_for_scan(
+                        symbol=symbol,
+                        ohlcv_bars=bars_15m_long,
+                        current_trend=current_trend,
+                    )
+                    if chan_plugin.should_activate_for_scan(chan_result):
+                        action = chan_plugin.get_action_for_scan(chan_result)
+                        if action in ("BUY", "SELL"):
+                            _conf = min(0.7, chan_result.strength) if hasattr(chan_result, 'strength') else 0.6
+                            _gcc_push_15m(main_symbol, "ChanBS_15m", action, _conf)
+                            pushed += 1
+                            logger.info(f"[S11] {symbol} ChanBS_15m → {action}")
+            except Exception as e:
+                logger.debug(f"[S11] {symbol} ChanBS_15m error: {e}")
+
+        # ── 3. SuperTrend 15m ──
+        if _supertrend_available:
+            try:
+                st_config = self.config[market_type].get("supertrend", {})
+                if st_config.get("enabled", False):
+                    close_prices_15m = [b["close"] for b in bars_15m]
+                    l1_signals = self._get_l1_signals_for_supertrend(symbol)
+                    market_data = self._get_market_data_for_supertrend(symbol)
+                    plugin = get_supertrend_plugin()
+                    st_result = plugin.process(
+                        symbol=symbol,
+                        ohlcv_bars=bars_15m,
+                        close_prices=close_prices_15m,
+                        l1_signals=l1_signals,
+                        market_data=market_data,
+                    )
+                    if st_result:
+                        mode_val = getattr(st_result.mode, 'value', st_result.mode) if st_result.mode else None
+                        if mode_val in ("PLUGIN_AGREE", "PLUGIN_CONFLICT") and st_result.action in ("BUY", "SELL"):
+                            _gcc_push_15m(main_symbol, "SuperTrend_15m", st_result.action, 0.6)
+                            pushed += 1
+                            logger.info(f"[S11] {symbol} SuperTrend_15m → {st_result.action}")
+            except Exception as e:
+                logger.debug(f"[S11] {symbol} SuperTrend_15m error: {e}")
+
+        if pushed > 0:
+            logger.info(f"[S11] {symbol} 15m扫描完成: {pushed}个信号推入GCC-TM信号池")
+
     def _scan_crypto(self):
         """扫描加密货币 - v3.545: P0-Tracking + 剥头皮 + L1外挂"""
         for idx, symbol in enumerate(self.config["crypto"]["symbols"]):
@@ -10042,6 +10156,9 @@ class PriceScanEngine:
 
                     # v3.550: SuperTrend+QQE MOD+A-V2外挂 - v15.2: 暂时屏蔽
                     # self._scan_supertrend_av2(symbol)
+
+                    # GCC-0258 S11: 15min多周期外挂扫描 (在4H外挂之后, gcc_observe之前)
+                    self._scan_plugins_15m(symbol, market_type="crypto")
 
                     # GCC-0141: 外挂扫描计时结束
                     _dp.stop(f"plugins_{symbol}")
@@ -10170,6 +10287,9 @@ class PriceScanEngine:
 
                     # v3.550: SuperTrend+AV2外挂 (4小时周期) - v15.2: 暂时屏蔽
                     # self._scan_supertrend_av2(symbol, market_type="stock")
+
+                    # GCC-0258 S11: 15min多周期外挂扫描 (在4H外挂之后, gcc_observe之前)
+                    self._scan_plugins_15m(symbol, market_type="stock")
 
                     # GCC-0141: 外挂扫描计时结束
                     _dp.stop(f"plugins_{symbol}")
