@@ -118,7 +118,7 @@ except ImportError:
 # -----------------------------------------------------------------------------
 class SystemConfig:
     """系统级配置"""
-    VERSION = "3.678"  # v3.678: S2/S3/S4/P0/CycleSwitch全部观察模式，只保留GCC-TM通道执行 | v3.677: 移动止盈补豁免FilterChain+SignalGate 3处
+    VERSION = "3.679"  # v3.679: 观察模式结构化日志+KEY-009四标签分析 | v3.678: S2/S3/S4/P0/CycleSwitch全部观察模式
     LOG_DIR = "logs"
     STATE_FILE = "state.json"
     ENABLE_DEBUG = False
@@ -320,6 +320,26 @@ def log_to_server(msg: str):
 def is_us_stock(symbol: str) -> bool:
     """向后兼容函数"""
     return USStockConfig.is_us_stock(symbol)
+
+# v3.679: 观察模式结构化日志 — S1/S2/S3/S4/P0/CycleSwitch信号写入JSONL
+_OBSERVE_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state", "gcc_observe_log.jsonl")
+def _log_observe_signal(channel: str, symbol: str, action: str, price: float, reason: str = ""):
+    """写入观察模式信号到结构化日志"""
+    try:
+        from datetime import datetime as _obs_dt
+        import json as _obs_json
+        entry = _obs_json.dumps({
+            "ts": _obs_dt.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "channel": channel,
+            "symbol": symbol,
+            "action": action,
+            "price": round(price, 4),
+            "reason": reason,
+        }, ensure_ascii=False)
+        with open(_OBSERVE_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(entry + "\n")
+    except Exception:
+        pass
 
 # -----------------------------------------------------------------------------
 # 0.8a 品种参数加载器 (v3.661: PARAM_YAML)
@@ -3472,6 +3492,7 @@ def _run_cycle_switch_analysis(symbol: str, timeframe: int):
             else:
                 # v3.678: CycleSwitch观察模式 — 不直接下单，只走GCC-TM
                 log_to_server(f"[v3.678][OBSERVE] CycleSwitch BUY: {symbol} @ {current_price:.4f} (观察模式,不下单)")
+                _log_observe_signal("P0", symbol, "BUY", current_price, "CycleSwitch")
                 send_ok = False
                 try:
                     if False:  # v3.678: 原执行路径保留
@@ -3509,6 +3530,7 @@ def _run_cycle_switch_analysis(symbol: str, timeframe: int):
             else:
                 # v3.678: CycleSwitch观察模式 — 不直接下单，只走GCC-TM
                 log_to_server(f"[v3.678][OBSERVE] CycleSwitch SELL: {symbol} @ {current_price:.4f} (观察模式,不下单)")
+                _log_observe_signal("P0", symbol, "SELL", current_price, "CycleSwitch")
                 send_ok = False
                 try:
                     if False:  # v3.678: 原执行路径保留
@@ -47915,6 +47937,7 @@ def llm_decide():
             send_ok = False
             executed_qty = 0.0
             log_to_server(f"[v3.678][OBSERVE] S2外挂信号: {symbol} {final_action} bias={plugin_exec_bias} (观察模式,不下单)")
+            _log_observe_signal("S2", symbol, final_action, last_close, f"plugin_bias={plugin_exec_bias}")
         # ===== v3.650: L1参考模式 - 不执行实际交易 =====
         # L1的BUY/SELL只作为参考,交易执行保留给: L2门卫(STRONG) + MACD背离 + P0-CycleSwitch
         else:
@@ -47922,6 +47945,7 @@ def llm_decide():
             executed_qty = 0.0
             print(f"[v3.650] L1参考信号: {symbol} {final_action} @ {last_close:.4f} (不下单)")
             log_to_server(f"[v3.650] L1参考: {symbol} {final_action} price={last_close:.4f}")
+            _log_observe_signal("S1", symbol, final_action, last_close, "L1_reference")
 
         # IRS-008 v5.340: 推理轨迹记录 — 每次决策后记录完整推理路径
         try:
@@ -50040,6 +50064,7 @@ def handle_tv_l2_10m():
                 # v3.678: S3观察模式 — MACD不直接下单，只走GCC-TM
                 send_ok = False
                 log_to_server(f"[v3.678][OBSERVE] S3 MACD BUY: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                _log_observe_signal("S3", symbol, "BUY", current_close, "MACD_divergence")
 
                 if send_ok is True:
                     old_position = position_units
@@ -50141,6 +50166,7 @@ def handle_tv_l2_10m():
                 # v3.678: S3观察模式 — MACD不直接下单，只走GCC-TM
                 send_ok = False
                 log_to_server(f"[v3.678][OBSERVE] S3 MACD SELL: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                _log_observe_signal("S3", symbol, "SELL", current_close, "MACD_divergence")
 
                 if send_ok is True:
                     old_position = position_units
@@ -50282,6 +50308,7 @@ def handle_tv_l2_10m():
                     # v3.678: S4观察模式 — L2 Gate不直接下单，只走GCC-TM
                     send_ok = False
                     log_to_server(f"[v3.678][OBSERVE] S4 Gate BUY: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                    _log_observe_signal("S4", symbol, "BUY", current_close, "L2_Gate")
 
                     if send_ok is True:  # v3.560 P2-1
                         # 更新仓位 (与L2大周期一致的仓位管理)
@@ -50354,6 +50381,7 @@ L2门卫交易触发
                     # v3.678: S4观察模式 — L2 Gate不直接下单，只走GCC-TM
                     send_ok = False
                     log_to_server(f"[v3.678][OBSERVE] S4 Gate SELL: {symbol} @ {current_close:.4f} (观察模式,不下单)")
+                    _log_observe_signal("S4", symbol, "SELL", current_close, "L2_Gate")
 
                     if send_ok is True:  # v3.560 P2-1
                         # 更新仓位 (与L2大周期一致的仓位管理)
@@ -51139,6 +51167,20 @@ def key009_gcctm():
     except Exception:
         pass
 
+    # v3.679: 观察模式信号日志 — 最近500条
+    observe_signals = []
+    _obs_path = ROOT / "state" / "gcc_observe_log.jsonl"
+    try:
+        if _obs_path.exists():
+            _obs_lines = _obs_path.read_text(encoding="utf-8").splitlines()
+            for _ol in _obs_lines[-500:]:
+                try:
+                    observe_signals.append(json.loads(_ol))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     decisions = list(reversed(decisions))
     knn_entries = list(reversed(knn_entries))
     sim_trades = list(reversed(sim_trades))
@@ -51156,6 +51198,7 @@ def key009_gcctm():
                 "round_decisions": round_decisions,
                 "signal_pool": signal_pool,
                 "direction_locks": direction_locks,
+                "observe_signals": list(reversed(observe_signals)),
             },
             ensure_ascii=False,
         ),
@@ -51863,66 +51906,68 @@ def handle_p0_signal():
                 if not reason:
                     # v3.678: P0观察模式 — 扫描引擎不直接下单，只走GCC-TM
                     log_to_server(f"[v3.678][OBSERVE] P0 BUY: {symbol} @ {price:.4f} type={signal_type} (观察模式,不下单)")
+                    _log_observe_signal("P0", symbol, "BUY", price, f"scan_{signal_type}")
                     send_ok = False
-                    if False:  # v3.678: 原执行路径保留，观察期结束后恢复
-                        if is_crypto:
-                            send_ok = send_3commas_signal("BUY", price, symbol, signal_type=signal_type)
-                        else:
-                            send_ok = send_signalstack_order("BUY", symbol, signal_type=signal_type)
+                    try:
+                        if False:  # v3.678: 原执行路径保留，观察期结束后恢复
+                            if is_crypto:
+                                send_ok = send_3commas_signal("BUY", price, symbol, signal_type=signal_type)
+                            else:
+                                send_ok = send_signalstack_order("BUY", symbol, signal_type=signal_type)
 
-                        if send_ok is True:  # v3.560 P2-1
-                            executed = True
-                            reason = f"P0买入执行成功"
-                            _p0_daily_send_count[_p0_dc_key] = _p0_dc_val + 1  # v21.18
+                            if send_ok is True:  # v3.560 P2-1
+                                executed = True
+                                reason = f"P0买入执行成功"
+                                _p0_daily_send_count[_p0_dc_key] = _p0_dc_val + 1  # v21.18
 
-                            # v3.560 P1-5: 统一更新所有资产的本地仓位（含加密货币）
-                            old_position = position_units
-                            if symbol not in symbol_state:
-                                symbol_state[symbol] = {}
-                            symbol_state[symbol]["position_units"] = min(5, position_units + 1)
-                            if "open_buys" not in symbol_state[symbol]:
-                                symbol_state[symbol]["open_buys"] = []
-                            symbol_state[symbol]["open_buys"].append(price)
-                            _save_state_to_disk()
-                            log_to_server(f"[P0] {symbol} BUY仓位更新: {old_position} → {symbol_state[symbol]['position_units']}")
+                                # v3.560 P1-5: 统一更新所有资产的本地仓位（含加密货币）
+                                old_position = position_units
+                                if symbol not in symbol_state:
+                                    symbol_state[symbol] = {}
+                                symbol_state[symbol]["position_units"] = min(5, position_units + 1)
+                                if "open_buys" not in symbol_state[symbol]:
+                                    symbol_state[symbol]["open_buys"] = []
+                                symbol_state[symbol]["open_buys"].append(price)
+                                _save_state_to_disk()
+                                log_to_server(f"[P0] {symbol} BUY仓位更新: {old_position} → {symbol_state[symbol]['position_units']}")
 
-                            # v3.640: 记录交易到trade_history.json
-                            try:
-                                now_ny_rec = datetime.now(ZoneInfo("America/New_York"))
-                                _p0_pos = data.get("position_pct", 50) / 100.0  # v3.652
-                                trade_rec = {
-                                    "ts": now_ny_rec.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "tz": "America/New_York",
-                                    "symbol": symbol,
-                                    "timeframe": timeframe,
-                                    "action": "BUY",
-                                    "price": price,
-                                    "units": 1,
-                                    "fee_rate": FEE_RATE,
-                                    "fee_usd": price * FEE_RATE,
-                                    "cycle_id": sym_state.get("cycle_id", 0),
-                                    "trade_mode": "live",
-                                    "source": signal_type,
-                                    "pos_in_channel": round(_p0_pos, 4),  # v3.652: 节奏评分用
-                                    "consensus_score": data.get("consensus_score"),  # v21.8
-                                    # KEY-009: 交易分析用字段
-                                    "market_regime": sym_state.get("market_regime", "UNKNOWN"),
-                                    "adx_value": round(float(data.get("adx", 0) or 0), 1),
-                                    "trend_state": sym_state.get("current_trend", "SIDE"),
-                                }
-                                _append_trade_record(trade_rec)
-                                portfolio_breaker_record_trade("BUY")  # v3.654
-                                log_to_server(f"[P0] {symbol} BUY交易记录已写入")
-                            except Exception as e:
-                                log_to_server(f"[P0] {symbol} BUY交易记录写入失败: {e}")
+                                # v3.640: 记录交易到trade_history.json
+                                try:
+                                    now_ny_rec = datetime.now(ZoneInfo("America/New_York"))
+                                    _p0_pos = data.get("position_pct", 50) / 100.0  # v3.652
+                                    trade_rec = {
+                                        "ts": now_ny_rec.strftime("%Y-%m-%d %H:%M:%S"),
+                                        "tz": "America/New_York",
+                                        "symbol": symbol,
+                                        "timeframe": timeframe,
+                                        "action": "BUY",
+                                        "price": price,
+                                        "units": 1,
+                                        "fee_rate": FEE_RATE,
+                                        "fee_usd": price * FEE_RATE,
+                                        "cycle_id": sym_state.get("cycle_id", 0),
+                                        "trade_mode": "live",
+                                        "source": signal_type,
+                                        "pos_in_channel": round(_p0_pos, 4),  # v3.652: 节奏评分用
+                                        "consensus_score": data.get("consensus_score"),  # v21.8
+                                        # KEY-009: 交易分析用字段
+                                        "market_regime": sym_state.get("market_regime", "UNKNOWN"),
+                                        "adx_value": round(float(data.get("adx", 0) or 0), 1),
+                                        "trend_state": sym_state.get("current_trend", "SIDE"),
+                                    }
+                                    _append_trade_record(trade_rec)
+                                    portfolio_breaker_record_trade("BUY")  # v3.654
+                                    log_to_server(f"[P0] {symbol} BUY交易记录已写入")
+                                except Exception as e:
+                                    log_to_server(f"[P0] {symbol} BUY交易记录写入失败: {e}")
 
-                            # v2.983: 发送邮件通知
-                            # v3.502: Chandelier+ZLSMA由P0扫描引擎发送邮件，避免重复
-                            if signal_type != "Chandelier+ZLSMA":
-                                now_ny = datetime.now(ZoneInfo("America/New_York"))
-                                time_str = now_ny.strftime("%Y-%m-%d %H:%M:%S")
-                                email_subject = f"⚡ P0扫描买入 | {symbol} | BUY"
-                                email_body = f"""
+                                # v2.983: 发送邮件通知
+                                # v3.502: Chandelier+ZLSMA由P0扫描引擎发送邮件，避免重复
+                                if signal_type != "Chandelier+ZLSMA":
+                                    now_ny = datetime.now(ZoneInfo("America/New_York"))
+                                    time_str = now_ny.strftime("%Y-%m-%d %H:%M:%S")
+                                    email_subject = f"⚡ P0扫描买入 | {symbol} | BUY"
+                                    email_body = f"""
 ========================================
 ⚡ P0 扫描引擎触发 - 买入 ({signal_type})
 ========================================
@@ -51943,9 +51988,9 @@ def handle_p0_signal():
 仓位: {position_units}/5
 ========================================
 """
-                                send_email_notification(email_subject, email_body)
-                        else:
-                            reason = "P0买入被门控拦截" if send_ok is None else "P0买入发送失败"
+                                    send_email_notification(email_subject, email_body)
+                            else:
+                                reason = "P0买入被门控拦截" if send_ok is None else "P0买入发送失败"
                     except Exception as e:
                         reason = f"P0买入执行失败: {e}"
                         log_to_server(f"[P0] {symbol} {reason}")
@@ -51999,65 +52044,67 @@ def handle_p0_signal():
                 if not reason:
                     # v3.678: P0观察模式 — 扫描引擎不直接下单，只走GCC-TM
                     log_to_server(f"[v3.678][OBSERVE] P0 SELL: {symbol} @ {price:.4f} type={signal_type} (观察模式,不下单)")
+                    _log_observe_signal("P0", symbol, "SELL", price, f"scan_{signal_type}")
                     send_ok = False
-                    if False:  # v3.678: 原执行路径保留，观察期结束后恢复
-                        if is_crypto:
-                            send_ok = send_3commas_signal("SELL", price, symbol, signal_type=signal_type)
-                        else:
-                            send_ok = send_signalstack_order("SELL", symbol, signal_type=signal_type)
+                    try:
+                        if False:  # v3.678: 原执行路径保留，观察期结束后恢复
+                            if is_crypto:
+                                send_ok = send_3commas_signal("SELL", price, symbol, signal_type=signal_type)
+                            else:
+                                send_ok = send_signalstack_order("SELL", symbol, signal_type=signal_type)
 
-                        if send_ok is True:  # v3.560 P2-1
-                            executed = True
-                            reason = f"P0卖出执行成功"
-                            _p0_daily_send_count[_p0_dc_key] = _p0_dc_val + 1  # v21.18
+                            if send_ok is True:  # v3.560 P2-1
+                                executed = True
+                                reason = f"P0卖出执行成功"
+                                _p0_daily_send_count[_p0_dc_key] = _p0_dc_val + 1  # v21.18
 
-                            # v3.560 P1-5: 统一更新所有资产的本地仓位（含加密货币）
-                            old_position = position_units
-                            if symbol not in symbol_state:
-                                symbol_state[symbol] = {}
-                            symbol_state[symbol]["position_units"] = max(0, position_units - 1)
-                            if symbol_state[symbol].get("open_buys"):
-                                symbol_state[symbol]["open_buys"].pop(0)  # v3.560 P1-2: FIFO
-                            _save_state_to_disk()
-                            log_to_server(f"[P0] {symbol} SELL仓位更新: {old_position} → {symbol_state[symbol]['position_units']}")
+                                # v3.560 P1-5: 统一更新所有资产的本地仓位（含加密货币）
+                                old_position = position_units
+                                if symbol not in symbol_state:
+                                    symbol_state[symbol] = {}
+                                symbol_state[symbol]["position_units"] = max(0, position_units - 1)
+                                if symbol_state[symbol].get("open_buys"):
+                                    symbol_state[symbol]["open_buys"].pop(0)  # v3.560 P1-2: FIFO
+                                _save_state_to_disk()
+                                log_to_server(f"[P0] {symbol} SELL仓位更新: {old_position} → {symbol_state[symbol]['position_units']}")
 
-                            # v3.640: 记录交易到trade_history.json
-                            try:
-                                now_ny_rec = datetime.now(ZoneInfo("America/New_York"))
-                                _p0_pos = data.get("position_pct", 50) / 100.0  # v3.652
-                                trade_rec = {
-                                    "ts": now_ny_rec.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "tz": "America/New_York",
-                                    "symbol": symbol,
-                                    "timeframe": timeframe,
-                                    "action": "SELL",
-                                    "price": price,
-                                    "units": 1,
-                                    "fee_rate": FEE_RATE,
-                                    "fee_usd": price * FEE_RATE,
-                                    "cycle_id": sym_state.get("cycle_id", 0),
-                                    "trade_mode": "live",
-                                    "source": signal_type,
-                                    "pos_in_channel": round(_p0_pos, 4),  # v3.652: 节奏评分用
-                                    "consensus_score": data.get("consensus_score"),  # v21.8
-                                    # KEY-009: 交易分析用字段
-                                    "market_regime": sym_state.get("market_regime", "UNKNOWN"),
-                                    "adx_value": round(float(data.get("adx", 0) or 0), 1),
-                                    "trend_state": sym_state.get("current_trend", "SIDE"),
-                                }
-                                _append_trade_record(trade_rec)
-                                portfolio_breaker_record_trade("SELL")  # v3.654
-                                log_to_server(f"[P0] {symbol} SELL交易记录已写入")
-                            except Exception as e:
-                                log_to_server(f"[P0] {symbol} SELL交易记录写入失败: {e}")
+                                # v3.640: 记录交易到trade_history.json
+                                try:
+                                    now_ny_rec = datetime.now(ZoneInfo("America/New_York"))
+                                    _p0_pos = data.get("position_pct", 50) / 100.0  # v3.652
+                                    trade_rec = {
+                                        "ts": now_ny_rec.strftime("%Y-%m-%d %H:%M:%S"),
+                                        "tz": "America/New_York",
+                                        "symbol": symbol,
+                                        "timeframe": timeframe,
+                                        "action": "SELL",
+                                        "price": price,
+                                        "units": 1,
+                                        "fee_rate": FEE_RATE,
+                                        "fee_usd": price * FEE_RATE,
+                                        "cycle_id": sym_state.get("cycle_id", 0),
+                                        "trade_mode": "live",
+                                        "source": signal_type,
+                                        "pos_in_channel": round(_p0_pos, 4),  # v3.652: 节奏评分用
+                                        "consensus_score": data.get("consensus_score"),  # v21.8
+                                        # KEY-009: 交易分析用字段
+                                        "market_regime": sym_state.get("market_regime", "UNKNOWN"),
+                                        "adx_value": round(float(data.get("adx", 0) or 0), 1),
+                                        "trend_state": sym_state.get("current_trend", "SIDE"),
+                                    }
+                                    _append_trade_record(trade_rec)
+                                    portfolio_breaker_record_trade("SELL")  # v3.654
+                                    log_to_server(f"[P0] {symbol} SELL交易记录已写入")
+                                except Exception as e:
+                                    log_to_server(f"[P0] {symbol} SELL交易记录写入失败: {e}")
 
-                            # v2.983: 发送邮件通知
-                            # v3.502: Chandelier+ZLSMA由P0扫描引擎发送邮件，避免重复
-                            if signal_type != "Chandelier+ZLSMA":
-                                now_ny = datetime.now(ZoneInfo("America/New_York"))
-                                time_str = now_ny.strftime("%Y-%m-%d %H:%M:%S")
-                                email_subject = f"⚡ P0扫描卖出 | {symbol} | SELL"
-                                email_body = f"""
+                                # v2.983: 发送邮件通知
+                                # v3.502: Chandelier+ZLSMA由P0扫描引擎发送邮件，避免重复
+                                if signal_type != "Chandelier+ZLSMA":
+                                    now_ny = datetime.now(ZoneInfo("America/New_York"))
+                                    time_str = now_ny.strftime("%Y-%m-%d %H:%M:%S")
+                                    email_subject = f"⚡ P0扫描卖出 | {symbol} | SELL"
+                                    email_body = f"""
 ========================================
 ⚡ P0 扫描引擎触发 - 卖出 ({signal_type})
 ========================================
@@ -52078,9 +52125,9 @@ def handle_p0_signal():
 仓位: {position_units}/5
 ========================================
 """
-                                send_email_notification(email_subject, email_body)
-                        else:
-                            reason = "P0卖出被门控拦截" if send_ok is None else "P0卖出发送失败"
+                                    send_email_notification(email_subject, email_body)
+                            else:
+                                reason = "P0卖出被门控拦截" if send_ok is None else "P0卖出发送失败"
                     except Exception as e:
                         reason = f"P0卖出执行失败: {e}"
                         log_to_server(f"[P0] {symbol} {reason}")
