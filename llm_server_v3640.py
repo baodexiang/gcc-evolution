@@ -118,7 +118,7 @@ except ImportError:
 # -----------------------------------------------------------------------------
 class SystemConfig:
     """系统级配置"""
-    VERSION = "3.680"  # v3.680: 确认S5+VisionWorker双通道期权执行 | v3.679: 观察模式结构化日志+KEY-009四标签分析
+    VERSION = "3.681"  # v3.681: GCC-TM后台消费线程(解决pending_order积压) | v3.680: S5+VisionWorker双通道期权执行
     LOG_DIR = "logs"
     STATE_FILE = "state.json"
     ENABLE_DEBUG = False
@@ -42919,6 +42919,146 @@ def _write_md_file(md_dir: str, md_text: str, mark: datetime, prefix: str) -> st
 # ████████████████████████████████████████████████████████████████████████
 
 # =========================================
+# B3-v2: GCC-TM pending_order 统一执行器
+# =========================================
+
+_gcc_tm_locks: dict = {}  # symbol → threading.Lock, 防止双线程重复下单
+_gcc_tm_locks_guard = __import__("threading").Lock()
+
+
+def _gcc_tm_execute_pending(symbol: str) -> bool:
+    """消费并执行 GCC-TM pending_order。
+    由 llm_decide() 和后台消费线程共同调用。
+    返回 True=成功下单, False=无单或失败。
+    线程安全: 每个品种一把锁，防止并发重复下单。
+    """
+    if not _HAS_GCC_TM:
+        return False
+    # 获取品种级锁
+    with _gcc_tm_locks_guard:
+        if symbol not in _gcc_tm_locks:
+            _gcc_tm_locks[symbol] = __import__("threading").Lock()
+        _lock = _gcc_tm_locks[symbol]
+    if not _lock.acquire(blocking=False):
+        return False  # 另一个线程正在处理该品种
+    try:
+        return _gcc_tm_execute_pending_inner(symbol)
+    finally:
+        _lock.release()
+
+
+def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
+    """实际执行逻辑（持锁调用）。"""
+    _gcc_order = _gcc_consume(symbol)
+    if not _gcc_order:
+        return False
+    _gcc_act = _gcc_order.get("action", "HOLD")
+    _gcc_price = float(_gcc_order.get("price_ref", 0))
+    # 当前价优先 Schwab(美股) / Coinbase(加密)
+    _gcc_cur_price = 0.0
+    _gcc_price_src = ""
+    try:
+        if is_crypto_symbol(symbol):
+            _cb_map = {"BTCUSDC": "BTC", "ETHUSDC": "ETH",
+                       "SOLUSDC": "SOL", "ZECUSDC": "ZEC"}
+            _cb_sym = _cb_map.get(symbol)
+            if _cb_sym:
+                from coinbase_sync_v6 import get_price as _cb_gp
+                _gcc_cur_price = _cb_gp(_cb_sym)
+                _gcc_price_src = "Coinbase"
+        else:
+            from schwab_data_provider import get_provider as _schwab_gp2
+            _sq = _schwab_gp2().get_quote(symbol)
+            _gcc_cur_price = _sq.get("last", 0)
+            _gcc_price_src = "Schwab"
+    except Exception as _api_e:
+        log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_price_src or 'API'}取价失败({_api_e})")
+    if _gcc_cur_price <= 0:
+        _gcc_cur_price = _gcc_price
+        _gcc_price_src = "price_ref"
+    log_to_server(
+        f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} "
+        f"price_ref={_gcc_price:.2f} cur={_gcc_cur_price:.2f}({_gcc_price_src}) "
+        f"source={_gcc_order.get('source','')}"
+    )
+    if _gcc_act not in ("BUY", "SELL"):
+        return False
+    send_ok = False
+    if symbol == "TSLA":
+        try:
+            from qqq_options import execute_signal as _qqq_execute
+            _qqq_res = _qqq_execute(_gcc_act, dry_run=False)
+            send_ok = _qqq_res.get("success", False)
+            _opt_info = _qqq_res.get('option', {})
+            log_to_server(
+                f"[TSLA_OPT] GCC-TM {_gcc_act} → success={send_ok} "
+                f"type={_opt_info.get('type', 'N/A')} strike={_opt_info.get('strike', 'N/A')}"
+            )
+        except Exception as _qqq_e:
+            log_to_server(f"[TSLA_OPT][ERROR] GCC-TM {_gcc_act}: {_qqq_e}")
+    elif is_us_stock(symbol):
+        try:
+            send_ok = send_signalstack_order(_gcc_act, symbol, source="gcc_tm")
+        except Exception as _ss_e:
+            log_to_server(f"[GCC-TM][ERROR] {symbol} SignalStack: {_ss_e}")
+    else:
+        try:
+            send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol, source="gcc_tm")
+        except Exception as _3c_e:
+            log_to_server(f"[GCC-TM][ERROR] {symbol} 3Commas: {_3c_e}")
+    _gcc_confirm(symbol, success=send_ok)
+    if send_ok:
+        log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单成功")
+        # GCC-0257 S5: 交易记录入KEY-009
+        try:
+            from timeframe_params import read_symbol_timeframe
+            _gcc_tf = str(read_symbol_timeframe(symbol).get("timeframe_minutes", 240))
+        except Exception:
+            _gcc_tf = "240"
+        try:
+            _gcc_state = get_state_for_symbol(symbol) or {}
+            _gcc_trade_rec = {
+                "ts": _gcc_order.get("ts", datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")),
+                "tz": "America/New_York",
+                "symbol": symbol,
+                "timeframe": _gcc_tf,
+                "action": _gcc_act,
+                "price": _gcc_cur_price,
+                "signal_price": _gcc_price,
+                "units": 1,
+                "fee_rate": 0.001,
+                "fee_usd": _gcc_cur_price * 0.001,
+                "cycle_id": _gcc_state.get("cycle_id", ""),
+                "trade_mode": "live",
+                "pos_in_channel": 0.5,
+                "source": "GCC-TM",
+                "market_regime": _gcc_state.get("market_regime", "UNKNOWN"),
+                "adx_value": 0.0,
+                "trend_state": _gcc_state.get("current_trend", "SIDE"),
+                "n_structure_confirmed": False,
+            }
+            _append_trade_record(_gcc_trade_rec)
+        except Exception as _gcc_rec_e:
+            log_to_server(f"[GCC-TM] {symbol} trade_record写入失败: {_gcc_rec_e}")
+        try:
+            send_email_notification(
+                f"[GCC-TM] {symbol} {_gcc_act}",
+                f"GCC-TM 统一裁决执行\n"
+                f"品种: {symbol}\n"
+                f"方向: {_gcc_act}\n"
+                f"参考价: {_gcc_price:.2f}\n"
+                f"当前价: {_gcc_cur_price:.2f} ({_gcc_price_src})\n"
+                f"来源: gcc_trading_module\n"
+                f"时间: {_gcc_order.get('ts', '')}"
+            )
+        except Exception as _em_err:
+            log_to_server(f"[GCC-TM][EXECUTE] {symbol}: 邮件发送失败 - {_em_err}")
+    else:
+        log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单失败,保留pending_order重试")
+    return send_ok
+
+
+# =========================================
 # /llm_decide — v1.97 主逻辑（含 L2 执行层）
 # =========================================
 
@@ -42961,131 +43101,7 @@ def llm_decide():
 
     # ── B3: GCC-TM 执行 — 消费 pending_order（美股+加密货币）──
     if _HAS_GCC_TM and (is_us_stock(symbol) or is_crypto_symbol(symbol)):
-        _gcc_order = _gcc_consume(symbol)
-        if _gcc_order:
-            _gcc_act = _gcc_order.get("action", "HOLD")
-            _gcc_price = float(_gcc_order.get("price_ref", 0))
-            # v3.663: 当前价优先Schwab(美股)/Coinbase(加密)，避免TV/yfinance脏数据
-            _gcc_cur_price = 0.0
-            _gcc_price_src = ""
-            # 优先: Schwab(美股) / Coinbase(加密)
-            try:
-                if is_crypto_symbol(symbol):
-                    _cb_map = {"BTCUSDC": "BTC", "ETHUSDC": "ETH",
-                               "SOLUSDC": "SOL", "ZECUSDC": "ZEC"}
-                    _cb_sym = _cb_map.get(symbol)
-                    if _cb_sym:
-                        from coinbase_sync_v6 import get_price as _cb_gp
-                        _gcc_cur_price = _cb_gp(_cb_sym)
-                        _gcc_price_src = "Coinbase"
-                else:
-                    from schwab_data_provider import get_provider as _schwab_gp2
-                    _sq = _schwab_gp2().get_quote(symbol)
-                    _gcc_cur_price = _sq.get("last", 0)
-                    _gcc_price_src = "Schwab"
-            except Exception as _api_e:
-                log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_price_src or 'API'}取价失败({_api_e})")
-            # fallback: price_ref(决策时价格)
-            if _gcc_cur_price <= 0:
-                _gcc_cur_price = _gcc_price
-                _gcc_price_src = "price_ref"
-            log_to_server(
-                f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} "
-                f"price_ref={_gcc_price:.2f} cur={_gcc_cur_price:.2f}({_gcc_price_src}) "
-                f"source={_gcc_order.get('source','')}"
-            )
-            if _gcc_act in ("BUY", "SELL"):
-                send_ok = False
-                # BTCUSDC永续合约暂停 — API key无INTX权限，走3Commas现货
-                # if symbol == "BTCUSDC":
-                #     try:
-                #         from btc_perp import execute_signal as _btc_execute
-                #         _btc_res = _btc_execute(_gcc_act, dry_run=False)
-                #         send_ok = _btc_res.get("success", False)
-                #         log_to_server(
-                #             f"[BTC_PERP] GCC-TM {_gcc_act} → success={send_ok} "
-                #             f"action={_btc_res.get('action', 'N/A')}"
-                #         )
-                #     except Exception as _btc_e:
-                #         log_to_server(f"[BTC_PERP][ERROR] GCC-TM {_gcc_act}: {_btc_e}")
-                #         send_ok = False
-                if symbol == "TSLA":
-                    # TSLA走期权通道
-                    try:
-                        from qqq_options import execute_signal as _qqq_execute
-                        _qqq_res = _qqq_execute(_gcc_act, dry_run=False)
-                        send_ok = _qqq_res.get("success", False)
-                        _opt_info = _qqq_res.get('option', {})
-                        log_to_server(
-                            f"[TSLA_OPT] GCC-TM {_gcc_act} → success={send_ok} "
-                            f"type={_opt_info.get('type', 'N/A')} strike={_opt_info.get('strike', 'N/A')}"
-                        )
-                    except Exception as _qqq_e:
-                        log_to_server(f"[TSLA_OPT][ERROR] GCC-TM {_gcc_act}: {_qqq_e}")
-                        send_ok = False
-                elif is_us_stock(symbol):
-                    try:
-                        send_ok = send_signalstack_order(_gcc_act, symbol, source="gcc_tm")
-                    except Exception as _ss_e:
-                        log_to_server(f"[GCC-TM][ERROR] {symbol} SignalStack: {_ss_e}")
-                        send_ok = False
-                else:
-                    # 加密货币走3Commas通道
-                    try:
-                        send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol, source="gcc_tm")
-                    except Exception as _3c_e:
-                        log_to_server(f"[GCC-TM][ERROR] {symbol} 3Commas: {_3c_e}")
-                        send_ok = False
-                # 成功后才标记consumed（失败保留pending_order供下次重试）
-                _gcc_confirm(symbol, success=send_ok)
-                if send_ok:
-                    log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单成功")
-                    # GCC-0257 S5: GCC-TM交易记录入KEY-009
-                    try:
-                        from timeframe_params import read_symbol_timeframe
-                        _gcc_tf = str(read_symbol_timeframe(symbol).get("timeframe_minutes", 240))
-                    except Exception:
-                        _gcc_tf = "240"
-                    try:
-                        _gcc_state = get_state_for_symbol(symbol) or {}
-                        _gcc_trade_rec = {
-                            "ts": _gcc_order.get("ts", datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")),
-                            "tz": "America/New_York",
-                            "symbol": symbol,
-                            "timeframe": _gcc_tf,
-                            "action": _gcc_act,
-                            "price": _gcc_cur_price,
-                            "signal_price": _gcc_price,
-                            "units": 1,
-                            "fee_rate": 0.001,
-                            "fee_usd": _gcc_cur_price * 0.001,
-                            "cycle_id": _gcc_state.get("cycle_id", ""),
-                            "trade_mode": "live",
-                            "pos_in_channel": 0.5,
-                            "source": "GCC-TM",
-                            "market_regime": _gcc_state.get("market_regime", "UNKNOWN"),
-                            "adx_value": 0.0,
-                            "trend_state": _gcc_state.get("current_trend", "SIDE"),
-                            "n_structure_confirmed": False,
-                        }
-                        _append_trade_record(_gcc_trade_rec)
-                    except Exception as _gcc_rec_e:
-                        log_to_server(f"[GCC-TM] {symbol} trade_record写入失败: {_gcc_rec_e}")
-                    try:
-                        send_email_notification(
-                            f"[GCC-TM] {symbol} {_gcc_act}",
-                            f"GCC-TM 统一裁决执行\n"
-                            f"品种: {symbol}\n"
-                            f"方向: {_gcc_act}\n"
-                            f"参考价: {_gcc_price:.2f}\n"
-                            f"当前价: {_gcc_cur_price:.2f} ({_gcc_price_src})\n"
-                            f"来源: gcc_trading_module\n"
-                            f"时间: {_gcc_order.get('ts', '')}"
-                        )
-                    except Exception as _em_err:
-                        log_to_server(f"[GCC-TM][EXECUTE] {symbol}: 邮件发送失败 - {_em_err}")
-                else:
-                    log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单失败,保留pending_order重试")
+        _gcc_tm_execute_pending(symbol)
 
     trade_mode = str(data.get("trade_mode", "live")).lower().strip()
     if trade_mode not in ["live", "paper"]:
@@ -54014,6 +54030,72 @@ if __name__ == "__main__":
         print("[BOOT] KEY-010审计后台线程已启动 (每5分钟刷新 module_audit_*.json)")
     except Exception as _k010_boot_err:
         print(f"[BOOT][WARN] KEY-010审计后台线程启动失败: {_k010_boot_err}")
+
+    # v3.681: GCC-TM pending_order 后台消费线程
+    # 解决: scan_engine写pending_order但llm_decide()依赖TV webhook消费，
+    #       美股webhook不稳定导致pending_order积压不执行
+    try:
+        import threading as _gcc_consumer_threading
+
+        def _gcc_tm_consumer_loop():
+            import time as _gcc_c_time
+            from datetime import datetime as _gcc_dt
+            from zoneinfo import ZoneInfo as _gcc_zi
+            _gcc_c_time.sleep(60)  # 启动延迟60秒，等主程序就绪
+            _GCC_CONSUMER_INTERVAL = 30  # 每30秒检查一次
+            _ALL_SYMBOLS = list(_GCC_TM_EXECUTE_SYMBOLS) if _HAS_GCC_TM else []
+            _last_cleanup_date = ""  # 每天只清理一次
+            log_to_server(f"[GCC-TM][CONSUMER] 后台消费线程启动, 监控 {len(_ALL_SYMBOLS)} 个品种")
+            while True:
+                try:
+                    # 每日 NY 8:00 AM 清理所有未消费的 pending_order
+                    _ny_now = _gcc_dt.now(_gcc_zi("America/New_York"))
+                    _today_str = _ny_now.strftime("%Y-%m-%d")
+                    if _ny_now.hour >= 8 and _last_cleanup_date != _today_str:
+                        _last_cleanup_date = _today_str
+                        _cleaned = 0
+                        for _sym in _ALL_SYMBOLS:
+                            _po_path = os.path.join(
+                                os.path.dirname(os.path.abspath(__file__)),
+                                "state", f"gcc_pending_order_{_sym}.json"
+                            )
+                            if not os.path.exists(_po_path):
+                                continue
+                            try:
+                                with open(_po_path, "r", encoding="utf-8") as _f:
+                                    _po = json.loads(_f.read())
+                                if not _po.get("consumed") and not _po.get("processing"):
+                                    _po["consumed"] = True
+                                    _po["consumed_ts"] = _ny_now.strftime("%Y-%m-%d %H:%M:%S")
+                                    _po["expired"] = True
+                                    _po["expire_reason"] = "daily_8am_cleanup"
+                                    with open(_po_path, "w", encoding="utf-8") as _f:
+                                        _f.write(json.dumps(_po, ensure_ascii=False, indent=2))
+                                    _cleaned += 1
+                            except Exception:
+                                pass
+                        if _cleaned:
+                            log_to_server(f"[GCC-TM][CLEANUP] 8AM清理 {_cleaned} 个积压pending_order")
+
+                    for _sym in _ALL_SYMBOLS:
+                        # 美股盘外不消费
+                        if is_us_stock(_sym) and not _is_us_market_open():
+                            continue
+                        try:
+                            _gcc_tm_execute_pending(_sym)
+                        except Exception as _sym_e:
+                            log_to_server(f"[GCC-TM][CONSUMER] {_sym} 执行异常: {_sym_e}")
+                except Exception as _loop_e:
+                    log_to_server(f"[GCC-TM][CONSUMER] 循环异常: {_loop_e}")
+                _gcc_c_time.sleep(_GCC_CONSUMER_INTERVAL)
+
+        _gcc_consumer_thread = _gcc_consumer_threading.Thread(
+            target=_gcc_tm_consumer_loop, daemon=True, name="GCC-TM-Consumer"
+        )
+        _gcc_consumer_thread.start()
+        print("[BOOT] GCC-TM pending_order后台消费线程已启动 (每30秒检查)")
+    except Exception as _gcc_consumer_err:
+        print(f"[BOOT][WARN] GCC-TM消费线程启动失败: {_gcc_consumer_err}")
 
     port = int(os.getenv("PORT", "6001"))
     print(f"[BOOT] AIPRO_VERSION={AIPRO_VERSION}, listening on 0.0.0.0:{port}")

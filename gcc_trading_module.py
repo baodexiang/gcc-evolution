@@ -2119,7 +2119,7 @@ class GCCTradingModule:
     def _write_pending_order(
         self, action: str, price: float, ts: str
     ) -> None:
-        """Phase2: 写待执行订单，下一K线由主程序消费。"""
+        """Phase2: 写待执行订单，由后台消费线程或llm_decide消费。"""
         order = {
             "symbol":    self.symbol,
             "action":    action,
@@ -2127,12 +2127,12 @@ class GCCTradingModule:
             "ts":        ts,
             "source":    "gcc_trading_module",
             "consumed":  False,
+            "processing": False,  # v3.681: 防崩溃重复下单标记
         }
         try:
             self._pending_file.parent.mkdir(parents=True, exist_ok=True)
-            self._pending_file.write_text(
-                json.dumps(order, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            _atomic_write(self._pending_file,
+                          json.dumps(order, ensure_ascii=False, indent=2))
             logger.info("[GCC-TRADE] pending_order written: %s %s", action, self.symbol)
         except Exception as e:
             logger.warning("[GCC-TRADE] write_pending_order: %s", e)
@@ -2769,11 +2769,10 @@ def _drain_signals(symbol: str) -> list:
 # B2: pending_order 消费器 — 主程序每根 K 线开头调用
 # ══════════════════════════════════════════════════════════════
 def gcc_consume_pending_order(symbol: str) -> Optional[dict]:
-    """读取 pending_order（如有），不立即标记consumed。
+    """读取 pending_order（如有），标记 processing=True 防止并发/崩溃重复。
 
     返回: {"action": "BUY"/"SELL", "price_ref": float, ...} 或 None。
-    调用方需在下单成功后调用 gcc_confirm_consumed(symbol) 标记已消费。
-    由 llm_server 在每根 K 线开头调用。
+    调用方需在下单后调用 gcc_confirm_consumed(symbol, success) 标记结果。
     """
     pending_file = _STATE_DIR / f"gcc_pending_order_{symbol}.json"
     if not pending_file.exists():
@@ -2786,51 +2785,88 @@ def gcc_consume_pending_order(symbol: str) -> Optional[dict]:
     if order.get("consumed"):
         return None
 
-    # v0.2.1: TTL检查 — 超过8小时的pending_order视为过期，防止崩溃恢复后执行陈旧订单
+    # v3.681: 崩溃恢复保护 — processing=True 说明上次下单可能已发出但未确认
+    if order.get("processing"):
+        _proc_ts = order.get("processing_ts", "")
+        logger.warning(
+            "[GCC-TM][CRASH_GUARD] %s %s processing=True (上次可能已下单未确认, ts=%s), 跳过自动重试",
+            symbol, order.get("action"), _proc_ts,
+        )
+        # 超过2小时的processing视为崩溃残留, 自动过期
+        if _proc_ts:
+            try:
+                _proc_dt = datetime.strptime(_proc_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_NY_TZ)
+                _proc_age_h = (datetime.now(_NY_TZ) - _proc_dt).total_seconds() / 3600
+                if _proc_age_h > 2:
+                    order["consumed"] = True
+                    order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+                    order["expired"] = True
+                    order["expire_reason"] = "crash_guard_timeout"
+                    _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
+                    logger.warning("[GCC-TM][CRASH_GUARD] %s processing超2h, 自动过期", symbol)
+            except Exception:
+                pass
+        return None
+
+    # v3.681: TTL检查 — 超过24小时的pending_order自动过期清理
     _order_ts = order.get("ts", "")
     if _order_ts:
         try:
             _order_dt = datetime.strptime(_order_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_NY_TZ)
             _age_hours = (datetime.now(_NY_TZ) - _order_dt).total_seconds() / 3600
-            if _age_hours > 8:
+            if _age_hours > 24:
                 logger.warning(
-                    "[GCC-TM][EXPIRED] %s %s price_ref=%.2f age=%.1fh > 8h, 丢弃",
+                    "[GCC-TM][EXPIRED] %s %s price_ref=%.2f age=%.1fh > 24h, 丢弃",
                     symbol, order.get("action"), order.get("price_ref", 0), _age_hours,
                 )
                 order["consumed"] = True
                 order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
                 order["expired"] = True
+                order["expire_reason"] = "ttl_24h"
                 _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
                 return None
         except Exception:
             pass
 
+    # v3.681: 标记 processing=True, 防止崩溃后重复下单
+    order["processing"] = True
+    order["processing_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
+    except Exception:
+        pass
+
     logger.info(
-        "[GCC-TM][PEEK] %s %s price_ref=%.2f (未标记consumed,等待执行确认)",
+        "[GCC-TM][PEEK] %s %s price_ref=%.2f (标记processing, 等待执行确认)",
         symbol, order.get("action"), order.get("price_ref", 0),
     )
     return order
 
 
 def gcc_confirm_consumed(symbol: str, success: bool = True) -> None:
-    """下单成功后标记 pending_order 为 consumed。
-    success=False 时不标记，下次 llm_decide 会重试。
+    """下单结果确认。
+    success=True → consumed=True (完成)
+    success=False → processing=False (恢复为可重试状态)
     """
-    if not success:
-        logger.warning("[GCC-TM][RETRY] %s 下单失败,保留pending_order供重试", symbol)
-        return
     pending_file = _STATE_DIR / f"gcc_pending_order_{symbol}.json"
     if not pending_file.exists():
         return
     try:
         order = json.loads(pending_file.read_text(encoding="utf-8"))
-        order["consumed"] = True
-        order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
-        _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
-        logger.info(
-            "[GCC-TM][CONSUMED] %s %s price_ref=%.2f confirmed",
-            symbol, order.get("action"), order.get("price_ref", 0),
-        )
+        if success:
+            order["consumed"] = True
+            order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+            order["processing"] = False
+            _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
+            logger.info(
+                "[GCC-TM][CONSUMED] %s %s price_ref=%.2f confirmed",
+                symbol, order.get("action"), order.get("price_ref", 0),
+            )
+        else:
+            # 下单失败 → 清除processing标记, 允许下次重试
+            order["processing"] = False
+            _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
+            logger.warning("[GCC-TM][RETRY] %s 下单失败, 清除processing, 等待重试", symbol)
     except Exception as e:
         logger.warning("[GCC-TM][CONSUMED] %s write error: %s", symbol, e)
 
