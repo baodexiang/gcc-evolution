@@ -42965,7 +42965,7 @@ def llm_decide():
                 _gcc_price_src = "price_ref"
             log_to_server(
                 f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} "
-                f"price_ref={_gcc_price:.2f} cur={_gcc_cur_price:.2f} "
+                f"price_ref={_gcc_price:.2f} cur={_gcc_cur_price:.2f}({_gcc_price_src}) "
                 f"source={_gcc_order.get('source','')}"
             )
             if _gcc_act in ("BUY", "SELL"):
@@ -43052,7 +43052,7 @@ def llm_decide():
                             f"品种: {symbol}\n"
                             f"方向: {_gcc_act}\n"
                             f"参考价: {_gcc_price:.2f}\n"
-                            f"当前价: {_gcc_cur_price:.2f}\n"
+                            f"当前价: {_gcc_cur_price:.2f} ({_gcc_price_src})\n"
                             f"来源: gcc_trading_module\n"
                             f"时间: {_gcc_order.get('ts', '')}"
                         )
