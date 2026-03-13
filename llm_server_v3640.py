@@ -51081,6 +51081,20 @@ def key009_gcctm():
         except Exception:
             pass
 
+    # K线汇总(上一根完成的K线): gcc_candle_summary_{symbol}.json
+    candle_summaries = {}
+    for _csm_path in _gcctm_glob.glob(str(ROOT / "state" / "gcc_candle_summary_*.json")):
+        try:
+            _csm_name = os.path.basename(_csm_path)
+            if "-" in _csm_name.replace("gcc_candle_summary_", ""):
+                continue  # skip MSI/BaoPCS copies
+            _csm_data = json.loads(open(_csm_path, encoding="utf-8").read())
+            _csm_sym = _csm_name.replace("gcc_candle_summary_", "").replace(".json", "")
+            if _csm_sym:
+                candle_summaries[_csm_sym] = _csm_data
+        except Exception:
+            pass
+
     # 轮次决策明细: gcc_round_decisions.jsonl
     round_decisions = []
     rd_path = ROOT / "state" / "gcc_round_decisions.jsonl"
@@ -51107,6 +51121,7 @@ def key009_gcctm():
                 "accuracy": accuracy,
                 "sim_trades": sim_trades,
                 "candle_states": candle_states,
+                "candle_summaries": candle_summaries,
                 "round_decisions": round_decisions,
             },
             ensure_ascii=False,

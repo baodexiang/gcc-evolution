@@ -169,131 +169,22 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div class="tab-bar" id="tab-bar">
 <div class="tab active" data-tab="gcctm">GCC-TM</div>
 <div class="tab" data-tab="trades">交易分析</div>
-<div class="tab" data-tab="ranking">策略排行</div>
-<div class="tab" data-tab="macd">L2 MACD</div>
-<div class="tab" data-tab="vision">Vision过滤</div>
-<div class="tab" data-tab="bv">BrooksVision</div>
-<div class="tab" data-tab="plugins">外挂运行</div>
-<div class="tab" data-tab="gates">门控拦截</div>
-<div class="tab" data-tab="blockval">拦截验证</div>
-<div class="tab" data-tab="sigacc">信号准确率</div>
-<div class="tab" data-tab="baseline">仓位控制</div>
+<div class="tab" data-tab="verdict">裁决分析</div>
+<div class="tab" data-tab="vgate">Vision门控</div>
+<div class="tab" data-tab="sigpool">信号池</div>
+<div class="tab" data-tab="accuracy">准确率</div>
 <div class="tab" data-tab="tasks">GCC任务</div>
 <div class="tab" data-tab="issues">问题&风险</div>
 <div class="tab" data-tab="broker">券商对账</div>
 <div class="tab" data-tab="evolution">进化</div>
 </div>
 
-<!-- Tab: 策略排行 -->
-<div class="tab-content" id="tab-ranking">
-<div class="summary" id="ranking-summary"></div>
-<h2>策略绩效排行 (FIFO配对)</h2>
-<table><thead><tr><th>排名</th><th>策略</th><th>交易数</th><th>胜率</th><th>平均PnL%</th><th>总PnL%</th><th>评分</th><th>建议</th></tr></thead>
-<tbody id="ranking-body"></tbody></table>
-<h2>外挂×品种 交叉热力图</h2>
-<div id="ranking-heatmap"></div>
-<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:bold;color:#4fc3f7">结构化规则 (gcc-evo闭环)</summary>
-<table style="margin-top:6px"><thead><tr><th>Rule ID</th><th>条件</th><th>动作</th><th>置信度</th><th>样本</th><th>状态</th><th>操作</th></tr></thead>
-<tbody id="rules-body"></tbody></table>
-</details>
-</div>
 
-<!-- Tab: 拦截验证 -->
-<div class="tab-content" id="tab-blockval">
-<div class="summary" id="blockval-summary"></div>
-<h2>按拦截原因 — 哪种拦截最有效</h2>
-<table><thead><tr><th>原因</th><th>已验证</th><th>正确</th><th>正确率</th></tr></thead>
-<tbody id="blockval-reason-body"></tbody></table>
-<h2>按外挂来源 — 哪个外挂被拦截最多</h2>
-<table><thead><tr><th>外挂</th><th>已验证</th><th>正确</th><th>正确率</th></tr></thead>
-<tbody id="blockval-source-body"></tbody></table>
-</div>
 
-<!-- Tab: 外挂运行 -->
-<div class="tab-content" id="tab-plugins">
-<div class="summary" id="plugin-summary"></div>
-<div class="two-col">
-<div>
-<h2>VF过滤 (按外挂)</h2>
-<table><thead><tr><th>外挂</th><th>过滤次数</th><th>品种分布</th></tr></thead>
-<tbody id="vf-plugin-body"></tbody></table>
-</div>
-<div>
-<h2>KNN抑制 (按外挂)</h2>
-<table><thead><tr><th>外挂</th><th>抑制次数</th><th>品种分布</th></tr></thead>
-<tbody id="knn-body"></tbody></table>
-</div>
-</div>
-<h2>VF过滤 (按品种)</h2>
-<table><thead><tr><th>品种</th><th>过滤次数</th><th>比例</th></tr></thead>
-<tbody id="vf-symbol-body"></tbody></table>
-<h2>扫描引擎外挂运行 (每个外挂)</h2>
-<table><thead><tr><th>外挂</th><th>扫描</th><th>触发</th><th>触发率</th><th>发送</th><th>执行</th><th>拦截</th><th>拦截原因</th></tr></thead>
-<tbody id="scan-plugin-body"></tbody></table>
 
-<!-- GCC-0252: 方向锁 Leader -->
-<h2 style="margin-top:20px">🔒 方向锁 — 加密品种 Leader</h2>
-<div id="direction-lock-panel" style="margin-bottom:16px">
-<table><thead><tr><th>品种</th><th>Leader</th><th>准确率</th><th>样本</th><th>更新时间</th></tr></thead>
-<tbody id="direction-lock-body"></tbody></table>
-<div id="direction-lock-note" style="font-size:0.8em;color:#656d76;margin-top:6px">Phase1: 观察模式（记录日志，不实际拦截）· 锁定2h过期 · 样本≥10才选leader</div>
-</div>
-</div>
 
-<!-- Tab: L2 MACD -->
-<div class="tab-content" id="tab-macd">
-<div class="summary" id="macd-summary"></div>
-<h2>MACD执行漏斗</h2>
-<div id="macd-funnel"></div>
-<h2>按品种</h2>
-<table><thead><tr><th>品种</th><th>触发</th><th>执行</th><th>执行率</th></tr></thead>
-<tbody id="macd-symbol-body"></tbody></table>
-</div>
 
-<!-- Tab: Vision过滤 -->
-<div class="tab-content" id="tab-vision">
-<div class="summary" id="vision-summary"></div>
-<h2>过滤漏斗</h2>
-<div id="vision-funnel"></div>
-<h2>Vision方向拦截 (按品种)</h2>
-<div id="vision-filter-detail"></div>
-<h2>拦截原因分析</h2>
-<div id="vision-reason-chart"></div>
-<h2>外挂VF过滤详情 (按品种×外挂)</h2>
-<div id="vision-detail"></div>
-</div>
 
-<!-- Tab: BrooksVision -->
-<div class="tab-content" id="tab-bv">
-<div class="summary" id="bv-summary"></div>
-<h2>信号执行漏斗</h2>
-<div id="bv-funnel"></div>
-<h2>信号准确率 (4H回填)</h2>
-<div class="summary" id="bv-acc-summary"></div>
-<h2>按形态准确率</h2>
-<table><thead><tr><th>形态</th><th>判定数</th><th>正确</th><th>错误</th><th>准确率</th><th>占比</th></tr></thead>
-<tbody id="bv-acc-body"></tbody></table>
-<h2>评估概览</h2>
-<div id="bv-eval-chart"></div>
-<h2>按品种准确率</h2>
-<table><thead><tr><th>品种</th><th>判定数</th><th>正确</th><th>准确率</th></tr></thead>
-<tbody id="bv-symbol-body"></tbody></table>
-<h2>形态分布</h2>
-<table><thead><tr><th>形态</th><th>次数</th><th>占比</th></tr></thead>
-<tbody id="bv-pattern-body"></tbody></table>
-</div>
-
-<!-- Tab: 门控拦截 -->
-<div class="tab-content" id="tab-gates">
-<div class="summary" id="gate-summary"></div>
-<h2>拦截分布</h2>
-<div id="gate-funnel"></div>
-<h2>各门控拦截统计</h2>
-<table><thead><tr><th>门控</th><th>拦截次数</th><th>占比</th><th>Top品种</th></tr></thead>
-<tbody id="gate-body"></tbody></table>
-<h2>按品种拦截热力图</h2>
-<div id="gate-heatmap"></div>
-</div>
 
 <!-- Tab: GCC任务 -->
 <div class="tab-content" id="tab-tasks">
@@ -340,49 +231,56 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 </div>
 </div>
 
-<!-- Tab: 交易分析 -->
+<!-- Tab: 交易分析 (GCC-TM sim_trades) -->
 <div class="tab-content" id="tab-trades">
-<div class="summary" id="trade-cards"></div>
-<h2>全链路信号→盈亏分析 (每个外挂)</h2>
-<div id="pipeline-analysis"></div>
-<div id="trade-fixed"></div>
-<div class="two-col">
-<div>
-<h2>按品种胜率</h2>
-<table><thead><tr><th>Symbol</th><th>Trades</th><th>Winners</th><th>Win Rate</th><th>Total PnL</th></tr></thead><tbody id="trade-by-symbol"></tbody></table>
-</div>
-<div>
-<h2>按插件胜率</h2>
-<table><thead><tr><th>Plugin</th><th>Trades</th><th>Winners</th><th>Win Rate</th></tr></thead><tbody id="trade-by-plugin"></tbody></table>
-</div>
-</div>
+<div class="summary" id="trade-sim-summary"></div>
+<h2>按品种统计</h2>
+<table><thead><tr><th>品种</th><th>交易数</th><th>盈利</th><th>亏损</th><th>胜率</th><th>总P&amp;L%</th></tr></thead>
+<tbody id="trade-by-symbol-gcctm"></tbody></table>
+<h2>按动作统计</h2>
+<table><thead><tr><th>动作</th><th>交易数</th><th>胜率</th><th>平均P&amp;L%</th></tr></thead>
+<tbody id="trade-by-action-gcctm"></tbody></table>
+<h2>最近交易 (最多30条)</h2>
+<table><thead><tr><th>时间</th><th>品种</th><th>动作</th><th>入场价</th><th>出场价</th><th>P&amp;L%</th><th>结果</th><th>轮次</th></tr></thead>
+<tbody id="trade-recent-gcctm"></tbody></table>
 </div>
 
-<!-- Tab: 信号准确率 (GCC-0197 S6) -->
-<div class="tab-content" id="tab-sigacc">
-<div class="summary" id="sigacc-summary"></div>
-<h2>外挂信号准确率 (4H回填)</h2>
-<table><thead><tr><th>外挂</th><th>Decisive</th><th>正确</th><th>错误</th><th>中性</th><th>待定</th><th>准确率</th><th>Phase</th></tr></thead><tbody id="sigacc-body"></tbody></table>
-<h2>按品种×外挂明细</h2>
-<div id="sigacc-detail"></div>
+<!-- Tab: 裁决分析 -->
+<div class="tab-content" id="tab-verdict">
+<div class="summary" id="verdict-summary"></div>
+<h2>裁决类型分布</h2>
+<table><thead><tr><th>裁决</th><th>次数</th><th>占比</th><th>Top品种</th></tr></thead>
+<tbody id="verdict-breakdown-body"></tbody></table>
+<h2>品种×裁决热力图</h2>
+<div id="verdict-heatmap"></div>
 </div>
 
-<!-- Tab: 仓位控制 -->
-<div class="tab-content" id="tab-baseline">
-<div class="summary" id="bl-summary"></div>
-<h2>方向过滤器 (SignalFilter)</h2>
-<div class="summary" id="sf-summary"></div>
-<h2>按品种方向过滤</h2>
-<table><thead><tr><th>品种</th><th>模式</th><th>当前方向</th><th>4H BUY/SELL</th><th>本周 BUY/SELL</th><th>4H样本</th><th>本周样本</th><th>4H拦截</th><th>本周拦截</th></tr></thead>
-<tbody id="sf-symbol-body"></tbody></table>
-<h2>基准K线 + 唐安琪周期</h2>
-<table><thead><tr><th>品种</th><th>Buy基准</th><th>Sell基准</th><th>Buy距今</th><th>Sell距今</th><th>DC hl_avg</th><th>周期趋势</th><th>成熟度</th><th>周期计数</th><th>更新时间</th></tr></thead>
-<tbody id="bl-state-body"></tbody></table>
-<h2>门控事件统计</h2>
-<table><thead><tr><th>品种</th><th>通过</th><th>拦截</th><th>无数据</th><th>合计</th></tr></thead>
-<tbody id="bl-events-body"></tbody></table>
-<h2>按方向统计</h2>
-<div id="bl-direction"></div>
+<!-- Tab: Vision门控 -->
+<div class="tab-content" id="tab-vgate">
+<div class="summary" id="vgate-summary"></div>
+<h2>按品种 Vision 门控</h2>
+<table><thead><tr><th>品种</th><th>Vision方向</th><th>有效方向</th><th>上K汇总</th><th>矛盾</th><th>HOLD轮次</th></tr></thead>
+<tbody id="vgate-symbol-body"></tbody></table>
+<h2>Vision 方向分布</h2>
+<div id="vgate-direction-dist"></div>
+</div>
+
+<!-- Tab: 信号池 -->
+<div class="tab-content" id="tab-sigpool">
+<div class="summary" id="sigpool-summary"></div>
+<h2>按品种信号统计</h2>
+<table><thead><tr><th>品种</th><th>总轮次</th><th>平均买票</th><th>平均卖票</th><th>总信号</th></tr></thead>
+<tbody id="sigpool-symbol-body"></tbody></table>
+<h2>信号密度</h2>
+<div id="sigpool-density"></div>
+</div>
+
+<!-- Tab: 准确率 -->
+<div class="tab-content" id="tab-accuracy">
+<div class="summary" id="accuracy-summary"></div>
+<h2>全品种准确率明细</h2>
+<table><thead><tr><th>品种</th><th>总决策</th><th>一致</th><th>一致率</th><th>分歧率</th><th>分歧数</th><th>GCC最新</th><th>主程序最新</th><th>接管就绪</th></tr></thead>
+<tbody id="accuracy-full-body"></tbody></table>
 </div>
 
 <div class="tab-content" id="tab-broker">
@@ -415,78 +313,30 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <!-- Tab: GCC交易决策模块 (KEY-011) -->
 <div class="tab-content active" id="tab-gcctm">
 
-<!-- 最终决策摘要 -->
-<h2>最终决策摘要 (每品种最新结论)</h2>
-<div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:20px">
-  <div style="flex:1;min-width:320px">
-    <h3 style="margin:0 0 8px 0;font-size:0.95em;color:#656d76">美股</h3>
-    <table>
-    <thead><tr><th>品种</th><th>最终决策</th><th>GCC</th><th>共识</th><th>时间</th></tr></thead>
-    <tbody id="summary-us-body"></tbody>
-    </table>
-  </div>
-  <div style="flex:1;min-width:320px">
-    <h3 style="margin:0 0 8px 0;font-size:0.95em;color:#656d76">加密货币</h3>
-    <table>
-    <thead><tr><th>品种</th><th>最终决策</th><th>GCC</th><th>共识</th><th>时间</th></tr></thead>
-    <tbody id="summary-crypto-body"></tbody>
-    </table>
-  </div>
-</div>
+<!-- 总览统计 -->
+<div class="summary" id="gcctm-overview-cards"></div>
 
-<!-- Vision门控 + K线实时状态 -->
-<h2>Vision门控 &amp; K线状态 (实时)</h2>
-<div id="gcctm-candle-states" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:20px"></div>
+<!-- 品种面板: 每品种一个展开卡片 -->
+<h2>品种实时面板 (当前4H K线)</h2>
+<div id="gcctm-symbol-panels"></div>
 
-<!-- GCC vs 主程序准确率对比 -->
-<h2>GCC-TM 准确率对比</h2>
-<div style="margin-bottom:16px">
-  <table>
-  <thead><tr><th>品种</th><th>总决策</th><th>一致率</th><th>分歧率</th><th>GCC最新</th><th>主程序最新</th><th>接管就绪</th></tr></thead>
-  <tbody id="gcctm-accuracy-body"></tbody>
-  </table>
-</div>
+<!-- 上一K线汇总 -->
+<h2 style="margin-top:24px">上一K线汇总 (已完成)</h2>
+<table>
+<thead><tr><th>品种</th><th>方向</th><th>置信度</th><th>BUY轮</th><th>SELL轮</th><th>HOLD轮</th><th>总轮数</th><th>已交易</th><th>量修正</th><th>时间</th></tr></thead>
+<tbody id="gcctm-summary-body"></tbody>
+</table>
 
 <!-- 模拟交易P&L -->
-<h2>模拟交易 P&amp;L</h2>
+<h2 style="margin-top:24px">模拟交易 P&amp;L</h2>
 <div id="gcctm-sim-summary" class="summary" style="margin-bottom:12px"></div>
 <table>
 <thead><tr><th>时间</th><th>品种</th><th>动作</th><th>入场价</th><th>出场价</th><th>P&amp;L%</th><th>结果</th><th>轮次</th></tr></thead>
 <tbody id="gcctm-sim-body"></tbody>
 </table>
 
-<!-- 美股执行区域 -->
-<h2 style="margin-top:24px">美股 GCC-TM 决策明细</h2>
-<table>
-<thead><tr>
-  <th>时间</th><th>品种</th><th>GCC裁决</th><th>主程序</th><th>一致</th>
-  <th>买票</th><th>卖票</th><th>最强信号源</th><th>树搜索</th><th>共识</th>
-</tr></thead>
-<tbody id="gcctm-us-body"></tbody>
-</table>
-
-<!-- crypto execute -->
-<h2 style="margin-top:24px">加密 GCC-TM 执行</h2>
-<table>
-<thead><tr>
-  <th>时间</th><th>品种</th><th>GCC</th><th>主程序</th><th>一致</th>
-  <th>买票</th><th>卖票</th><th>信号源</th><th>树搜索</th><th>共识</th>
-</tr></thead>
-<tbody id="gcctm-crypto-exec-body"></tbody>
-</table>
-
-<!-- crypto observe -->
-<h2 style="margin-top:24px">加密 GCC-TM 观察</h2>
-<table>
-<thead><tr>
-  <th>时间</th><th>品种</th><th>GCC</th><th>主程序</th><th>一致</th>
-  <th>买票</th><th>卖票</th><th>信号源</th><th>树搜索</th><th>共识</th>
-</tr></thead>
-<tbody id="gcctm-crypto-body"></tbody>
-</table>
-
 <!-- KNN经验 -->
-<h2 style="margin-top:20px">KNN经验卡片</h2>
+<h2 style="margin-top:24px">KNN经验卡片</h2>
 <div id="gcctm-knn-cards" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px"></div>
 </div>
 
@@ -776,471 +626,9 @@ function _doRender() {
         <div class="card"><div class="label">股票双源健康</div><div class="value ${((swStock.success||0)>0||(yfStock.success||0)>0)?'blue':'yellow'}">${(yfStock.success||0)}/${(swStock.success||0)}</div><div class="sub">YF/Schwab, Schwab成功距今 ${swAgeMin}m</div></div>
     `;
 
-    // ── 外挂运行 Tab ──
-    // 从scan_plugins聚合真实数据(plugin_exec只匹配旧格式日志,数据不全)
-    const sp_all = p.scan_plugins || {};
-    let sp_scan=0, sp_trigger=0, sp_dispatch=0, sp_executed=0, sp_blocked=0;
-    for (const pd of Object.values(sp_all)) {
-        sp_scan += pd.scan||0; sp_trigger += pd.trigger||0;
-        sp_dispatch += pd.dispatch||0; sp_executed += pd.executed||0; sp_blocked += pd.blocked||0;
-    }
-    $('plugin-summary').innerHTML = `
-        <div class="card"><div class="label">VF过滤总计</div><div class="value blue">${p.vf_total||0}</div></div>
-        <div class="card"><div class="label">KNN抑制</div><div class="value yellow">${p.knn_suppress_total||0}</div></div>
-        <div class="card"><div class="label">外挂已执行</div><div class="value green">${sp_executed}</div><div class="sub">dispatch ${sp_dispatch} / trigger ${sp_trigger}</div></div>
-        <div class="card"><div class="label">外挂扫描</div><div class="value blue">${sp_scan}</div></div>
-        <div class="card"><div class="label">外挂拦截</div><div class="value red">${sp_blocked}</div></div>
-    `;
+    // (old plugin/macd/vision/bv/gates tabs removed — now in GCC-TM)
 
-    // VF by plugin
-    const vfp = p.vf_by_plugin || {};
-    const maxVF = Math.max(...Object.values(vfp).map(v => Object.values(v).reduce((a,b)=>a+b,0)), 1);
-    let vfpHTML = '';
-    for (const [plugin, syms] of Object.entries(vfp).sort((a,b) => {
-        const sa = Object.values(a[1]).reduce((x,y)=>x+y,0);
-        const sb = Object.values(b[1]).reduce((x,y)=>x+y,0);
-        return sb - sa;
-    })) {
-        const total = Object.values(syms).reduce((a,b)=>a+b,0);
-        vfpHTML += `<tr><td><strong>${plugin}</strong></td><td>${barHTML(total,maxVF,'blue',80)} ${total}</td><td style="font-size:0.78em;color:#656d76">${topSymbols(syms,4)}</td></tr>`;
-    }
-    $('vf-plugin-body').innerHTML = vfpHTML || '<tr><td colspan="3" style="color:#656d76">无数据</td></tr>';
-
-    // KNN suppress
-    const knn = p.knn_suppress || {};
-    let knnHTML = '';
-    for (const [plugin, syms] of Object.entries(knn).sort((a,b) => {
-        const sa = Object.values(a[1]).reduce((x,y)=>x+y,0);
-        const sb = Object.values(b[1]).reduce((x,y)=>x+y,0);
-        return sb - sa;
-    })) {
-        const total = Object.values(syms).reduce((a,b)=>a+b,0);
-        knnHTML += `<tr><td><strong>${plugin}</strong></td><td>${barHTML(total,p.knn_suppress_total||1,'yellow',80)} ${total}</td><td style="font-size:0.78em;color:#656d76">${topSymbols(syms,4)}</td></tr>`;
-    }
-    $('knn-body').innerHTML = knnHTML || '<tr><td colspan="3" style="color:#656d76">无数据</td></tr>';
-
-    // VF by symbol
-    const vfs = p.vf_by_symbol || {};
-    const maxVFS = Math.max(...Object.values(vfs), 1);
-    let vfsHTML = '';
-    for (const [sym, cnt] of Object.entries(vfs).sort((a,b)=>b[1]-a[1])) {
-        const pct = (p.vf_total > 0) ? (cnt / p.vf_total * 100).toFixed(1) + '%' : '-';
-        vfsHTML += `<tr><td><strong>${sym}</strong></td><td>${barHTML(cnt,maxVFS,'blue',100)} ${cnt}</td><td>${pct}</td></tr>`;
-    }
-    $('vf-symbol-body').innerHTML = vfsHTML || '<tr><td colspan="3" style="color:#656d76">无数据</td></tr>';
-
-    // RobHoffman ER stats
-    if (rh.scans > 0) {
-        $('plugin-summary').innerHTML += `
-            <div class="card"><div class="label">RH震荡率</div><div class="value ${rh.er_below_pct>0.8?'yellow':'green'}">${(rh.er_below_pct*100).toFixed(0)}%</div><div class="sub">扫描${rh.scans} 信号${rh.signals||0} 过滤${rh.filtered}</div></div>
-        `;
-    }
-
-    // Scan plugins table
-    const sp = p.scan_plugins || {};
-    let spHTML = '';
-    for (const [pname, pd] of Object.entries(sp).sort((a,b) => {
-        const sa = (a[1].scan||0) + (a[1].trigger||0) + (a[1].dispatch||0);
-        const sb = (b[1].scan||0) + (b[1].trigger||0) + (b[1].dispatch||0);
-        return sb - sa;
-    })) {
-        const isP0 = pd.scan === 0 || !pd.scan;
-        const trigRate = isP0 ? (pd.trigger > 0 ? 'P0路径' : '-') : (pd.scan > 0 ? (pd.trigger / pd.scan * 100).toFixed(1) + '%' : '-');
-        const execColor = pd.dispatch > 0 && pd.executed === 0 ? 'color:#cf222e' : '';
-        // 拦截原因
-        const br = pd.block_reasons || {};
-        const brStr = Object.entries(br).sort((a,b)=>b[1]-a[1]).map(([r,c])=>`${r}:${c}`).join(' ') || '-';
-        spHTML += `<tr>
-            <td><strong>${pname}</strong>${isP0 && pd.trigger > 0 ? ' <span style="font-size:0.7em;color:#656d76">(P0)</span>' : ''}</td>
-            <td>${pd.scan||0}</td>
-            <td>${pd.trigger||0}</td>
-            <td>${trigRate}</td>
-            <td>${pd.dispatch||0}</td>
-            <td style="color:#1a7f37">${pd.executed||0}</td>
-            <td style="${execColor}">${pd.blocked||0}</td>
-            <td style="font-size:0.78em;color:#656d76">${brStr}</td>
-        </tr>`;
-    }
-    $('scan-plugin-body').innerHTML = spHTML || '<tr><td colspan="8" style="color:#656d76">无数据</td></tr>';
-
-    // 拦截原因汇总
-    const allReasons = {};
-    for (const pd of Object.values(sp)) {
-        for (const [r,c] of Object.entries(pd.block_reasons || {})) {
-            allReasons[r] = (allReasons[r]||0) + c;
-            if (false) sigaccSummary.insertAdjacentHTML('beforeend', `
-                <div class="card"><div class="label">最强外挂</div><div class="value" style="color:${best && best.accRaw != null && best.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${bestText}</div><div class="sub">${bestSub}</div></div>
-                <div class="card"><div class="label">第二名</div><div class="value" style="color:${second && second.accRaw != null && second.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${secondText}</div><div class="sub">${secondSub}</div></div>`);
-        }
-        if (false && sigaccSummary) {
-            sigaccSummary.insertAdjacentHTML('beforeend', `
-                <div class="card"><div class="label">æœ€å¼ºå¤–æŒ‚</div><div class="value" style="color:${best && best.accRaw != null && best.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${bestText}</div><div class="sub">${bestSub}</div></div>
-                <div class="card"><div class="label">ç¬¬äºŒå</div><div class="value" style="color:${second && second.accRaw != null && second.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${secondText}</div><div class="sub">${secondSub}</div></div>`);
-        }
-        if (false && sigaccSummary) {
-            sigaccSummary.insertAdjacentHTML('beforeend', `
-                <div class="card"><div class="label">最强外挂</div><div class="value" style="color:${best && best.accRaw != null && best.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${bestText}</div><div class="sub">${bestSub}</div></div>
-                <div class="card"><div class="label">第二名</div><div class="value" style="color:${second && second.accRaw != null && second.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${secondText}</div><div class="sub">${secondSub}</div></div>`);
-            sigaccSummary.insertAdjacentHTML('beforeend', `
-                <div class="card"><div class="label">最强外挂</div><div class="value" style="color:${best && best.accRaw != null && best.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${bestText}</div><div class="sub">${bestSub}</div></div>
-                <div class="card"><div class="label">第二名</div><div class="value" style="color:${second && second.accRaw != null && second.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${secondText}</div><div class="sub">${secondSub}</div></div>`);
-        }
-    }
-    const reasonEntries = Object.entries(allReasons).sort((a,b)=>b[1]-a[1]);
-    if (reasonEntries.length > 0) {
-        const totalBlocked = reasonEntries.reduce((s,e)=>s+e[1],0);
-        let brHTML = '<h3 style="margin-top:16px">拦截原因分布</h3><table><thead><tr><th>原因</th><th>次数</th><th>占比</th><th>建议</th></tr></thead><tbody>';
-        const suggestions = {
-            '门控拦截': '检查KEY-001/002门控参数，或放宽Vision/N-Gate阈值',
-            '执行失败': '检查SignalStack/3Commas连接状态（Schwab 7天重连）',
-            'FilterChain': '检查Vision准确率和volume_score阈值',
-            '限次/冷却': 'P0每日限次3次/品种，属正常防护',
-            '仓位限制': '满仓或EMA条件不满足，属正常风控',
-            '方向限制': 'daily_bias方向限制，检查set_bias.py配置是否合理',
-        };
-        for (const [r,c] of reasonEntries) {
-            const pct = (c/totalBlocked*100).toFixed(0)+'%';
-            const sug = suggestions[r] || '查看具体日志分析';
-            brHTML += `<tr><td><strong>${r}</strong></td><td>${c}</td><td>${pct}</td><td style="font-size:0.82em;color:#656d76">${sug}</td></tr>`;
-        }
-        brHTML += '</tbody></table>';
-        $('scan-plugin-body').closest('table').insertAdjacentHTML('afterend', brHTML);
-    }
-
-    // ── 方向锁 Leader (GCC-0252) ──
-    fetch('/key009/direction-leaders').then(r => r.ok ? r.json() : {}).then(leaders => {
-        const tbody = $('direction-lock-body');
-        if (!tbody) return;
-        const syms = Object.keys(leaders).sort();
-        if (!syms.length) {
-            tbody.innerHTML = '<tr><td colspan="5" style="color:#656d76;text-align:center">暂无 Leader 数据 (需运行 key009_audit 或样本不足)</td></tr>';
-            return;
-        }
-        tbody.innerHTML = syms.map(sym => {
-            const ld = leaders[sym];
-            const acc = (ld.acc * 100).toFixed(1);
-            const accColor = ld.acc >= 0.8 ? '#3fb950' : ld.acc >= 0.5 ? '#d29922' : '#f85149';
-            return `<tr>
-                <td><strong>${sym}</strong></td>
-                <td>🏆 ${ld.leader}</td>
-                <td style="color:${accColor};font-weight:600">${acc}%</td>
-                <td>${ld.sample_n}</td>
-                <td style="font-size:0.85em;color:#656d76">${ld.updated || ''}</td>
-            </tr>`;
-        }).join('');
-    }).catch(() => {});
-
-    // ── L2 MACD Tab ──
-    $('macd-summary').innerHTML = `
-        <div class="card"><div class="label">触发</div><div class="value blue">${md.trigger||0}</div></div>
-        <div class="card"><div class="label">过滤</div><div class="value yellow">${md.reject||0}</div></div>
-        <div class="card"><div class="label">执行</div><div class="value green">${md.execute||0}</div></div>
-        <div class="card"><div class="label">门控拦截</div><div class="value red">${md.gate_block||0}</div></div>
-    `;
-
-    // MACD funnel
-    const funnelTotal = Math.max(md.trigger || 1, 1);
-    const stages = [
-        {label:'触发', val:md.trigger||0, color:'blue'},
-        {label:'未过滤', val:(md.trigger||0)-(md.reject||0), color:'blue'},
-        {label:'执行', val:md.execute||0, color:'green'},
-        {label:'门控拦截', val:md.gate_block||0, color:'red'},
-    ];
-    $('macd-funnel').innerHTML = stages.map(s =>
-        `<div style="margin:4px 0;font-size:0.85em">${s.label}: ${barHTML(s.val,funnelTotal,s.color,200)} <strong>${s.val}</strong> (${(s.val/funnelTotal*100).toFixed(0)}%)</div>`
-    ).join('');
-
-    // MACD by symbol
-    const mbs = md.by_symbol || {};
-    let mbsHTML = '';
-    for (const [sym, st] of Object.entries(mbs).sort((a,b)=>b[1].trigger-a[1].trigger)) {
-        const rate = st.trigger > 0 ? (st.execute / st.trigger * 100).toFixed(0) + '%' : '-';
-        mbsHTML += `<tr><td><strong>${sym}</strong></td><td>${st.trigger}</td><td>${st.execute}</td><td>${rate}</td></tr>`;
-    }
-    $('macd-symbol-body').innerHTML = mbsHTML || '<tr><td colspan="4" style="color:#656d76">无数据</td></tr>';
-
-    // MACD divergence (from macd_divergence.log)
-    if (mdiv.found > 0 || mdiv.filtered > 0) {
-        $('macd-summary').innerHTML += `
-            <div class="card"><div class="label">背离发现</div><div class="value blue">${mdiv.found}</div></div>
-            <div class="card"><div class="label">背离过滤</div><div class="value yellow">${mdiv.filtered}</div></div>
-            <div class="card"><div class="label">平均强度</div><div class="value blue">${mdiv.avg_strength||0}%</div></div>
-        `;
-        const fr = mdiv.filter_reasons || {};
-        const frEntries = Object.entries(fr).sort((a,b)=>b[1]-a[1]);
-        if (frEntries.length) {
-            const frTotal = frEntries.reduce((s,e)=>s+e[1],0);
-            const maxFR = Math.max(...frEntries.map(e=>e[1]),1);
-            let frHTML = '<h3 style="margin-top:16px">背离过滤原因</h3><table><thead><tr><th>原因</th><th>次数</th><th>占比</th></tr></thead><tbody>';
-            for (const [reason, cnt] of frEntries) {
-                frHTML += `<tr><td>${reason}</td><td>${barHTML(cnt,maxFR,'yellow',100)} ${cnt}</td><td>${(cnt/frTotal*100).toFixed(0)}%</td></tr>`;
-            }
-            frHTML += '</tbody></table>';
-            $('macd-symbol-body').closest('table').insertAdjacentHTML('afterend', frHTML);
-        }
-    }
-
-    // ── Vision过滤 Tab ──
     const m = DATA.metrics || {};
-    const vflTotal = vfl.total || 0;
-    const vfPluginTotal = p.vf_total || 0;
-    const vAllTotal = vflTotal + vfPluginTotal;
-    const vflSymCount = Object.keys(vfl.by_symbol || {}).length;
-    const vfAccAvg = m.vf_acc_avg;
-    $('vision-summary').innerHTML = `
-        <div class="card"><div class="label">总过滤</div><div class="value ${vAllTotal>0?'yellow':'green'}">${vAllTotal}</div><div class="sub">Vision ${vflTotal} + 外挂VF ${vfPluginTotal}</div></div>
-        <div class="card"><div class="label">Vision方向拦截</div><div class="value red">${vflTotal}</div><div class="sub">${vflSymCount}个品种</div></div>
-        <div class="card"><div class="label">外挂VF过滤</div><div class="value yellow">${vfPluginTotal}</div><div class="sub">${Object.keys(p.vf_by_plugin||{}).length}个外挂</div></div>
-        ${vfAccAvg !== undefined ? `<div class="card"><div class="label">VF准确率</div><div class="value ${vfAccAvg>=0.5?'green':'red'}">${(vfAccAvg*100).toFixed(1)}%</div></div>` : ''}
-    `;
-
-    // Vision funnel
-    const vFunnelMax = Math.max(vAllTotal, 1);
-    const vFunnelStages = [
-        {label:'Vision方向拦截', val:vflTotal, color:'red'},
-        {label:'外挂VF过滤', val:vfPluginTotal, color:'yellow'},
-    ];
-    $('vision-funnel').innerHTML = vFunnelStages.map(s =>
-        `<div style="margin:4px 0;font-size:0.85em">${s.label}: ${barHTML(s.val,vFunnelMax,s.color,250)} <strong>${s.val}</strong> (${(s.val/vFunnelMax*100).toFixed(0)}%)</div>`
-    ).join('');
-
-    // Vision方向拦截 (VISION_FILTER) 按品种
-    const vflSym = vfl.by_symbol || {};
-    const vflReason = vfl.by_reason || {};
-    const vflEntries = Object.entries(vflSym).sort((a,b)=>b[1]-a[1]);
-    if (vflEntries.length) {
-        const maxVfl = Math.max(...vflEntries.map(e=>e[1]), 1);
-        let vflHTML = '<table><thead><tr><th>品种</th><th>拦截次数</th><th>占比</th></tr></thead><tbody>';
-        for (const [sym, cnt] of vflEntries) {
-            const pct = vflTotal > 0 ? (cnt/vflTotal*100).toFixed(1)+'%' : '-';
-            vflHTML += `<tr><td><strong>${sym}</strong></td><td>${barHTML(cnt,maxVfl,'red',120)} ${cnt}</td><td>${pct}</td></tr>`;
-        }
-        vflHTML += '</tbody></table>';
-        $('vision-filter-detail').innerHTML = vflHTML;
-    } else {
-        $('vision-filter-detail').innerHTML = '<div style="color:#656d76;padding:10px">无Vision方向拦截</div>';
-    }
-
-    // Vision reason analysis
-    const vflReasonEntries = Object.entries(vflReason).sort((a,b)=>b[1]-a[1]);
-    if (vflReasonEntries.length) {
-        const maxR = Math.max(...vflReasonEntries.map(e=>e[1]), 1);
-        const totalR = vflReasonEntries.reduce((s,e)=>s+e[1],0);
-        let vrHTML = '<table><thead><tr><th>原因</th><th>次数</th><th>占比</th></tr></thead><tbody>';
-        for (const [reason, cnt] of vflReasonEntries) {
-            vrHTML += `<tr><td><strong>${reason}</strong></td><td>${barHTML(cnt,maxR,'yellow',150)} ${cnt}</td><td>${(cnt/totalR*100).toFixed(0)}%</td></tr>`;
-        }
-        vrHTML += '</tbody></table>';
-        $('vision-reason-chart').innerHTML = vrHTML;
-    } else {
-        $('vision-reason-chart').innerHTML = '<div style="color:#656d76;padding:10px">无拦截原因数据</div>';
-    }
-
-    // Vision detail: plugin×symbol matrix
-    const plugins = Object.keys(vfp).sort();
-    const symbols = [...new Set(Object.values(vfp).flatMap(v => Object.keys(v)))].sort();
-    if (plugins.length && symbols.length) {
-        let tbl = '<table><thead><tr><th>品种</th>';
-        plugins.forEach(pl => tbl += `<th>${pl}</th>`);
-        tbl += '<th>合计</th></tr></thead><tbody>';
-        for (const sym of symbols) {
-            tbl += `<tr><td><strong>${sym}</strong></td>`;
-            let rowTotal = 0;
-            plugins.forEach(pl => {
-                const v = (vfp[pl] || {})[sym] || 0;
-                rowTotal += v;
-                tbl += `<td style="color:${v>0?'#58a6ff':'#484f58'}">${v||'-'}</td>`;
-            });
-            tbl += `<td><strong>${rowTotal}</strong></td></tr>`;
-        }
-        tbl += '</tbody></table>';
-        $('vision-detail').innerHTML = tbl;
-    } else {
-        $('vision-detail').innerHTML = '<div style="color:#656d76;padding:20px">无VF过滤数据</div>';
-    }
-
-    // ── BrooksVision Tab ──
-    const ev = bv.eval || {};
-    const evDecisive = (ev.CORRECT||0) + (ev.INCORRECT||0);
-    const evTotal = evDecisive + (ev.NEUTRAL||0);
-    const bvAcc = evDecisive > 0 ? ((ev.CORRECT||0) / evDecisive * 100).toFixed(1) : '-';
-    const bvDir = bv.by_direction || {};
-    const bvExecRate = (bv.signals||0) > 0 ? ((bv.executed||0)/(bv.signals||1)*100).toFixed(1) : '-';
-    $('bv-summary').innerHTML = `
-        <div class="card"><div class="label">P0信号</div><div class="value blue">${bv.signals||0}</div><div class="sub">BUY ${bvDir.BUY||0} / SELL ${bvDir.SELL||0}</div></div>
-        <div class="card"><div class="label">已执行</div><div class="value green">${bv.executed||0}</div><div class="sub">执行率 ${bvExecRate}%</div></div>
-        <div class="card"><div class="label">门控观察</div><div class="value yellow">${bv.gate_obs||0}</div></div>
-        <div class="card"><div class="label">评估总数</div><div class="value blue">${evTotal}</div><div class="sub">decisive ${evDecisive}</div></div>
-        <div class="card"><div class="label">准确率</div><div class="value ${bvAcc!=='-'&&parseFloat(bvAcc)>=50?'green':'red'}">${bvAcc}%</div><div class="sub">${evDecisive} decisive</div></div>
-    `;
-
-    // BV funnel
-    const bvFunnelMax = Math.max(bv.signals||0, 1);
-    const bvBlocked = (bv.signals||0) - (bv.executed||0);
-    const bvFunnelStages = [
-        {label:'P0信号', val:bv.signals||0, color:'blue'},
-        {label:'已执行', val:bv.executed||0, color:'green'},
-        {label:'被拦截/过滤', val:bvBlocked > 0 ? bvBlocked : 0, color:'red'},
-        {label:'门控观察', val:bv.gate_obs||0, color:'yellow'},
-    ];
-    $('bv-funnel').innerHTML = bvFunnelStages.map(s =>
-        `<div style="margin:4px 0;font-size:0.85em">${s.label}: ${barHTML(s.val,bvFunnelMax,s.color,250)} <strong>${s.val}</strong> (${(s.val/bvFunnelMax*100).toFixed(0)}%)</div>`
-    ).join('');
-
-    // BV accuracy from state file (GCC-0172)
-    const bvAccData = DATA.bv_accuracy || {};
-    const bvAccOverall = bvAccData.overall || {};
-    const bvAccPatterns = bvAccData.patterns || {};
-    const bvAccEl = $('bv-acc-summary');
-    const bvAccBodyEl = $('bv-acc-body');
-    if (bvAccOverall.decisive > 0) {
-        const oa = bvAccOverall;
-        const accPctO = (oa.accuracy * 100).toFixed(1);
-        bvAccEl.innerHTML = `
-            <div class="card"><div class="label">总判定</div><div class="value blue">${oa.decisive}</div><div class="sub">${oa.correct} correct / ${oa.incorrect} incorrect</div></div>
-            <div class="card"><div class="label">4H准确率</div><div class="value ${parseFloat(accPctO)>=50?'green':'red'}">${accPctO}%</div><div class="sub">neutral ${oa.neutral||0} excluded</div></div>
-        `;
-        const totalDec = oa.decisive;
-        let accRows = '';
-        for (const [pat, pv] of Object.entries(bvAccPatterns).sort((a,b)=>(b[1].decisive||0)-(a[1].decisive||0))) {
-            if (!pv.decisive) continue;
-            const pa = ((pv.accuracy||0)*100).toFixed(1);
-            const cls = parseFloat(pa) >= 55 ? 'green' : parseFloat(pa) < 40 ? 'red' : 'yellow';
-            const share = totalDec > 0 ? ((pv.decisive/totalDec)*100).toFixed(0)+'%' : '-';
-            accRows += `<tr><td><strong>${pat}</strong></td><td>${pv.decisive}</td><td style="color:#1a7f37">${pv.correct||0}</td><td style="color:#cf222e">${(pv.decisive||0)-(pv.correct||0)}</td><td style="color:${cls==='green'?'#1a7f37':cls==='red'?'#cf222e':'#9a6700'};font-weight:600">${pa}%</td><td>${share}</td></tr>`;
-        }
-        bvAccBodyEl.innerHTML = accRows || '<tr><td colspan="6" style="color:#656d76">无数据</td></tr>';
-    } else {
-        bvAccEl.innerHTML = '<div class="card"><div class="label">BV信号准确率</div><div class="value">-</div><div class="sub">等待数据积累</div></div>';
-        bvAccBodyEl.innerHTML = '<tr><td colspan="6" style="color:#656d76">无数据</td></tr>';
-    }
-
-    // BV eval chart
-    if (evTotal > 0) {
-        const pctC = (ev.CORRECT||0)/evTotal*100, pctI = (ev.INCORRECT||0)/evTotal*100, pctN = (ev.NEUTRAL||0)/evTotal*100;
-        const accPct = evDecisive > 0 ? ((ev.CORRECT||0)/evDecisive*100).toFixed(1) : '-';
-        $('bv-eval-chart').innerHTML = `
-            <div style="display:flex;height:24px;border-radius:6px;overflow:hidden;margin-bottom:8px">
-                <div style="width:${pctC}%;background:#1a7f37" title="CORRECT ${ev.CORRECT||0}"></div>
-                <div style="width:${pctI}%;background:#cf222e" title="INCORRECT ${ev.INCORRECT||0}"></div>
-                <div style="width:${pctN}%;background:#484f58" title="NEUTRAL ${ev.NEUTRAL||0}"></div>
-            </div>
-            <div style="font-size:0.82em;display:flex;gap:16px;flex-wrap:wrap">
-                <span style="color:#1a7f37">CORRECT: ${ev.CORRECT||0} (${pctC.toFixed(0)}%)</span>
-                <span style="color:#cf222e">INCORRECT: ${ev.INCORRECT||0} (${pctI.toFixed(0)}%)</span>
-                <span style="color:#656d76">NEUTRAL: ${ev.NEUTRAL||0} (${pctN.toFixed(0)}%)</span>
-                <span style="font-weight:600">准确率: ${accPct}% (decisive)</span>
-            </div>`;
-    } else {
-        $('bv-eval-chart').innerHTML = '<div style="color:#656d76;padding:10px">无评估数据</div>';
-    }
-
-    // BV by symbol accuracy (from bv_accuracy patterns → aggregate by symbol)
-    const bvSymAcc = {};
-    for (const [pat, pv] of Object.entries(bvAccPatterns)) {
-        for (const [sym, sv] of Object.entries(pv.symbols || {})) {
-            if (!bvSymAcc[sym]) bvSymAcc[sym] = {correct:0, incorrect:0, neutral:0, decisive:0};
-            bvSymAcc[sym].correct += sv.correct||0;
-            bvSymAcc[sym].incorrect += sv.incorrect||0;
-            bvSymAcc[sym].neutral += sv.neutral||0;
-            bvSymAcc[sym].decisive += sv.decisive||0;
-        }
-    }
-    const bvSymEntries = Object.entries(bvSymAcc).sort((a,b)=>b[1].decisive-a[1].decisive);
-    const bvSymEl = $('bv-symbol-body');
-    if (bvSymEntries.length) {
-        const maxSymDec = Math.max(...bvSymEntries.map(e=>e[1].decisive), 1);
-        bvSymEl.innerHTML = bvSymEntries.map(([sym, sv]) => {
-            const acc = sv.decisive > 0 ? (sv.correct/sv.decisive*100).toFixed(1) : '-';
-            const accColor = sv.decisive >= 5 ? (sv.correct/sv.decisive >= 0.55 ? '#1a7f37' : sv.correct/sv.decisive < 0.4 ? '#cf222e' : '#9a6700') : '#656d76';
-            return `<tr><td><strong>${sym}</strong></td><td>${barHTML(sv.decisive,maxSymDec,'blue',100)} ${sv.decisive}</td><td style="color:#1a7f37">${sv.correct}</td><td style="color:${accColor};font-weight:600">${acc}%</td></tr>`;
-        }).join('');
-    } else {
-        bvSymEl.innerHTML = '<tr><td colspan="4" style="color:#656d76">无数据</td></tr>';
-    }
-
-    // BV patterns
-    const bvp = bv.patterns || {};
-    const bvpTotal = Object.values(bvp).reduce((a,b)=>a+b,0);
-    const maxBvp = Math.max(...Object.values(bvp), 1);
-    let bvpHTML = '';
-    for (const [pat, cnt] of Object.entries(bvp).sort((a,b)=>b[1]-a[1])) {
-        const share = bvpTotal > 0 ? (cnt/bvpTotal*100).toFixed(1)+'%' : '-';
-        bvpHTML += `<tr><td><strong>${pat}</strong></td><td>${barHTML(cnt,maxBvp,'blue',100)} ${cnt}</td><td>${share}</td></tr>`;
-    }
-    $('bv-pattern-body').innerHTML = bvpHTML || '<tr><td colspan="3" style="color:#656d76">无数据</td></tr>';
-
-    // ── 门控拦截 Tab ──
-    const gateBox = (gt && (gt.totals || gt.detail)) ? gt : (DATA.gates || {});
-    const gateValidated = DATA.block_validation || {};
-    const gTotals = gateBox.totals_adjusted || gateBox.totals || {};
-    const gDetail = gateBox.detail || {};
-    const totalGates = Object.values(gTotals).reduce((a,b)=>a+b, 0);
-    const gateNames = Object.entries(gTotals).sort((a,b)=>b[1]-a[1]);
-    let gateSummaryHTML = `<div class="card"><div class="label">当前聚合拦截</div><div class="value ${totalGates>0?'yellow':'green'}">${totalGates}</div><div class="sub">来自 gates.totals</div></div>`;
-    if ((gateValidated.total_blocked||0) > 0) {
-        gateSummaryHTML += `<div class="card"><div class="label">历史验证拦截</div><div class="value blue">${gateValidated.total_blocked||0}</div><div class="sub">${gateValidated.validated||0} reviewed · 来自 block_validation</div></div>`;
-    }
-    for (const [gn, gc] of gateNames) {
-        if (gc > 0) {
-            const symCount = Object.keys(gDetail[gn] || {}).length;
-            gateSummaryHTML += `<div class="card"><div class="label">${gn}</div><div class="value yellow">${gc}</div><div class="sub">${symCount} symbols</div></div>`;
-        }
-    }
-    if (totalGates === 0) gateSummaryHTML += `<div class="card"><div class="label">状态</div><div class="value green">当前无聚合拦截</div><div class="sub">${(gateValidated.total_blocked||0) > 0 ? '但历史验证里仍有拦截记录' : '当前窗口无拦截'}</div></div>`;
-    $('gate-summary').innerHTML = gateSummaryHTML;
-
-    const maxGate = Math.max(...Object.values(gTotals), 1);
-    $('gate-funnel').innerHTML = gateNames.filter(e=>e[1]>0).map(([gn, gc]) =>
-        `<div style="margin:4px 0;font-size:0.85em">${gn}: ${barHTML(gc,maxGate,'yellow',250)} <strong>${gc}</strong> (${(gc/totalGates*100).toFixed(0)}%)</div>`
-    ).join('') || (
-        (gateValidated.total_blocked||0) > 0
-            ? `<div style="color:#9a6700;padding:10px">当前 gates 聚合为 0，但 block_validation 中仍有 ${gateValidated.total_blocked||0} 条历史验证拦截。详见“拦截验证”页。</div>`
-            : '<div style="color:#1a7f37;padding:10px">当前窗口无聚合拦截</div>'
-    );
-
-    let gHTML = '';
-    for (const [gname, cnt] of gateNames) {
-        if (cnt === 0) continue;
-        const detail = gDetail[gname] || {};
-        const pct = totalGates > 0 ? (cnt/totalGates*100).toFixed(0)+'%' : '-';
-        gHTML += `<tr><td><strong>${gname}</strong></td><td>${barHTML(cnt,maxGate,'yellow',120)} ${cnt}</td><td>${pct}</td><td style="font-size:0.78em;color:#656d76">${topSymbols(detail,5)}</td></tr>`;
-    }
-    $('gate-body').innerHTML = gHTML || (
-        (gateValidated.total_blocked||0) > 0
-            ? `<tr><td colspan="4" style="color:#9a6700">当前 gates 明细为空；但历史验证拦截 = ${gateValidated.total_blocked||0}。请查看“拦截验证”页获取原因与来源。</td></tr>`
-            : '<tr><td colspan="4" style="color:#1a7f37">当前窗口无聚合拦截</td></tr>'
-    );
-
-    const allGateSyms = new Set();
-    for (const detail of Object.values(gDetail)) {
-        for (const sym of Object.keys(detail || {})) allGateSyms.add(sym);
-    }
-    const gateSymList = [...allGateSyms].sort();
-    const activeGates = gateNames.filter(e=>e[1]>0).map(e=>e[0]);
-    if (activeGates.length && gateSymList.length) {
-        let hmHTML = '<table><thead><tr><th>Symbol</th>';
-        activeGates.forEach(g => hmHTML += `<th>${g}</th>`);
-        hmHTML += '<th>Symbol</th></tr></thead><tbody>';
-        const maxCell = Math.max(...gateSymList.map(sym => activeGates.reduce((s,g)=>s+(gDetail[g]||{})[sym]||0, 0)), 1);
-        for (const sym of gateSymList) {
-            let rowTotal = 0;
-            hmHTML += `<tr><td><strong>${sym}</strong></td>`;
-            for (const g of activeGates) {
-                const v = (gDetail[g] || {})[sym] || 0;
-                rowTotal += v;
-                const bg = v > 0 ? `rgba(212,167,44,${v/maxCell*0.5+0.1})` : 'transparent';
-                hmHTML += `<td style="text-align:center;background:${bg};font-weight:${v>0?'600':'400'}">${v||'-'}</td>`;
-            }
-            hmHTML += `<td style="font-weight:700">${rowTotal}</td></tr>`;
-        }
-        hmHTML += '</tbody></table>';
-        $('gate-heatmap').innerHTML = hmHTML;
-    } else {
-        $('gate-heatmap').innerHTML = (gateValidated.total_blocked||0) > 0
-            ? `<div style="color:#9a6700;padding:10px">当前 heatmap 无聚合明细；但历史验证拦截 = ${gateValidated.total_blocked||0}。</div>`
-            : '<div style="color:#656d76;padding:10px">当前窗口无拦截热力数据</div>';
-    }
     let mhtml = '';
     if (m.vf_acc_avg !== undefined) mhtml += `<div class="metric"><div class="k">VF Accuracy</div><div class="v">${(m.vf_acc_avg*100).toFixed(1)}%</div></div>`;
     if (m.nc_scored !== undefined) mhtml += `<div class="metric"><div class="k">NC Scored</div><div class="v">${m.nc_scored}</div></div>`;
@@ -1339,296 +727,6 @@ function _doRender() {
         issList.innerHTML = '<div class="issue-item" style="color:#1a7f37">All systems OK - no issues detected</div>';
     }
 
-    // ── 交易分析 Tab (统一用FIFO配对数据) ──
-    const ta = DATA.fifo_trades || DATA.trade_analysis || {};
-    const taOld = DATA.trade_analysis || {};
-    const trCards = $('trade-cards');
-    const _taTotal = ta.total || 0;
-    const _taWR = ta.win_rate || 0;
-    const _taLosers = _taTotal - (ta.winners||0);
-    const wrColor = _taWR >= 0.5 ? 'green' : _taWR >= 0.35 ? 'yellow' : 'red';
-    const pnlColor = (ta.total_pnl_pct||ta.total_pnl||0) >= 0 ? 'green' : 'red';
-    trCards.innerHTML = `
-        <div class="card"><div class="label">FIFO配对数</div><div class="value blue">${_taTotal}</div><div class="sub">${DATA.hours}h window</div></div>
-        <div class="card"><div class="label">Win Rate</div><div class="value ${wrColor}">${(_taWR*100).toFixed(1)}%</div><div class="sub">${ta.winners||0}W / ${_taLosers}L</div></div>
-        <div class="card"><div class="label">Avg PnL%</div><div class="value ${(ta.avg_pnl_pct||0)>=0?'green':'red'}">${(ta.avg_pnl_pct||0).toFixed(2)}%</div></div>
-        <div class="card"><div class="label">总PnL%</div><div class="value ${pnlColor}">${(ta.total_pnl_pct||ta.total_pnl||0)>=0?'+':''}${(ta.total_pnl_pct||ta.total_pnl||0).toFixed(1)}%</div></div>
-        ${taOld.avg_hold_min > 0 ? `<div class="card"><div class="label">平均持仓</div><div class="value blue">${taOld.avg_hold_min.toFixed(0)}</div><div class="sub">分钟</div></div>` : ''}`;
-
-    // ── 全链路信号→盈亏分析 ──
-    const pa = DATA.pipeline_analysis || [];
-    const paEl = $('pipeline-analysis');
-    if (pa.length > 0) {
-        let paHTML = '<table><thead><tr><th>外挂</th><th>扫描</th><th>触发</th><th>发送</th><th>执行</th><th>拦截</th><th>执行率</th><th>成交</th><th>胜率</th><th>质量分</th><th>优化建议</th></tr></thead><tbody>';
-        for (const p of pa) {
-            const f = p.funnel || {};
-            const r = p.rates || {};
-            const t = p.trades || {};
-            const recs = p.recommendations || [];
-            const qs = p.quality_score;
-            // 质量分颜色
-            const qsColor = qs === null ? '#656d76' : qs >= 60 ? '#1a7f37' : qs >= 30 ? '#9a6700' : '#cf222e';
-            const qsText = qs === null ? '-' : qs.toFixed(0);
-            // 执行率
-            const execRate = r.exec_rate !== null && r.exec_rate !== undefined ? (r.exec_rate*100).toFixed(0)+'%' : '-';
-            const execColor = r.exec_rate !== null && r.exec_rate < 0.3 ? '#cf222e' : '';
-            // 胜率
-            const wrText = t.total > 0 ? (t.win_rate*100).toFixed(0)+'%' : '-';
-            const wrColor = t.total >= 3 ? (t.win_rate >= 0.5 ? '#1a7f37' : t.win_rate >= 0.35 ? '#9a6700' : '#cf222e') : '#656d76';
-            // 建议: 只取HIGH和MEDIUM
-            const recStr = recs.filter(r=>r.priority!=='LOW').map(r => {
-                const icon = r.priority==='HIGH'?'🔴':r.priority==='POSITIVE'?'🟢':'🟡';
-                const color = r.priority==='POSITIVE'?'color:#1a7f37':'';
-                return `<span style="${color}">${icon}<strong>${r.target}</strong>: ${r.action}</span>`;
-            }).join('<br>') || '<span style="color:#656d76">数据不足</span>';
-            // 拦截原因mini
-            const br = p.block_reasons || {};
-            const brStr = Object.entries(br).sort((a,b)=>b[1]-a[1]).slice(0,2).map(([k,v])=>`${k}:${v}`).join(' ');
-            paHTML += `<tr>
-                <td><strong>${p.plugin}</strong></td>
-                <td>${f.scan||0}</td>
-                <td>${f.trigger||0}</td>
-                <td>${f.dispatch||0}</td>
-                <td style="color:#1a7f37;font-weight:600">${f.executed||0}</td>
-                <td style="color:#cf222e">${f.blocked||0}${brStr ? '<br><span style="font-size:0.7em;color:#656d76">'+brStr+'</span>' : ''}</td>
-                <td style="color:${execColor};font-weight:600">${execRate}</td>
-                <td>${t.total||0}</td>
-                <td style="color:${wrColor};font-weight:600">${wrText}</td>
-                <td style="color:${qsColor};font-weight:700;font-size:1.1em">${qsText}</td>
-                <td style="font-size:0.78em;max-width:350px">${recStr}</td>
-            </tr>`;
-        }
-        paHTML += '</tbody></table>';
-        paEl.innerHTML = paHTML;
-    } else {
-        paEl.innerHTML = '<div style="color:#656d76;padding:10px">无外挂信号数据（需要scan engine日志）</div>';
-    }
-
-    // ── 已修复问题 (交易分析Tab内也展示) ──
-    const fixedInTrade = (DATA.issues || []).filter(i => i.fixed);
-    const fixedTradeEl = $('trade-fixed');
-    if (fixedTradeEl) {
-        if (fixedInTrade.length > 0) {
-            fixedTradeEl.innerHTML = fixedInTrade.map(i =>
-                `<div class="issue-item issue-fixed"><span class="issue-tag" style="color:#1a7f37">[FIXED]</span><strong>${i.task}</strong>: ${i.msg}` +
-                (i.fix_note ? ` <span class="fix-note">— ${i.fix_note}</span>` : '') + `</div>`
-            ).join('');
-        } else {
-            fixedTradeEl.innerHTML = '';
-        }
-    }
-
-    const tbs = $('trade-by-symbol');
-    const _taSym = ta.by_symbol || {};
-    const syms = Object.entries(_taSym).sort((a,b)=>(b[1].trades||b[1].total||0)-(a[1].trades||a[1].total||0));
-    tbs.innerHTML = syms.length ? syms.map(([s,d]) => {
-        const cnt = d.trades || d.total || 0;
-        const wins = d.wins || d.winners || 0;
-        const wr = cnt > 0 ? (wins/cnt*100).toFixed(1) : '0.0';
-        const wrv = cnt > 0 ? wins/cnt : 0;
-        const wrc = wrv>=0.5?'#1a7f37':wrv>=0.35?'#9a6700':'#cf222e';
-        const pnl = d.total_pnl || 0;
-        return `<tr><td><strong>${s}</strong></td><td>${cnt}</td><td>${wins}</td><td style="color:${wrc};font-weight:600">${wr}%</td><td style="color:${pnl>=0?'#1a7f37':'#cf222e'}">${pnl>=0?'+':''}${pnl.toFixed(1)}%</td></tr>`;
-    }).join('') : '<tr><td colspan="5" style="color:#656d76">No completed trades in window</td></tr>';
-
-    const tbp = $('trade-by-plugin');
-    const _taSrc = ta.by_source || ta.by_plugin || {};
-    const plugs = Object.entries(_taSrc).sort((a,b)=>(b[1].trades||b[1].total||0)-(a[1].trades||a[1].total||0));
-    tbp.innerHTML = plugs.length ? plugs.map(([p,d]) => {
-        const cnt = d.trades || d.total || 0;
-        const wins = d.wins || d.winners || 0;
-        const wr = cnt > 0 ? (wins/cnt*100).toFixed(1) : '0.0';
-        const wrv = cnt > 0 ? wins/cnt : 0;
-        const wrc = wrv>=0.5?'#1a7f37':wrv>=0.35?'#9a6700':'#cf222e';
-        return `<tr><td><strong>${p}</strong></td><td>${cnt}</td><td>${wins}</td><td style="color:${wrc};font-weight:600">${wr}%</td></tr>`;
-    }).join('') : '<tr><td colspan="4" style="color:#656d76">No plugin attribution data</td></tr>';
-
-    // ── GCC-0197 S6: 信号准确率 Tab ──
-    const paAcc = DATA.plugin_accuracy || {};
-    const pp = DATA.plugin_phases || {};
-    const sigaccBody = $('sigacc-body');
-    const sigaccSummary = $('sigacc-summary');
-    if (sigaccBody) {
-        const srcs = Object.keys(paAcc).sort();
-        let totalDecisive = 0, totalCorrect = 0, downgraded = 0;
-        const pluginRank = [];
-        const rows = srcs.map(src => {
-            const syms = paAcc[src] || {};
-            const ov = syms._overall || {};
-            const phase = (pp[src] || {}).phase || 'NORMAL';
-            const symItems = Object.keys(syms).filter(s => s !== '_overall').map(sym => syms[sym] || {});
-            const agg = symItems.reduce((a, d) => {
-                a.total += d.total || 0;
-                a.correct += d.correct || 0;
-                a.incorrect += d.incorrect || 0;
-                a.neutral += d.neutral || 0;
-                a.pending += d.pending || 0;
-                return a;
-            }, { total: 0, correct: 0, incorrect: 0, neutral: 0, pending: 0 });
-            const srcTotal = ov.total ?? agg.total;
-            const srcCorrect = ov.correct ?? agg.correct;
-            const srcIncorrect = ov.incorrect ?? agg.incorrect;
-            const srcNeutral = ov.neutral ?? agg.neutral;
-            const srcPending = ov.pending ?? agg.pending;
-            const srcAccRaw = ov.acc != null ? ov.acc : (srcTotal > 0 ? (srcCorrect / srcTotal) : null);
-            const acc = srcAccRaw != null ? (srcAccRaw * 100).toFixed(0) + '%' : 'N/A';
-            const accColor = srcAccRaw == null ? '#656d76' : (srcAccRaw >= 0.55 ? '#1a7f37' : srcAccRaw < 0.5 ? '#cf222e' : '#9a6700');
-            const phaseColor = phase === 'DOWNGRADED' ? '#cf222e' : '#1a7f37';
-            totalDecisive += (srcTotal || 0);
-            totalCorrect += (srcCorrect || 0);
-            if (phase === 'DOWNGRADED') downgraded++;
-            pluginRank.push({ src, total: srcTotal || 0, correct: srcCorrect || 0, accRaw: srcAccRaw, phase });
-            // 按品种明细
-            const symRows = Object.keys(syms).filter(s => s !== '_overall').map(sym => {
-                const d = syms[sym] || {};
-                return `<tr style="font-size:0.85em;color:#656d76"><td style="padding-left:24px">${sym}</td><td>${d.total||0}</td><td>${d.correct||0}</td><td>${d.incorrect||0}</td><td>${d.neutral||0}</td><td>${d.pending||0}</td><td>${d.acc!=null?(d.acc*100).toFixed(0)+'%':'—'}</td><td></td></tr>`;
-            }).join('');
-            return `<tr><td><strong>${src}</strong></td><td>${srcTotal||0}</td><td>${srcCorrect||0}</td><td>${srcIncorrect||0}</td><td>${srcNeutral||0}</td><td>${srcPending||0}</td><td style="color:${accColor};font-weight:600">${acc}</td><td style="color:${phaseColor}">${phase}</td></tr>${symRows}`;
-        }).join('');
-        sigaccBody.innerHTML = rows || '<tr><td colspan="8" style="color:#656d76">暂无信号数据 (需scan engine重启后积累)</td></tr>';
-        const overallAcc = totalDecisive > 0 ? (totalCorrect / totalDecisive * 100).toFixed(0) : 'N/A';
-        const overallAccText = overallAcc === 'N/A' ? 'N/A' : `${overallAcc}%`;
-        const ranked = pluginRank.sort((a, b) => {
-            const aAcc = a.accRaw == null ? -1 : a.accRaw;
-            const bAcc = b.accRaw == null ? -1 : b.accRaw;
-            if (bAcc !== aAcc) return bAcc - aAcc;
-            return (b.total || 0) - (a.total || 0);
-        });
-        const best = ranked[0] || null;
-        const second = ranked[1] || null;
-        const bestText = best && best.accRaw != null ? `${best.src} ${(best.accRaw * 100).toFixed(1)}%` : 'N/A';
-        const bestSub = best ? `${best.total} decisive${best.phase === 'DOWNGRADED' ? ' · DOWNGRADED' : ''}` : 'æ— æ ·æœ¬';
-        const secondText = second && second.accRaw != null ? `${second.src} ${(second.accRaw * 100).toFixed(1)}%` : 'N/A';
-        const secondSub = second ? `${second.total} decisive${second.phase === 'DOWNGRADED' ? ' · DOWNGRADED' : ''}` : 'æ— ç¬¬äºŒå';
-        if (sigaccSummary) {
-            sigaccSummary.innerHTML = `
-                <div class="card"><div class="label">总样本</div><div class="value">${totalDecisive}</div></div>
-                <div class="card"><div class="label">整体准确率</div><div class="value">${overallAccText}</div></div>
-                <div class="card"><div class="label">外挂数</div><div class="value">${srcs.length}</div></div>
-                <div class="card"><div class="label" style="color:${downgraded>0?'#cf222e':'#1a7f37'}">降级中</div><div class="value">${downgraded}</div></div>`;
-        }
-    }
-
-    // ── 仓位控制 Tab ──
-    if (false && sigaccSummary) {
-        sigaccSummary.insertAdjacentHTML('beforeend', `
-            <div class="card"><div class="label">最强外挂</div><div class="value" style="color:${best && best.accRaw != null && best.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${bestText}</div><div class="sub">${bestSub}</div></div>
-            <div class="card"><div class="label">第二名</div><div class="value" style="color:${second && second.accRaw != null && second.accRaw >= 0.55 ? '#1a7f37' : '#1f2328'}">${secondText}</div><div class="sub">${secondSub}</div></div>`);
-    }
-
-    // ── 方向过滤器 SignalFilter ──
-    const sf = DATA.signal_direction_filter || {};
-    const sfFilterMode = sf.mode || 'OFF';
-    const sfDir = sf.direction || 'N/A';
-    const sfDirColor = sfDir === 'BUY_DOMINANT' ? '#1a7f37' : sfDir === 'SELL_DOMINANT' ? '#cf222e' : sfDir === 'NEUTRAL' ? '#0969da' : '#656d76';
-    const sfModeColor = sfFilterMode === 'ENFORCE' ? '#1a7f37' : sfFilterMode === 'OBSERVE' ? '#9a6700' : '#656d76';
-    const sfBuy4h = sf.buy_ratio_4h != null ? (sf.buy_ratio_4h * 100).toFixed(1) + '%' : '-';
-    const sfSell4h = sf.sell_ratio_4h != null ? (sf.sell_ratio_4h * 100).toFixed(1) + '%' : '-';
-    const sfBuyW = sf.buy_ratio_week != null ? (sf.buy_ratio_week * 100).toFixed(1) + '%' : '-';
-    const sfSellW = sf.sell_ratio_week != null ? (sf.sell_ratio_week * 100).toFixed(1) + '%' : '-';
-    const sfSample4h = sf.sample_4h != null ? sf.sample_4h : '-';
-    const sfSampleW = sf.sample_week != null ? sf.sample_week : '-';
-    const sfBySymbol = (sf.by_symbol || []).slice().sort((a,b) => {
-        const aScore = Number(b?.sample_4h || 0) + Number(b?.blocked_4h || 0);
-        const bScore = Number(a?.sample_4h || 0) + Number(a?.blocked_4h || 0);
-        return aScore - bScore;
-    });
-    $('sf-summary').innerHTML = `
-        <div class="card"><div class="label">模式</div><div class="value" style="color:${sfModeColor}">${sfFilterMode}</div><div class="sub">ENFORCE=真拦截</div></div>
-        <div class="card"><div class="label">当前方向</div><div class="value" style="color:${sfDirColor}">${sfDir}</div><div class="sub">${sf.reason || ''}</div></div>
-        <div class="card"><div class="label">4H Buy/Sell</div><div class="value blue">${sfBuy4h} / ${sfSell4h}</div><div class="sub">样本 ${sfSample4h}</div></div>
-        <div class="card"><div class="label">本周 Buy/Sell</div><div class="value blue">${sfBuyW} / ${sfSellW}</div><div class="sub">样本 ${sfSampleW}</div></div>
-    `;
-    $('sf-symbol-body').innerHTML = sfBySymbol.map(row => {
-        const dir = row.direction || 'NO_ANSWER';
-        const dirColor = dir === 'BUY_DOMINANT' ? '#1a7f37' : dir === 'SELL_DOMINANT' ? '#cf222e' : dir === 'NEUTRAL' ? '#0969da' : '#656d76';
-        const buy4 = ((Number(row.buy_ratio_4h || 0) * 100).toFixed(1)) + '%';
-        const sell4 = ((Number(row.sell_ratio_4h || 0) * 100).toFixed(1)) + '%';
-        const buyW = ((Number(row.buy_ratio_week || 0) * 100).toFixed(1)) + '%';
-        const sellW = ((Number(row.sell_ratio_week || 0) * 100).toFixed(1)) + '%';
-        return `<tr>
-            <td><strong>${row.symbol}</strong></td>
-            <td>${row.mode || sfFilterMode}</td>
-            <td style="color:${dirColor};font-weight:700">${dir}</td>
-            <td>${buy4} / ${sell4}</td>
-            <td>${buyW} / ${sellW}</td>
-            <td>${row.sample_4h ?? 0}</td>
-            <td>${row.sample_week ?? 0}</td>
-            <td>${row.blocked_4h ?? 0}</td>
-            <td>${row.blocked_week ?? 0}</td>
-        </tr>`;
-    }).join('') || '<tr><td colspan="9" style="color:#656d76">暂无按品种 SignalFilter 数据</td></tr>';
-
-    const bl = DATA.baseline || {};
-    const blStats = bl.stats || {};
-    const blState = bl.state || {};
-    const dcStats = bl.dc_stats || {};
-    const blTotal = blStats.total || 0;
-    const blPass = blStats.pass || 0;
-    const blBlock = blStats.block || 0;
-    const blNoData = blStats.no_data || 0;
-    const dcBlock = dcStats.block || 0;
-    const dcPass = dcStats.pass || 0;
-    const dcNoData = dcStats.no_data || 0;
-    const totalBlock = blBlock + dcBlock;
-    $('bl-summary').innerHTML = `
-        <div class="card"><div class="label">仓位控制总事件</div><div class="value blue">${blTotal}</div></div>
-        <div class="card"><div class="label">基准K线拦截</div><div class="value red">${blBlock}</div><div class="sub">执行模式</div></div>
-        <div class="card"><div class="label">DC周期拦截</div><div class="value red">${dcBlock}</div><div class="sub">执行模式 (通过${dcPass} 无数据${dcNoData})</div></div>
-        <div class="card"><div class="label">合计执行拦截</div><div class="value ${totalBlock>0?'red':'green'}">${totalBlock}</div><div class="sub">基准${blBlock}+DC${dcBlock}</div></div>
-        <div class="card"><div class="label">品种数</div><div class="value blue">${Object.keys(blState).length}</div></div>
-    `;
-    // 基准状态表 + 唐安琪周期 (GCC-0200)
-    const trendLabel = {1:'上升', '-1':'下降', 0:'震荡'};
-    const matColor = {'young':'#0969da','mid':'#9a6700','mature':'#1a7f37'};
-    function _baselineMissReason(side, s) {
-        const foundKey = side === 'BUY' ? 'buy_found' : 'sell_found';
-        if (s && s[foundKey] === false) return '视觉未识别';
-        if (s && s.buy_price != null && s.sell_price != null && s.buy_price >= s.sell_price) return '结构冲突单边保留';
-        if (!s || !s.updated_at) return '无更新时间';
-        try {
-            const h = (Date.now() - new Date(s.updated_at).getTime()) / 3600000;
-            if (isFinite(h) && h > 24) return '基准已过期';
-        } catch (e) {}
-        return '等待下次4h刷新';
-    }
-    let blStateHTML = '';
-    for (const [sym, s] of Object.entries(blState).sort()) {
-        const bp = s.buy_price != null
-            ? s.buy_price.toFixed(2)
-            : `<span style="color:#cf222e">未找到</span><span style="font-size:0.72em;color:#656d76;margin-left:4px">${_baselineMissReason('BUY', s)}</span>`;
-        const sp = s.sell_price != null
-            ? s.sell_price.toFixed(2)
-            : `<span style="color:#cf222e">未找到</span><span style="font-size:0.72em;color:#656d76;margin-left:4px">${_baselineMissReason('SELL', s)}</span>`;
-        const ba = s.buy_bars_ago != null ? s.buy_bars_ago + '根' : '-';
-        const sa = s.sell_bars_ago != null ? s.sell_bars_ago + '根' : '-';
-        const dcAvg = s.dc_hl_avg != null ? s.dc_hl_avg.toFixed(1) : '-';
-        const dcTrend = s.dc_cycle_trend != null ? (trendLabel[s.dc_cycle_trend]||'?') : '-';
-        const dcMat = s.dc_maturity || '-';
-        const dcMatStyle = matColor[dcMat] ? `color:${matColor[dcMat]};font-weight:600` : '';
-        const dcCnt = s.dc_cycle_counter != null ? s.dc_cycle_counter : '-';
-        blStateHTML += `<tr><td><strong>${sym}</strong></td><td>${bp}</td><td>${sp}</td><td>${ba}</td><td>${sa}</td><td>${dcAvg}</td><td>${dcTrend}</td><td style="${dcMatStyle}">${dcMat}</td><td>${dcCnt}</td><td>${s.updated_at||'-'}</td></tr>`;
-    }
-    $('bl-state-body').innerHTML = blStateHTML || '<tr><td colspan="10" style="color:#656d76">尚无基准数据（等待首次Vision识别）</td></tr>';
-    // 门控事件表
-    const blBySymbol = blStats.by_symbol || {};
-    let blEvtHTML = '';
-    for (const [sym, d] of Object.entries(blBySymbol).sort()) {
-        const t = d.pass + d.block + d.no_data;
-        blEvtHTML += `<tr><td><strong>${sym}</strong></td><td class="green">${d.pass}</td><td class="red">${d.block}</td><td>${d.no_data}</td><td>${t}</td></tr>`;
-    }
-    $('bl-events-body').innerHTML = blEvtHTML || '<tr><td colspan="5" style="color:#656d76">暂无门控事件</td></tr>';
-    // 按方向
-    const blByDir = blStats.by_direction || {};
-    let blDirHTML = '<div style="display:flex;gap:20px">';
-    for (const dir of ['BUY','SELL']) {
-        const dd = blByDir[dir] || {pass:0,block:0,no_data:0};
-        const dt = dd.pass+dd.block+dd.no_data;
-        blDirHTML += `<div class="card" style="min-width:200px"><div class="label">${dir}</div><div class="value">${dt}</div><div class="sub">通过${dd.pass} 拦截${dd.block} 无数据${dd.no_data}</div></div>`;
-    }
-    blDirHTML += '</div>';
-    $('bl-direction').innerHTML = blDirHTML;
-
     // ── 券商对账 Tab ──
     const bm = DATA.broker_match || {};
     const bmCards = $('broker-cards');
@@ -1691,187 +789,6 @@ function _doRender() {
         $('broker-matches').innerHTML = '';
         $('broker-nosignal').innerHTML = '';
         $('broker-sources').innerHTML = '';
-    }
-
-    // ── 策略排行 Tab ──
-    const ft = DATA.fifo_trades || {};
-    const sr = DATA.strategy_ranking || [];
-    const ftWR = ft.total > 0 ? ((ft.win_rate||0)*100).toFixed(1) : '-';
-    const ftColor = (ft.win_rate||0) >= 0.5 ? 'green' : (ft.win_rate||0) >= 0.35 ? 'yellow' : 'red';
-    const ftPnlColor = (ft.total_pnl_pct||0) >= 0 ? 'green' : 'red';
-    $('ranking-summary').innerHTML = `
-        <div class="card"><div class="label">FIFO配对数</div><div class="value blue">${ft.total||0}</div><div class="sub">${DATA.hours}h window</div></div>
-        <div class="card"><div class="label">胜率</div><div class="value ${ftColor}">${ftWR}%</div><div class="sub">${ft.winners||0}W / ${(ft.total||0)-(ft.winners||0)}L</div></div>
-        <div class="card"><div class="label">平均PnL%</div><div class="value ${(ft.avg_pnl_pct||0)>=0?'green':'red'}">${(ft.avg_pnl_pct||0).toFixed(2)}%</div></div>
-        <div class="card"><div class="label">总PnL%</div><div class="value ${ftPnlColor}">${(ft.total_pnl_pct||0).toFixed(1)}%</div></div>
-    `;
-    // Ranking table
-    const rankBody = $('ranking-body');
-    if (sr.length > 0) {
-        rankBody.innerHTML = sr.map(r => {
-            const wrPct = (r.win_rate*100).toFixed(1);
-            const wrC = r.win_rate>=0.5?'#1a7f37':r.win_rate>=0.35?'#9a6700':'#cf222e';
-            const scoreC = r.score>70?'#1a7f37':r.score>=50?'#9a6700':'#cf222e';
-            let adviceText = r.action || '??';
-            const rawAdvice = String(r.action || '').toUpperCase();
-            const isWatchMode = rawAdvice.includes('WATCH') || rawAdvice.includes('??') || rawAdvice.includes('??????');
-            let actionBg = r.action==='??'?'#dafbe1':r.action==='??'?'#fff8c5':r.action==='????'?'#ffebe9':'#ddf4ff';
-            let actionColor = r.action==='??'?'#1a7f37':r.action==='??'?'#9a6700':r.action==='????'?'#cf222e':'#0969da';
-            if ((r.trades || 0) < 5) {
-                adviceText = isWatchMode ? `?????(${r.trades}?, WATCH)` : `?????(${r.trades}?)`;
-                actionBg = '#f6f8fa';
-                actionColor = '#656d76';
-            } else if ((r.trades || 0) < 10) {
-                adviceText = isWatchMode ? `????(${r.trades}?, WATCH)` : `????(${r.trades}?)`;
-                actionBg = '#fff8c5';
-                actionColor = '#9a6700';
-            }
-            return `<tr>
-                <td style="font-weight:700;text-align:center">${r.rank}</td>
-                <td><strong>${r.source}</strong></td>
-                <td>${r.trades}</td>
-                <td style="color:${wrC};font-weight:600">${wrPct}%</td>
-                <td style="color:${r.avg_pnl>=0?'#1a7f37':'#cf222e'}">${r.avg_pnl>=0?'+':''}${r.avg_pnl.toFixed(2)}%</td>
-                <td style="color:${r.total_pnl>=0?'#1a7f37':'#cf222e'}">${r.total_pnl>=0?'+':''}${r.total_pnl.toFixed(1)}%</td>
-                <td style="color:${scoreC};font-weight:700;font-size:1.1em">${r.score}</td>
-                <td><span class="badge" style="background:${actionBg};color:${actionColor}">${adviceText}</span></td>
-            </tr>`;
-        }).join('');
-    } else {
-        rankBody.innerHTML = '<tr><td colspan="8" style="color:#656d76">无FIFO配对数据(需trade_history有source字段)</td></tr>';
-    }
-    // 优点/缺点发现 (从ranking + cross data)
-    if (sr.length > 0) {
-        const crossD = ft.by_source_symbol || {};
-        const bvBlock = (DATA.block_validation || {}).by_source || {};
-        let insightHTML = '<h2>优点 & 问题发现</h2><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">';
-        for (const r of sr) {
-            const srcCross = crossD[r.source] || {};
-            // 找best品种(pnl最高)
-            const bestSym = Object.entries(srcCross).sort((a,b)=>(b[1].pnl||0)-(a[1].pnl||0))[0];
-            const worstSym = Object.entries(srcCross).sort((a,b)=>(a[1].pnl||0)-(b[1].pnl||0))[0];
-            const blockInfo = bvBlock[r.source];
-            let tips = [];
-            if (bestSym && bestSym[1].pnl > 0) tips.push(`<span style="color:#1a7f37">✓ ${bestSym[0]}盈利${bestSym[1].pnl.toFixed(1)}%(${bestSym[1].trades}笔)</span>`);
-            if (worstSym && worstSym[1].pnl < -5) tips.push(`<span style="color:#cf222e">✗ ${worstSym[0]}亏损${worstSym[1].pnl.toFixed(1)}%(${worstSym[1].trades}笔)</span>`);
-            if (blockInfo && blockInfo.total >= 3) tips.push(`<span style="color:${blockInfo.accuracy>=0.6?'#1a7f37':'#cf222e'}">拦截正确率${(blockInfo.accuracy*100).toFixed(0)}%(${blockInfo.total}次)</span>`);
-            if (r.trades < 5) tips.push(`<span style="color:#656d76">样本不足(${r.trades}笔)</span>`);
-            if (tips.length) {
-                insightHTML += `<div style="background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:10px 14px;min-width:220px;flex:1">
-                    <div style="font-weight:700;margin-bottom:4px">${r.source} <span class="badge" style="background:${r.action==='加强'?'#dafbe1':r.action==='维持'?'#fff8c5':r.action==='降低频次'?'#ffebe9':'#ddf4ff'};color:${r.action==='加强'?'#1a7f37':r.action==='维持'?'#9a6700':r.action==='降低频次'?'#cf222e':'#0969da'}">${r.action}</span></div>
-                    <div style="font-size:0.82em;line-height:1.6">${tips.join('<br>')}</div>
-                </div>`;
-            }
-        }
-        insightHTML += '</div>';
-        $('ranking-heatmap').insertAdjacentHTML('beforebegin', insightHTML);
-    }
-    // Heatmap: source × symbol
-    const crossData = ft.by_source_symbol || {};
-    const hmSources = Object.keys(crossData).sort();
-    const hmSymbols = [...new Set(hmSources.flatMap(s => Object.keys(crossData[s] || {})))].sort();
-    if (hmSources.length && hmSymbols.length) {
-        let hmHTML = '<table><thead><tr><th>品种\\策略</th>';
-        hmSources.forEach(s => hmHTML += `<th>${s}</th>`);
-        hmHTML += '</tr></thead><tbody>';
-        const allPnl = hmSources.flatMap(s => Object.values(crossData[s]||{}).map(d=>Math.abs(d.pnl||0)));
-        const maxPnl = Math.max(...allPnl, 1);
-        for (const sym of hmSymbols) {
-            hmHTML += `<tr><td><strong>${sym}</strong></td>`;
-            for (const src of hmSources) {
-                const cell = (crossData[src]||{})[sym];
-                if (!cell || !cell.trades) {
-                    hmHTML += '<td style="text-align:center;color:#afb8c1">-</td>';
-                } else {
-                    const intensity = Math.min(Math.abs(cell.pnl)/maxPnl*0.6+0.1, 0.7);
-                    const bg = cell.pnl >= 0 ? `rgba(26,127,55,${intensity})` : `rgba(207,34,46,${intensity})`;
-                    const txt = cell.pnl >= 0 ? '#1a7f37' : '#cf222e';
-                    hmHTML += `<td style="text-align:center;background:${bg};color:${txt};font-weight:600" title="${cell.trades}笔 ${cell.wins}W">${cell.pnl>=0?'+':''}${cell.pnl.toFixed(1)}%</td>`;
-                }
-            }
-            hmHTML += '</tr>';
-        }
-        hmHTML += '</tbody></table>';
-        $('ranking-heatmap').innerHTML = hmHTML;
-    } else {
-        $('ranking-heatmap').innerHTML = '<div style="color:#656d76;padding:10px">无交叉数据</div>';
-    }
-    // ── 结构化规则表 ──
-    const rulesBody = $('rules-body');
-    const rules = DATA.extracted_rules || [];
-    if (rulesBody) {
-        if (rules.length > 0) {
-            const actionColors = {RELAX:'#1a7f37',OBSERVE:'#0969da',TIGHTEN:'#cf222e',REVIEW:'#9a6700',DISABLE:'#cf222e'};
-            const statusColors = {DISCOVERED:'#ddf4ff;color:#0969da',ACTIVE:'#dafbe1;color:#1a7f37',DEPRECATED:'#ffebe9;color:#cf222e'};
-            rulesBody.innerHTML = rules.map((r,idx) => {
-                const ac = actionColors[r.action] || '#656d76';
-                const sc = statusColors[r.status] || statusColors.DISCOVERED;
-                const canActivate = r.status === 'DISCOVERED';
-                const canDeprecate = r.status === 'ACTIVE';
-                let btns = '';
-                if (canActivate) btns += `<button onclick="ruleTransition(${idx},'ACTIVE')" style="background:#1a7f37;color:#fff;border:none;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:0.8em">激活</button>`;
-                if (canDeprecate) btns += `<button onclick="ruleTransition(${idx},'DEPRECATED')" style="background:#cf222e;color:#fff;border:none;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:0.8em">停用</button>`;
-                if (r.status === 'DEPRECATED') btns = '<span style="color:#656d76;font-size:0.8em">已停用</span>';
-                return `<tr>
-                    <td style="font-family:monospace;font-size:0.85em">${r.rule_id}</td>
-                    <td>${r.trigger_condition}</td>
-                    <td style="color:${ac};font-weight:700">${r.action}</td>
-                    <td>${(r.confidence*100).toFixed(0)}%</td>
-                    <td>${r.sample_count}</td>
-                    <td><span class="badge" style="background:${sc}">${r.status}</span></td>
-                    <td>${btns}</td>
-                </tr>`;
-            }).join('');
-        } else {
-            rulesBody.innerHTML = '<tr><td colspan="7" style="color:#656d76">无规则(需1w范围数据)</td></tr>';
-        }
-    }
-
-    // ── 拦截验证 Tab ──
-    const bv2 = DATA.block_validation || {};
-    const bvDecisive = (bv2.correct||0) + (bv2.incorrect||0);
-    const bvAccPct = bvDecisive > 0 ? ((bv2.correct||0)/bvDecisive*100).toFixed(1) : '-';
-    const bvAccColor = bvDecisive > 0 ? ((bv2.correct||0)/bvDecisive >= 0.6 ? 'green' : (bv2.correct||0)/bvDecisive >= 0.45 ? 'yellow' : 'red') : 'blue';
-    const bvCovPct = bv2.total_blocked > 0 ? ((bv2.validated||0)/bv2.total_blocked*100).toFixed(1) : '0';
-    $('blockval-summary').innerHTML = `
-        <div class="card"><div class="label">总拦截</div><div class="value blue">${bv2.total_blocked||0}</div><div class="sub">${DATA.hours}h window</div></div>
-        <div class="card"><div class="label">已验证</div><div class="value blue">${bv2.validated||0}</div><div class="sub">覆盖率 ${bvCovPct}%</div></div>
-        <div class="card"><div class="label">拦截正确</div><div class="value green">${bv2.correct||0}</div></div>
-        <div class="card"><div class="label">拦截错误</div><div class="value red">${bv2.incorrect||0}</div></div>
-        <div class="card"><div class="label">正确率</div><div class="value ${bvAccColor}">${bvAccPct}%</div><div class="sub">${bvDecisive} decisive</div></div>
-    `;
-    // 验证覆盖率说明
-    if (bv2.total_blocked > 0 && bv2.validated < bv2.total_blocked * 0.1) {
-        $('blockval-summary').innerHTML += `
-        <div style="background:#fff8c5;border:1px solid #d4a72c;border-radius:8px;padding:8px 14px;font-size:0.82em;color:#9a6700;width:100%;margin-top:4px">
-            验证覆盖率较低(${bvCovPct}%): 拦截验证需要同品种4H内有后续交易记录作为价格参照。被拦截但之后没有交易的信号无法验证。随交易量增加覆盖率会提升。
-        </div>`;
-    }
-    // By reason
-    const brReason = bv2.by_reason || {};
-    const brReasonEntries = Object.entries(brReason).sort((a,b)=>(b[1].total||0)-(a[1].total||0));
-    const brReasonBody = $('blockval-reason-body');
-    if (brReasonEntries.length) {
-        brReasonBody.innerHTML = brReasonEntries.map(([reason, d]) => {
-            const acc = (d.accuracy*100).toFixed(1);
-            const accC = d.accuracy>=0.6?'#1a7f37':d.accuracy>=0.45?'#9a6700':'#cf222e';
-            return `<tr><td><strong>${reason}</strong></td><td>${d.total}</td><td style="color:#1a7f37">${d.correct}</td><td style="color:${accC};font-weight:600">${acc}%</td></tr>`;
-        }).join('');
-    } else {
-        brReasonBody.innerHTML = '<tr><td colspan="4" style="color:#656d76">无已验证拦截</td></tr>';
-    }
-    // By source
-    const brSource = bv2.by_source || {};
-    const brSourceEntries = Object.entries(brSource).sort((a,b)=>(b[1].total||0)-(a[1].total||0));
-    const brSourceBody = $('blockval-source-body');
-    if (brSourceEntries.length) {
-        brSourceBody.innerHTML = brSourceEntries.map(([src, d]) => {
-            const acc = (d.accuracy*100).toFixed(1);
-            const accC = d.accuracy>=0.6?'#1a7f37':d.accuracy>=0.45?'#9a6700':'#cf222e';
-            return `<tr><td><strong>${src}</strong></td><td>${d.total}</td><td style="color:#1a7f37">${d.correct}</td><td style="color:${accC};font-weight:600">${acc}%</td></tr>`;
-        }).join('');
-    } else {
-        brSourceBody.innerHTML = '<tr><td colspan="4" style="color:#656d76">无已验证拦截</td></tr>';
     }
 
     // ── GCC-0202: 系统进化 Score Bar + Tab ──
@@ -2168,121 +1085,43 @@ function loadGccTm() {
     }).then(d => {
         const decisions = d.decisions || [];
         const knn = d.knn_entries || [];
-        const pipelineTasks = d.pipeline_tasks || [];
-
-        // 分离美股 vs 加密决策（同时支持 gcc_trading_decisions 和 process() 两种数据源）
-        const usDec = decisions.filter(x => US_EXECUTE.has(x.symbol));
-        const cryptoDec = decisions.filter(x => CRYPTO_SYMS.has(x.symbol));
-        const cryptoExecDec = cryptoDec.filter(x => String(x.phase || '').toLowerCase() === 'execute');
-        const cryptoExecKeys = new Set(cryptoExecDec.map(d => `${d.symbol}|${d.ts}`));
-        const cryptoObsDec = cryptoDec.filter(x => String(x.phase || '').toLowerCase() !== 'execute')
-            .filter(d => !cryptoExecKeys.has(`${d.symbol}|${d.ts}`));
-        const otherDec = decisions.filter(x => !US_EXECUTE.has(x.symbol) && !CRYPTO_SYMS.has(x.symbol));
-
-        const summarizeSymbols = (poolSet, decs) => {
-            const pool = [...poolSet];
-            const hit = [...new Set(decs.map(d => d.symbol).filter(Boolean))];
-            const exec = [...new Set(decs.filter(d => String(d.phase || '').toLowerCase() === 'execute').map(d => d.symbol).filter(Boolean))];
-            const observe = [...new Set(decs.filter(d => String(d.phase || '').toLowerCase() !== 'execute').map(d => d.symbol).filter(Boolean))];
-            return { pool, hit, exec, observe };
-        };
-
-        // 美股执行区域
-        const usBuys = usDec.filter(x => (x.gcc_action||x.final_action) === 'BUY').length;
-        const usSells = usDec.filter(x => (x.gcc_action||x.final_action) === 'SELL').length;
-        const usMeta = summarizeSymbols(US_EXECUTE, usDec);
-        const usBody = $('gcctm-us-body');
-        if (!usDec.length) {
-            usBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">暂无美股执行数据 (等待4H K线结束)</td></tr>';
-        } else {
-            usBody.innerHTML = usDec.map(renderDecisionRow).join('');
-        }
-
-        // crypto execute area
-        const cryptoExecBody = $('gcctm-crypto-exec-body');
-        if (!cryptoExecDec.length) {
-            cryptoExecBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">No crypto execute data</td></tr>';
-        } else {
-            cryptoExecBody.innerHTML = cryptoExecDec.map(renderDecisionRow).join('');
-        }
-
-        // crypto observe area
-        const crBuys = cryptoDec.filter(x => (x.gcc_action||x.final_action) === 'BUY').length;
-        const crSells = cryptoDec.filter(x => (x.gcc_action||x.final_action) === 'SELL').length;
-        const cryptoMeta = summarizeSymbols(CRYPTO_SYMS, cryptoDec);
-        const cryptoBody = $('gcctm-crypto-body');
-        if (!cryptoObsDec.length) {
-            cryptoBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">No crypto observe data</td></tr>';
-        } else {
-            cryptoBody.innerHTML = cryptoObsDec.map(renderDecisionRow).join('');
-        }
-
-        // ── 最终决策摘要 ──────────────────────────────────
-        const buildSummary = (decs, poolSet) => {
-            // 每品种取最新一条有gcc_action的决策作为最终结论
-            const latest = {};
-            decs.forEach(d => {
-                const sym = d.symbol;
-                if (!sym) return;
-                const action = d.gcc_action || d.final_action || '';
-                if (!action || action === '-') return;
-                const ts = d.ts || '';
-                if (!latest[sym] || ts > latest[sym].ts) {
-                    latest[sym] = {
-                        symbol: sym,
-                        action: action,
-                        gcc: d.gcc_action || d.final_action || '-',
-                        consensus: d.consensus != null ? `${d.consensus}/3` : '-',
-                        ts: ts
-                    };
-                }
-            });
-            // 补上池中没出现信号的品种为HOLD
-            [...poolSet].forEach(sym => {
-                if (!latest[sym]) {
-                    latest[sym] = { symbol: sym, action: 'HOLD', gcc: '-', consensus: '-', ts: '-' };
-                }
-            });
-            return Object.values(latest).sort((a, b) => a.symbol.localeCompare(b.symbol));
-        };
-        const renderSummaryRow = (item) => {
-            const a = item.action;
-            const color = a === 'BUY' ? '#3fb950' : a === 'SELL' ? '#f85149' : '#656d76';
-            const bg = a === 'BUY' ? '#f0fff4' : a === 'SELL' ? '#fff5f5' : 'transparent';
-            const ts = formatGccTmTimestamp(item.ts || '');
-            return `<tr style="background:${bg}">
-                <td style="font-weight:600">${item.symbol}</td>
-                <td style="color:${color};font-weight:700;font-size:1.1em">${a}</td>
-                <td>${item.gcc}</td>
-                <td>${item.consensus}</td>
-                <td style="font-size:0.85em;color:#656d76">${ts}</td>
-            </tr>`;
-        };
-        const usSummaryBody = $('summary-us-body');
-        const cryptoSummaryBody = $('summary-crypto-body');
-        if (usSummaryBody) {
-            const usSummary = buildSummary(usDec, US_EXECUTE);
-            usSummaryBody.innerHTML = usSummary.length ? usSummary.map(renderSummaryRow).join('') :
-                '<tr><td colspan="5" style="color:#656d76;text-align:center">暂无数据</td></tr>';
-        }
-        if (cryptoSummaryBody) {
-            const cryptoSummary = buildSummary(cryptoDec, CRYPTO_SYMS);
-            cryptoSummaryBody.innerHTML = cryptoSummary.length ? cryptoSummary.map(renderSummaryRow).join('') :
-                '<tr><td colspan="5" style="color:#656d76;text-align:center">暂无数据</td></tr>';
-        }
-
-        // Summary
-        summary.textContent = `共 ${decisions.length} 条决策 | 美股执行:${usDec.length} | 加密观察:${cryptoDec.length} | 其他:${otherDec.length} | KNN:${knn.length} | 任务:${pipelineTasks.length}`;
-
-        // ── Vision门控 & K线实时状态 ──
         const candleStates = d.candle_states || {};
-        const csEl = $('gcctm-candle-states');
-        const csSymbols = Object.keys(candleStates).sort();
-        if (!csSymbols.length) {
-            csEl.innerHTML = '<div style="color:#656d76;font-size:0.85em;padding:12px">暂无K线状态数据 (等待GCC-TM启动)</div>';
+        const candleSummaries = d.candle_summaries || {};
+        const roundDecs = d.round_decisions || [];
+        const accuracy = d.accuracy || {};
+        const simTrades = d.sim_trades || [];
+
+        // ══════════════════════════════════════════════════════════
+        // GCC-TM Tab: Pipeline View (品种面板 + 8轮时间线)
+        // ══════════════════════════════════════════════════════════
+
+        // 总览卡片
+        const allSyms = new Set([...Object.keys(candleStates), ...Object.keys(candleSummaries)]);
+        const tradedSyms = Object.values(candleStates).filter(cs => cs.traded).length;
+        const holdSyms = Object.values(candleStates).filter(cs => cs.effective_direction === 'HOLD').length;
+        const totalRounds = Object.values(candleStates).reduce((s, cs) => s + (cs.current_round || 0), 0);
+        const simWins = simTrades.filter(t => t.outcome === true).length;
+        const simLosses = simTrades.filter(t => t.outcome === false).length;
+        const simDecided = simWins + simLosses;
+        const simWinRate = simDecided > 0 ? (simWins / simDecided * 100).toFixed(1) : '-';
+        const simPnl = simTrades.reduce((s, t) => s + (t.pnl_pct || 0), 0);
+        $('gcctm-overview-cards').innerHTML = `
+            <div class="card"><div class="label">活跃品种</div><div class="value blue">${allSyms.size}</div></div>
+            <div class="card"><div class="label">已交易</div><div class="value green">${tradedSyms}</div></div>
+            <div class="card"><div class="label">HOLD中</div><div class="value yellow">${holdSyms}</div></div>
+            <div class="card"><div class="label">本K线轮次</div><div class="value blue">${totalRounds}</div></div>
+            <div class="card"><div class="label">模拟胜率</div><div class="value ${Number(simWinRate)>=50?'green':'red'}">${simWinRate}%</div><div class="sub">${simWins}W/${simLosses}L</div></div>
+            <div class="card"><div class="label">累计P&L</div><div class="value ${simPnl>=0?'green':'red'}">${simPnl>=0?'+':''}${simPnl.toFixed(2)}%</div></div>
+        `;
+
+        // ── 品种面板: 每品种展开卡片 ──
+        const panelSymbols = [...allSyms].sort();
+        const panelsEl = $('gcctm-symbol-panels');
+        if (!panelSymbols.length) {
+            panelsEl.innerHTML = '<div style="color:#656d76;padding:16px">暂无品种数据 (等待GCC-TM启动)</div>';
         } else {
-            csEl.innerHTML = csSymbols.map(sym => {
-                const cs = candleStates[sym];
+            panelsEl.innerHTML = panelSymbols.map(sym => {
+                const cs = candleStates[sym] || {};
                 const dir = cs.effective_direction || 'HOLD';
                 const vDir = cs.vision_direction || '-';
                 const vConf = cs.vision_confidence != null ? (cs.vision_confidence * 100).toFixed(0) + '%' : '-';
@@ -2292,69 +1131,118 @@ function loadGccTm() {
                 const tradeRound = cs.trade_round >= 0 ? cs.trade_round : '-';
                 const dirColor = dir === 'BUY' ? '#1a7f37' : dir === 'SELL' ? '#cf222e' : '#9a6700';
                 const dirBg = dir === 'BUY' ? '#dafbe1' : dir === 'SELL' ? '#ffebe9' : '#fff8c5';
-                const tradedBadge = traded
-                    ? '<span style="background:#dafbe1;color:#1a7f37;padding:1px 6px;border-radius:8px;font-size:0.75em;font-weight:600">已交易 R' + tradeRound + '</span>'
-                    : '<span style="background:#fff8c5;color:#9a6700;padding:1px 6px;border-radius:8px;font-size:0.75em;font-weight:600">等待信号</span>';
-                // 轮次进度条
-                const pctDone = (round / 8 * 100).toFixed(0);
+                const isConflict = vDir !== '-' && prevSum !== '-' && vDir !== prevSum;
+
+                // Stage 1: Vision门控
+                const stageVision = `
+                    <div style="background:#f6f8fa;border-radius:6px;padding:8px 10px;margin-bottom:8px">
+                        <div style="font-size:0.78em;font-weight:700;color:#0969da;margin-bottom:4px">Stage 1: Vision门控</div>
+                        <div style="display:flex;gap:16px;font-size:0.85em">
+                            <span>Vision方向: <b style="color:${vDir==='BUY'?'#1a7f37':vDir==='SELL'?'#cf222e':'#656d76'}">${vDir}</b> (${vConf})</span>
+                            <span>上K汇总: <b>${prevSum}</b></span>
+                            <span>结论: <b style="color:${isConflict?'#cf222e':'#1a7f37'}">${isConflict ? '矛盾→HOLD' : dir}</b></span>
+                        </div>
+                    </div>`;
+
+                // Stage 2+3: 8轮时间线
                 const rounds = cs.round_decisions || [];
-                const roundDots = Array.from({length:8}, (_,i) => {
-                    const r = rounds[i];
-                    if (!r) return '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#eaeef2;margin:1px" title="R'+i+' 未执行"></span>';
-                    const rc = r.action === 'BUY' ? '#1a7f37' : r.action === 'SELL' ? '#cf222e' : '#d0d7de';
-                    const border = r.executed ? '2px solid #0969da' : 'none';
-                    return '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:'+rc+';border:'+border+';margin:1px" title="R'+i+' '+r.action+' '+r.verdict+'"></span>';
-                }).join('');
-                return `<div style="background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:12px;border-left:4px solid ${dirColor}">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                        <span style="font-weight:700;font-size:1em">${sym}</span>
-                        <span style="background:${dirBg};color:${dirColor};padding:2px 10px;border-radius:12px;font-weight:700;font-size:0.9em">${dir}</span>
+                let roundsHTML = '';
+                if (rounds.length === 0) {
+                    roundsHTML = '<div style="color:#656d76;font-size:0.82em;padding:6px 0">暂无轮次数据</div>';
+                } else {
+                    roundsHTML = '<table style="margin:0;font-size:0.82em"><thead><tr>' +
+                        '<th style="width:40px">轮次</th><th>时间</th><th>买信号</th><th>卖信号</th><th>裁决</th><th>原因</th><th>价格</th><th>状态</th>' +
+                        '</tr></thead><tbody>';
+                    for (let i = 0; i < 8; i++) {
+                        const r = rounds[i];
+                        if (!r) {
+                            roundsHTML += `<tr style="opacity:0.4"><td>R${i}</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td style="color:#afb8c1">未到</td></tr>`;
+                            continue;
+                        }
+                        const ts = (r.ts || '').slice(11, 16);
+                        const actColor = r.action === 'BUY' ? '#1a7f37' : r.action === 'SELL' ? '#cf222e' : '#656d76';
+                        const buyBg = r.buy_votes > 0 ? 'background:#dafbe1' : '';
+                        const sellBg = r.sell_votes > 0 ? 'background:#ffebe9' : '';
+                        const verdictShort = (r.verdict || '').replace('DIRECTION_','').replace('ALREADY_','');
+                        const verdictColor = r.executed ? '#0969da' : r.verdict === 'DIRECTION_HOLD' ? '#9a6700' : r.verdict === 'ALREADY_TRADED' ? '#656d76' : '#1f2328';
+                        const execBadge = r.executed
+                            ? '<span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:8px;font-size:0.85em;font-weight:600">已执行</span>'
+                            : '';
+                        const price = r.price ? '$' + Number(r.price).toFixed(2) : '-';
+                        roundsHTML += `<tr${r.executed?' style="background:#ddf4ff"':''}>
+                            <td style="font-weight:700">R${i}</td>
+                            <td style="color:#656d76">${ts}</td>
+                            <td style="${buyBg};font-weight:${r.buy_votes>0?'700':'400'};color:#1a7f37">${r.buy_votes || 0}</td>
+                            <td style="${sellBg};font-weight:${r.sell_votes>0?'700':'400'};color:#cf222e">${r.sell_votes || 0}</td>
+                            <td style="color:${actColor};font-weight:600">${r.action || 'HOLD'}</td>
+                            <td style="color:${verdictColor};font-size:0.9em">${verdictShort}</td>
+                            <td>${price}</td>
+                            <td>${execBadge}</td>
+                        </tr>`;
+                    }
+                    roundsHTML += '</tbody></table>';
+                }
+
+                // 进度条
+                const pctDone = (round / 8 * 100).toFixed(0);
+                const tradedLabel = traded
+                    ? `<span style="background:#dafbe1;color:#1a7f37;padding:2px 8px;border-radius:10px;font-size:0.78em;font-weight:600">已交易 R${tradeRound}</span>`
+                    : `<span style="background:#fff8c5;color:#9a6700;padding:2px 8px;border-radius:10px;font-size:0.78em;font-weight:600">等待信号</span>`;
+
+                // 准确率 (如果有)
+                const acc = accuracy[sym];
+                const accHTML = acc ? `<span style="font-size:0.78em;color:#656d76;margin-left:auto">一致率: ${(acc.rate*100).toFixed(0)}% (${acc.total}次)</span>` : '';
+
+                return `<div style="background:#fff;border:1px solid #d0d7de;border-radius:10px;padding:14px;margin-bottom:12px;border-left:5px solid ${dirColor}">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                        <span style="font-weight:700;font-size:1.15em">${sym}</span>
+                        <span style="background:${dirBg};color:${dirColor};padding:2px 12px;border-radius:12px;font-weight:700">${dir}</span>
+                        ${tradedLabel}
+                        <span style="font-size:0.82em;color:#656d76">轮次 ${round}/8</span>
+                        ${accHTML}
                     </div>
-                    <div style="font-size:0.82em;color:#656d76;margin-bottom:6px">
-                        Vision: <b style="color:${vDir==='BUY'?'#1a7f37':vDir==='SELL'?'#cf222e':'#656d76'}">${vDir}</b> ${vConf}
-                        | 上K汇总: <b>${prevSum}</b>
-                        | ${vDir !== prevSum && vDir !== '-' && prevSum !== '-' ? '<span style="color:#cf222e">矛盾→HOLD</span>' : '<span style="color:#1a7f37">一致</span>'}
-                    </div>
-                    <div style="margin-bottom:6px">${roundDots}</div>
-                    <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.78em;color:#656d76">
-                        <span>轮次 ${round}/8 (${pctDone}%)</span>
-                        ${tradedBadge}
-                    </div>
-                    <div style="background:#eaeef2;border-radius:4px;height:4px;margin-top:6px;overflow:hidden">
-                        <div style="background:${dirColor};height:100%;width:${pctDone}%;border-radius:4px"></div>
+                    ${stageVision}
+                    <div style="font-size:0.78em;font-weight:700;color:#0969da;margin-bottom:4px">Stage 2-3: 30分钟轮次 (信号→裁决)</div>
+                    ${roundsHTML}
+                    <div style="background:#eaeef2;border-radius:4px;height:5px;margin-top:8px;overflow:hidden">
+                        <div style="background:${dirColor};height:100%;width:${pctDone}%;border-radius:4px;transition:width 0.3s"></div>
                     </div>
                 </div>`;
             }).join('');
         }
 
-        // ── GCC-TM 准确率对比 ──
-        const accuracy = d.accuracy || {};
-        const accBody = $('gcctm-accuracy-body');
-        const accSymbols = Object.keys(accuracy).filter(s => !s.endsWith('USD') || accuracy[s].total > 5).sort((a,b) => (accuracy[b].total||0) - (accuracy[a].total||0));
-        if (!accSymbols.length) {
-            accBody.innerHTML = '<tr><td colspan="7" style="color:#656d76;text-align:center">暂无准确率数据</td></tr>';
+        // ── 上一K线汇总 ──
+        const sumBody = $('gcctm-summary-body');
+        const sumSyms = Object.keys(candleSummaries).sort();
+        if (!sumSyms.length) {
+            sumBody.innerHTML = '<tr><td colspan="10" style="color:#656d76;text-align:center">暂无K线汇总 (等待首根K线完成)</td></tr>';
         } else {
-            accBody.innerHTML = accSymbols.map(sym => {
-                const a = accuracy[sym];
-                const rate = a.rate != null ? (a.rate * 100).toFixed(1) + '%' : '-';
-                const divRate = a.divergence_rate != null ? (a.divergence_rate * 100).toFixed(1) + '%' : '-';
-                const rateColor = (a.rate||0) >= 0.6 ? '#1a7f37' : (a.rate||0) >= 0.3 ? '#9a6700' : '#cf222e';
-                const gccColor = (a.last_gcc||'-') === 'BUY' ? '#1a7f37' : (a.last_gcc||'-') === 'SELL' ? '#cf222e' : '#656d76';
-                const takeover = a.takeover_ready ? '<span class="badge badge-ok">READY</span>' : '<span class="badge" style="background:#eaeef2;color:#656d76">NO</span>';
+            sumBody.innerHTML = sumSyms.map(sym => {
+                const s = candleSummaries[sym];
+                const dir = s.direction || 'HOLD';
+                const conf = s.confidence != null ? (s.confidence * 100).toFixed(1) + '%' : '-';
+                const dirColor = dir === 'BUY' ? '#1a7f37' : dir === 'SELL' ? '#cf222e' : '#9a6700';
+                const volBoost = s.volume_boost != null ? (s.volume_boost >= 0 ? '+' : '') + s.volume_boost.toFixed(1) : '-';
+                const ts = s.ts || '-';
                 return `<tr>
                     <td style="font-weight:600">${sym}</td>
-                    <td>${a.total||0}</td>
-                    <td style="color:${rateColor};font-weight:600">${rate}</td>
-                    <td>${divRate}</td>
-                    <td style="color:${gccColor};font-weight:600">${a.last_gcc||'-'}</td>
-                    <td>${a.last_main||'-'}</td>
-                    <td>${takeover}</td>
+                    <td style="color:${dirColor};font-weight:700">${dir}</td>
+                    <td>${conf}</td>
+                    <td style="color:#1a7f37">${s.buy_rounds || 0}</td>
+                    <td style="color:#cf222e">${s.sell_rounds || 0}</td>
+                    <td>${s.hold_rounds || 0}</td>
+                    <td>${s.total_rounds || 0}</td>
+                    <td>${s.traded ? '<span style="color:#1a7f37;font-weight:600">YES R' + (s.trade_round >= 0 ? s.trade_round : '-') + '</span>' : 'NO'}</td>
+                    <td>${volBoost}</td>
+                    <td style="font-size:0.82em;color:#656d76">${ts}</td>
                 </tr>`;
             }).join('');
         }
 
+        // Summary bar
+        summary.textContent = `共 ${decisions.length} 条决策 | 活跃品种:${allSyms.size} | 已交易:${tradedSyms} | 模拟:${simTrades.length}笔 | KNN:${knn.length}`;
+
         // ── 模拟交易 P&L ──
-        const simTrades = d.sim_trades || [];
         const simBody = $('gcctm-sim-body');
         const simSummaryEl = $('gcctm-sim-summary');
         if (!simTrades.length) {
@@ -2430,11 +1318,312 @@ function loadGccTm() {
                 </div>`;
             }).join('');
         }
+
+        // ══════════════════════════════════════════════════════
+        // NEW TABS — all rendered from GCC-TM data
+        // ══════════════════════════════════════════════════════
+
+        const roundDecs2 = d.round_decisions || [];
+        const simTrades2 = d.sim_trades || [];
+        const accuracy2 = d.accuracy || {};
+        const candleStates2 = d.candle_states || {};
+
+        // ── 交易分析 Tab (tab-trades) ──
+        {
+            const el = $('trade-sim-summary');
+            if (!simTrades2.length) {
+                el.innerHTML = '<div class="card"><div class="label">模拟交易</div><div class="value">0</div><div class="sub">暂无数据</div></div>';
+                $('trade-by-symbol-gcctm').innerHTML = '<tr><td colspan="6" style="color:#656d76">暂无模拟交易数据</td></tr>';
+                $('trade-by-action-gcctm').innerHTML = '<tr><td colspan="4" style="color:#656d76">暂无数据</td></tr>';
+                $('trade-recent-gcctm').innerHTML = '<tr><td colspan="8" style="color:#656d76">暂无数据</td></tr>';
+            } else {
+                const wins = simTrades2.filter(t => t.outcome === true).length;
+                const losses = simTrades2.filter(t => t.outcome === false).length;
+                const decided = wins + losses;
+                const totalPnl = simTrades2.reduce((s, t) => s + (t.pnl_pct || 0), 0);
+                const avgPnl = decided > 0 ? totalPnl / decided : 0;
+                const winRate = decided > 0 ? (wins / decided * 100).toFixed(1) : '-';
+                el.innerHTML = `
+                    <div class="card"><div class="label">总交易</div><div class="value blue">${simTrades2.length}</div></div>
+                    <div class="card"><div class="label">胜率</div><div class="value ${Number(winRate)>=50?'green':'red'}">${winRate}%</div><div class="sub">${wins}W / ${losses}L</div></div>
+                    <div class="card"><div class="label">平均P&L</div><div class="value ${avgPnl>=0?'green':'red'}">${avgPnl>=0?'+':''}${avgPnl.toFixed(2)}%</div></div>
+                    <div class="card"><div class="label">累计P&L</div><div class="value ${totalPnl>=0?'green':'red'}">${totalPnl>=0?'+':''}${totalPnl.toFixed(2)}%</div></div>
+                `;
+                // By symbol
+                const bySym = {};
+                simTrades2.forEach(t => {
+                    const s = t.symbol || 'UNKNOWN';
+                    if (!bySym[s]) bySym[s] = {count:0, wins:0, losses:0, pnl:0};
+                    bySym[s].count++;
+                    if (t.outcome === true) bySym[s].wins++;
+                    if (t.outcome === false) bySym[s].losses++;
+                    bySym[s].pnl += t.pnl_pct || 0;
+                });
+                $('trade-by-symbol-gcctm').innerHTML = Object.entries(bySym).sort((a,b)=>b[1].count-a[1].count).map(([sym, v]) => {
+                    const dec2 = v.wins + v.losses;
+                    const wr = dec2 > 0 ? (v.wins/dec2*100).toFixed(1) : '-';
+                    const wrC = dec2 > 0 ? (v.wins/dec2 >= 0.5 ? '#1a7f37' : v.wins/dec2 >= 0.35 ? '#9a6700' : '#cf222e') : '#656d76';
+                    return `<tr><td><strong>${sym}</strong></td><td>${v.count}</td><td style="color:#1a7f37">${v.wins}</td><td style="color:#cf222e">${v.losses}</td><td style="color:${wrC};font-weight:600">${wr}%</td><td style="color:${v.pnl>=0?'#1a7f37':'#cf222e'}">${v.pnl>=0?'+':''}${v.pnl.toFixed(2)}%</td></tr>`;
+                }).join('');
+                // By action
+                const byAct = {};
+                simTrades2.forEach(t => {
+                    const a = t.action || 'UNKNOWN';
+                    if (!byAct[a]) byAct[a] = {count:0, wins:0, pnl:0, decided:0};
+                    byAct[a].count++;
+                    if (t.outcome === true) byAct[a].wins++;
+                    if (t.outcome != null) byAct[a].decided++;
+                    byAct[a].pnl += t.pnl_pct || 0;
+                });
+                $('trade-by-action-gcctm').innerHTML = Object.entries(byAct).map(([act, v]) => {
+                    const wr = v.decided > 0 ? (v.wins/v.decided*100).toFixed(1) : '-';
+                    const avg = v.decided > 0 ? (v.pnl / v.decided).toFixed(2) : '-';
+                    const actC = act === 'BUY' ? '#1a7f37' : act === 'SELL' ? '#cf222e' : '#656d76';
+                    return `<tr><td style="color:${actC};font-weight:600">${act}</td><td>${v.count}</td><td>${wr}%</td><td>${avg}%</td></tr>`;
+                }).join('');
+                // Recent trades (last 30)
+                $('trade-recent-gcctm').innerHTML = simTrades2.slice(0, 30).map(t => {
+                    const ts = formatGccTmTimestamp(t.ts || '');
+                    const actColor = t.action === 'BUY' ? '#1a7f37' : '#cf222e';
+                    const pnl = t.pnl_pct != null ? (t.pnl_pct >= 0 ? '+' : '') + t.pnl_pct.toFixed(2) + '%' : '-';
+                    const pnlColor = (t.pnl_pct||0) >= 0 ? '#1a7f37' : '#cf222e';
+                    const outcome = t.outcome === true ? '<span style="color:#1a7f37;font-weight:600">WIN</span>'
+                        : t.outcome === false ? '<span style="color:#cf222e;font-weight:600">LOSS</span>'
+                        : '<span style="color:#9a6700">待验证</span>';
+                    const entry = t.entry_price != null ? '$' + Number(t.entry_price).toFixed(2) : '-';
+                    const exit = t.exit_price != null ? '$' + Number(t.exit_price).toFixed(2) : '-';
+                    return `<tr>
+                        <td style="font-size:0.85em;color:#656d76">${ts}</td>
+                        <td style="font-weight:600">${t.symbol||'-'}</td>
+                        <td style="color:${actColor};font-weight:600">${t.action||'-'}</td>
+                        <td>${entry}</td><td>${exit}</td>
+                        <td style="color:${pnlColor};font-weight:600">${pnl}</td>
+                        <td>${outcome}</td>
+                        <td>R${t.round != null ? t.round : '-'}</td>
+                    </tr>`;
+                }).join('');
+            }
+        }
+
+        // ── 裁决分析 Tab (tab-verdict) ──
+        {
+            const totalRD = roundDecs2.length;
+            const byVerdict = {};
+            const bySymVerdict = {};
+            let buyCount = 0, sellCount = 0, holdCount = 0, execCount = 0;
+            roundDecs2.forEach(rd => {
+                const v = rd.verdict || 'UNKNOWN';
+                const s = rd.symbol || 'UNKNOWN';
+                const ga = rd.gcc_action || 'HOLD';
+                if (ga === 'BUY') buyCount++;
+                else if (ga === 'SELL') sellCount++;
+                else holdCount++;
+                if (rd.executed) execCount++;
+                if (!byVerdict[v]) byVerdict[v] = {count:0, symbols:{}};
+                byVerdict[v].count++;
+                byVerdict[v].symbols[s] = (byVerdict[v].symbols[s]||0) + 1;
+                if (!bySymVerdict[s]) bySymVerdict[s] = {};
+                bySymVerdict[s][v] = (bySymVerdict[s][v]||0) + 1;
+            });
+            $('verdict-summary').innerHTML = `
+                <div class="card"><div class="label">总决策</div><div class="value blue">${totalRD}</div></div>
+                <div class="card"><div class="label">BUY</div><div class="value green">${buyCount}</div></div>
+                <div class="card"><div class="label">SELL</div><div class="value red">${sellCount}</div></div>
+                <div class="card"><div class="label">HOLD</div><div class="value yellow">${holdCount}</div></div>
+                <div class="card"><div class="label">已执行</div><div class="value blue">${execCount}</div></div>
+            `;
+            const verdictEntries = Object.entries(byVerdict).sort((a,b)=>b[1].count-a[1].count);
+            $('verdict-breakdown-body').innerHTML = verdictEntries.length ? verdictEntries.map(([v, info]) => {
+                const pct = totalRD > 0 ? (info.count/totalRD*100).toFixed(1)+'%' : '-';
+                const top = Object.entries(info.symbols).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([s,c])=>`${s}(${c})`).join(' ');
+                return `<tr><td><strong>${v}</strong></td><td>${info.count}</td><td>${pct}</td><td style="font-size:0.82em;color:#656d76">${top}</td></tr>`;
+            }).join('') : '<tr><td colspan="4" style="color:#656d76">暂无数据</td></tr>';
+            // Heatmap
+            const allVerdicts = [...new Set(Object.values(bySymVerdict).flatMap(v => Object.keys(v)))].sort();
+            const allSyms = Object.keys(bySymVerdict).sort();
+            if (allSyms.length && allVerdicts.length) {
+                let hm = '<table><thead><tr><th>品种</th>';
+                allVerdicts.forEach(v => hm += `<th style="font-size:0.75em">${v.replace('DIRECTION_','D_')}</th>`);
+                hm += '<th>合计</th></tr></thead><tbody>';
+                const maxCell = Math.max(...allSyms.map(s => Object.values(bySymVerdict[s]).reduce((a,b)=>a+b,0)), 1);
+                allSyms.forEach(s => {
+                    let rowTotal = 0;
+                    hm += `<tr><td><strong>${s}</strong></td>`;
+                    allVerdicts.forEach(v => {
+                        const cnt = (bySymVerdict[s]||{})[v] || 0;
+                        rowTotal += cnt;
+                        const bg = cnt > 0 ? `rgba(9,105,218,${cnt/maxCell*0.5+0.1})` : 'transparent';
+                        hm += `<td style="text-align:center;background:${bg};font-weight:${cnt>0?'600':'400'}">${cnt||'-'}</td>`;
+                    });
+                    hm += `<td style="font-weight:700">${rowTotal}</td></tr>`;
+                });
+                hm += '</tbody></table>';
+                $('verdict-heatmap').innerHTML = hm;
+            } else {
+                $('verdict-heatmap').innerHTML = '<div style="color:#656d76;padding:10px">暂无数据</div>';
+            }
+        }
+
+        // ── Vision门控 Tab (tab-vgate) ──
+        {
+            let totalVG = 0, holdDirCount = 0, conflictCount = 0;
+            const perSym = {};
+            // From round_decisions
+            roundDecs2.forEach(rd => {
+                totalVG++;
+                const vg = rd.vision_gate || {};
+                const s = rd.symbol || 'UNKNOWN';
+                const vDir = vg.vision_direction || rd.vision_direction || '-';
+                const eDir = vg.effective_direction || '-';
+                const pSum = vg.prev_summary || '-';
+                if (eDir === 'HOLD') holdDirCount++;
+                if (vDir !== '-' && pSum !== '-' && vDir !== pSum) conflictCount++;
+                if (!perSym[s]) perSym[s] = {vDir:'-', eDir:'-', pSum:'-', conflict:false, holdRounds:0, count:0};
+                // Use latest values
+                perSym[s].vDir = vDir;
+                perSym[s].eDir = eDir;
+                perSym[s].pSum = pSum;
+                perSym[s].count++;
+                if (vDir !== '-' && pSum !== '-' && vDir !== pSum) perSym[s].conflict = true;
+                if (rd.verdict === 'DIRECTION_HOLD') perSym[s].holdRounds++;
+            });
+            // Supplement from candle_states
+            Object.entries(candleStates2).forEach(([sym, cs]) => {
+                if (!perSym[sym]) perSym[sym] = {vDir:'-', eDir:'-', pSum:'-', conflict:false, holdRounds:0, count:0};
+                perSym[sym].vDir = cs.vision_direction || perSym[sym].vDir;
+                perSym[sym].eDir = cs.effective_direction || perSym[sym].eDir;
+                perSym[sym].pSum = cs.prev_summary || perSym[sym].pSum;
+                if (perSym[sym].vDir !== '-' && perSym[sym].pSum !== '-' && perSym[sym].vDir !== perSym[sym].pSum) perSym[sym].conflict = true;
+            });
+            const holdPct = totalVG > 0 ? (holdDirCount/totalVG*100).toFixed(1) : '0';
+            $('vgate-summary').innerHTML = `
+                <div class="card"><div class="label">总门控决策</div><div class="value blue">${totalVG}</div></div>
+                <div class="card"><div class="label">HOLD率</div><div class="value ${Number(holdPct)>50?'yellow':'green'}">${holdPct}%</div><div class="sub">${holdDirCount} HOLD</div></div>
+                <div class="card"><div class="label">矛盾数</div><div class="value ${conflictCount>0?'red':'green'}">${conflictCount}</div><div class="sub">Vision != 上K汇总</div></div>
+            `;
+            const symEntries = Object.entries(perSym).sort((a,b) => b[1].count - a[1].count);
+            $('vgate-symbol-body').innerHTML = symEntries.length ? symEntries.map(([sym, v]) => {
+                const vC = v.vDir === 'BUY' ? '#1a7f37' : v.vDir === 'SELL' ? '#cf222e' : '#656d76';
+                const eC = v.eDir === 'BUY' ? '#1a7f37' : v.eDir === 'SELL' ? '#cf222e' : '#9a6700';
+                const conflictBadge = v.conflict ? '<span class="badge badge-error">矛盾</span>' : '<span class="badge badge-ok">一致</span>';
+                return `<tr>
+                    <td><strong>${sym}</strong></td>
+                    <td style="color:${vC};font-weight:600">${v.vDir}</td>
+                    <td style="color:${eC};font-weight:600">${v.eDir}</td>
+                    <td>${v.pSum}</td>
+                    <td>${conflictBadge}</td>
+                    <td>${v.holdRounds}</td>
+                </tr>`;
+            }).join('') : '<tr><td colspan="6" style="color:#656d76">暂无数据</td></tr>';
+            // Direction distribution
+            const dirDist = {BUY:0, SELL:0, HOLD:0};
+            roundDecs2.forEach(rd => {
+                const vg = rd.vision_gate || {};
+                const vDir = vg.vision_direction || rd.vision_direction || 'HOLD';
+                if (vDir === 'BUY') dirDist.BUY++;
+                else if (vDir === 'SELL') dirDist.SELL++;
+                else dirDist.HOLD++;
+            });
+            const dirTotal = dirDist.BUY + dirDist.SELL + dirDist.HOLD;
+            const maxDir = Math.max(dirDist.BUY, dirDist.SELL, dirDist.HOLD, 1);
+            $('vgate-direction-dist').innerHTML = `
+                <div style="margin:4px 0;font-size:0.85em">BUY: ${barHTML(dirDist.BUY,maxDir,'green',200)} <strong>${dirDist.BUY}</strong> (${dirTotal>0?(dirDist.BUY/dirTotal*100).toFixed(0):0}%)</div>
+                <div style="margin:4px 0;font-size:0.85em">SELL: ${barHTML(dirDist.SELL,maxDir,'red',200)} <strong>${dirDist.SELL}</strong> (${dirTotal>0?(dirDist.SELL/dirTotal*100).toFixed(0):0}%)</div>
+                <div style="margin:4px 0;font-size:0.85em">HOLD: ${barHTML(dirDist.HOLD,maxDir,'yellow',200)} <strong>${dirDist.HOLD}</strong> (${dirTotal>0?(dirDist.HOLD/dirTotal*100).toFixed(0):0}%)</div>
+            `;
+        }
+
+        // ── 信号池 Tab (tab-sigpool) ──
+        {
+            let totalSig = 0, totalBuy = 0, totalSell = 0;
+            const perSym = {};
+            let zeroSigRounds = 0, nonZeroRounds = 0;
+            roundDecs2.forEach(rd => {
+                const s = rd.symbol || 'UNKNOWN';
+                const bs = rd.buy_signals || 0;
+                const ss = rd.sell_signals || 0;
+                const sc = rd.signals_count || (bs + ss);
+                totalSig += sc;
+                totalBuy += bs;
+                totalSell += ss;
+                if (!perSym[s]) perSym[s] = {rounds:0, buySum:0, sellSum:0, sigSum:0};
+                perSym[s].rounds++;
+                perSym[s].buySum += bs;
+                perSym[s].sellSum += ss;
+                perSym[s].sigSum += sc;
+                if (sc === 0) zeroSigRounds++;
+                else nonZeroRounds++;
+            });
+            const totalRounds = roundDecs2.length;
+            const avgBuy = totalRounds > 0 ? (totalBuy / totalRounds).toFixed(2) : '0';
+            const avgSell = totalRounds > 0 ? (totalSell / totalRounds).toFixed(2) : '0';
+            $('sigpool-summary').innerHTML = `
+                <div class="card"><div class="label">总信号</div><div class="value blue">${totalSig}</div></div>
+                <div class="card"><div class="label">总轮次</div><div class="value blue">${totalRounds}</div></div>
+                <div class="card"><div class="label">平均买票/轮</div><div class="value green">${avgBuy}</div></div>
+                <div class="card"><div class="label">平均卖票/轮</div><div class="value red">${avgSell}</div></div>
+            `;
+            const symEntries = Object.entries(perSym).sort((a,b) => b[1].sigSum - a[1].sigSum);
+            $('sigpool-symbol-body').innerHTML = symEntries.length ? symEntries.map(([sym, v]) => {
+                const ab = v.rounds > 0 ? (v.buySum / v.rounds).toFixed(2) : '0';
+                const as = v.rounds > 0 ? (v.sellSum / v.rounds).toFixed(2) : '0';
+                return `<tr><td><strong>${sym}</strong></td><td>${v.rounds}</td><td>${ab}</td><td>${as}</td><td>${v.sigSum}</td></tr>`;
+            }).join('') : '<tr><td colspan="5" style="color:#656d76">暂无数据</td></tr>';
+            // Density
+            const densityMax = Math.max(zeroSigRounds, nonZeroRounds, 1);
+            $('sigpool-density').innerHTML = `
+                <div style="margin:4px 0;font-size:0.85em">有信号轮次: ${barHTML(nonZeroRounds,densityMax,'blue',200)} <strong>${nonZeroRounds}</strong> (${totalRounds>0?(nonZeroRounds/totalRounds*100).toFixed(0):0}%)</div>
+                <div style="margin:4px 0;font-size:0.85em">无信号轮次: ${barHTML(zeroSigRounds,densityMax,'gray',200)} <strong>${zeroSigRounds}</strong> (${totalRounds>0?(zeroSigRounds/totalRounds*100).toFixed(0):0}%)</div>
+            `;
+        }
+
+        // ── 准确率 Tab (tab-accuracy) ──
+        {
+            const accSymbols = Object.keys(accuracy2).sort((a,b) => (accuracy2[b].total||0) - (accuracy2[a].total||0));
+            let totalDec = 0, totalMatch = 0;
+            let bestSym = '-', bestRate = -1, worstSym = '-', worstRate = 2;
+            accSymbols.forEach(sym => {
+                const a = accuracy2[sym];
+                totalDec += a.total || 0;
+                totalMatch += a.match || 0;
+                const r = a.rate || 0;
+                if ((a.total||0) >= 5 && r > bestRate) { bestRate = r; bestSym = sym; }
+                if ((a.total||0) >= 5 && r < worstRate) { worstRate = r; worstSym = sym; }
+            });
+            const avgRate = totalDec > 0 ? (totalMatch / totalDec * 100).toFixed(1) : '-';
+            $('accuracy-summary').innerHTML = `
+                <div class="card"><div class="label">平均一致率</div><div class="value ${Number(avgRate)>=50?'green':'red'}">${avgRate}%</div><div class="sub">${totalMatch}/${totalDec}</div></div>
+                <div class="card"><div class="label">总决策</div><div class="value blue">${totalDec}</div></div>
+                <div class="card"><div class="label">最佳品种</div><div class="value green">${bestSym}</div><div class="sub">${bestRate>=0?(bestRate*100).toFixed(1)+'%':'-'}</div></div>
+                <div class="card"><div class="label">最差品种</div><div class="value red">${worstSym}</div><div class="sub">${worstRate<=1?(worstRate*100).toFixed(1)+'%':'-'}</div></div>
+            `;
+            $('accuracy-full-body').innerHTML = accSymbols.length ? accSymbols.map(sym => {
+                const a = accuracy2[sym];
+                const rate = a.rate != null ? (a.rate * 100).toFixed(1) + '%' : '-';
+                const divRate = a.divergence_rate != null ? (a.divergence_rate * 100).toFixed(1) + '%' : '-';
+                const rateColor = (a.rate||0) >= 0.6 ? '#1a7f37' : (a.rate||0) >= 0.3 ? '#9a6700' : '#cf222e';
+                const gccColor = (a.last_gcc||'-') === 'BUY' ? '#1a7f37' : (a.last_gcc||'-') === 'SELL' ? '#cf222e' : '#656d76';
+                const takeover = a.takeover_ready ? '<span class="badge badge-ok">READY</span>' : '<span class="badge" style="background:#eaeef2;color:#656d76">NO</span>';
+                return `<tr>
+                    <td style="font-weight:600">${sym}</td>
+                    <td>${a.total||0}</td>
+                    <td>${a.match||0}</td>
+                    <td style="color:${rateColor};font-weight:600">${rate}</td>
+                    <td>${divRate}</td>
+                    <td>${a.divergence_count||0}</td>
+                    <td style="color:${gccColor};font-weight:600">${a.last_gcc||'-'}</td>
+                    <td>${a.last_main||'-'}</td>
+                    <td>${takeover}</td>
+                </tr>`;
+            }).join('') : '<tr><td colspan="9" style="color:#656d76">暂无准确率数据</td></tr>';
+        }
+
     }).catch(err => {
         if (pipeline) {
             pipeline.innerHTML = `<div style="border:1px solid #eaeef2;border-radius:10px;padding:14px;color:#f85149">任务清单加载失败: ${err}</div>`;
         }
-        $('gcctm-dec-body').innerHTML = `<tr><td colspan="10" style="color:#f85149">加载失败: ${err}</td></tr>`;
+        const decBody = $('gcctm-summary-body');
+        if (decBody) decBody.innerHTML = `<tr><td colspan="10" style="color:#f85149">加载失败: ${err}</td></tr>`;
     });
 }
 
