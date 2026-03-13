@@ -20,7 +20,7 @@ PHASE4_TRUTH_TABLE = PaidBoundary(
 )
 
 TRUTH_ACCEPTANCE_SPEC = {
-    "version": "5.400",
+    "version": "5.405",
     "paper": "P003_alphaforgebench",
     "fields": (
         "candidate_id",

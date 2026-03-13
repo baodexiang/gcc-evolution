@@ -1,12 +1,12 @@
 """
-gcc-evo - AI Self-Evolution Engine v5.401
+gcc-evo - AI Self-Evolution Engine v5.405
 
 Open-source framework for LLM agent persistent memory + continuous learning.
 
 License: BUSL 1.1 | Free for personal/academic/<$1M revenue
 Commercial: gcc-evo.dev/licensing
 
-Canonical v5.401 split:
+Canonical v5.405 split:
   UI: free
   L0: free foundation layer
   L1: free foundation layer
@@ -25,7 +25,7 @@ so basic commands such as `gcc-evo version` do not fail during package import.
 
 from importlib import import_module
 
-__version__ = "5.401"
+__version__ = "5.405"
 __author__ = "baodexiang"
 __license__ = "BUSL-1.1"
 

@@ -3,7 +3,7 @@
     "version": "1.1.0",
     "description": "L1 Human 知识点规则配置 - 支持跟踪、验证与回滚",
     "created": "2026-01-01",
-    "last_updated": "2026-03-08",
+    "last_updated": "2026-03-12",
     "v1.1.0_changes": "调整阈值适配30分钟K线周期(原为日线设计)"
   },
   "rules": {
@@ -22,7 +22,7 @@
         "verify_window_bars": 2
       },
       "metrics": {
-        "total_triggers": 201,
+        "total_triggers": 318,
         "correct_predictions": 0,
         "false_positives": 0,
         "false_negatives": 0,
@@ -57,7 +57,7 @@
         "new_high_tolerance": 0.003
       },
       "metrics": {
-        "total_triggers": 233,
+        "total_triggers": 311,
         "correct_predictions": 0,
         "false_positives": 0,
         "false_negatives": 0,
@@ -91,7 +91,7 @@
         "consecutive_count": 2
       },
       "metrics": {
-        "total_triggers": 48,
+        "total_triggers": 52,
         "correct_predictions": 0,
         "false_positives": 0,
         "false_negatives": 0,
@@ -127,7 +127,7 @@
         "stage3_volume_ratio": 1.3
       },
       "metrics": {
-        "total_triggers": 162,
+        "total_triggers": 355,
         "correct_predictions": 0,
         "false_positives": 0,
         "false_negatives": 0,
@@ -163,7 +163,7 @@
         "calculation_bars": 12
       },
       "metrics": {
-        "total_triggers": 124,
+        "total_triggers": 165,
         "correct_predictions": 0,
         "false_positives": 0,
         "false_negatives": 0,

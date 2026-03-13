@@ -1,5 +1,5 @@
 """
-GCC v5.400 — Skeptic Hold-out Framework (IRS-003)
+GCC v5.405 — Skeptic Hold-out Framework (IRS-003)
 
 Apache 2.0 — open-source interface layer.
 The Skeptic evaluation strategy (thresholds, signal scoring) is private (BUSL 1.1).

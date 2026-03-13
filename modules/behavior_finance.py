@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 
@@ -379,7 +379,7 @@ def _update_ab_metrics(symbol: str, result: Dict[str, Any], action: str) -> None
     sym["last_dqs"] = result.get("dqs", 0.0)
     sym["last_csi"] = result.get("csi", 50.0)
 
-    data["updated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     _safe_json_write(AB_FILE, data)
 
 
@@ -626,7 +626,7 @@ def evaluate_behavior_finance(
 
     Returns normalized and persisted behavior assessment.
     """
-    now = datetime.utcfromtimestamp(now_ts) if now_ts else datetime.utcnow()
+    now = datetime.fromtimestamp(now_ts, timezone.utc) if now_ts else datetime.now(timezone.utc)
     updated_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     raw = _load_sentiment_sources(symbol)

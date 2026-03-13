@@ -25,15 +25,15 @@ SERVER_URL = "http://localhost:6001"
 POSITION_CONFIG = {
     "TSLA": 1,
     "COIN": 4,
-    "RDDT": 3,
-    "AMD": 0,
-    "NBIS": 1,
-    "CRWV": 1,
-    "RKLB": 4,
+    "RDDT": 1,
+    "AMD": 5,
+    "NBIS": 2,
+    "CRWV": 3,
+    "RKLB": 2,
     "HIMS": 4,
-    "OPEN": 1,
-    "ONDS": 3,
-    "PLTR": 3
+    "OPEN": 0,
+    "ONDS": 0,
+    "PLTR": 1
 }
 
 # ============================================================

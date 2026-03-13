@@ -36,9 +36,9 @@ SELL_PRICE_BUFFER_STOCK = 0.0015   # 美股 SELL 需低于基准 -0.15%
 BUY_PRICE_BUFFER_CRYPTO = 0.0025   # 加密 BUY 需高于基准 +0.25%
 SELL_PRICE_BUFFER_CRYPTO = 0.0025  # 加密 SELL 需低于基准 -0.25%
 
-# DC优化: 仅在周期成熟后执行反向拦截，降低 young 噪声误拦
-DC_ENFORCE_MATURITY = {"mid", "mature"}
-DC_MIN_CYCLE_COUNTER = 3
+# DC优化: 仅在更成熟周期后执行反向拦截，减少已过基准信号的二次误拦
+DC_ENFORCE_MATURITY = {"mature"}
+DC_MIN_CYCLE_COUNTER = 4
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state", "baseline_state.json")
 

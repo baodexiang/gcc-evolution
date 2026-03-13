@@ -1,5 +1,5 @@
 """
-GCC v5.400 — Multi-Agent Divergence Monitor (IRS-007)
+GCC v5.405 — Multi-Agent Divergence Monitor (IRS-007)
 
 Apache 2.0 — open-source interface layer.
 The private engine integrates Fleiss Kappa into the three-way voting

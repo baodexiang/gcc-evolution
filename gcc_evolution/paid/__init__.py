@@ -1,4 +1,4 @@
-"""Canonical paid surface for gcc-evo v5.400.
+"""Canonical paid surface for gcc-evo v5.405.
 
 This package intentionally avoids eager imports so lightweight commands remain
 stable even when optional paid submodules are not exercised.

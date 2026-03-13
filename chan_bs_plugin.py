@@ -449,9 +449,9 @@ class ChanBSPlugin:
 
 _min_strength_cache: Dict[str, float] = {}
 
-# 默认值: 加密波动大→放宽, 股票→收紧
-_DEFAULT_MIN_STRENGTH_CRYPTO = 0.25
-_DEFAULT_MIN_STRENGTH_STOCK = 0.35
+# 默认值: 近期审计显示 0 触发偏多，适度下调 symbol 级阈值提升候选覆盖
+_DEFAULT_MIN_STRENGTH_CRYPTO = 0.18
+_DEFAULT_MIN_STRENGTH_STOCK = 0.20
 
 
 def _is_crypto(symbol: str) -> bool:

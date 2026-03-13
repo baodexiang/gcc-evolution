@@ -102,12 +102,12 @@ SELL1_MIN_POSITION_PCT = 20  # SELL1 位置下限
 
 # v2.0: IRB (Inventory Retracement Bar) 参数 — 标准Rob Hoffman定义
 # IRB = 影线占K线振幅 >= 45% 的K线 (机构库存回补留下的长影线)
-IRB_WICK_PCT = 0.38          # v2.1: 0.45→0.38 dashboard显示22698扫描0触发,45%标准过严
+IRB_WICK_PCT = 0.34          # v2.2: 0.38→0.34 小步放宽IRB影线要求, 提升0触发品种的候选覆盖
 EMA_TREND = 20               # 趋势过滤EMA周期 (标准EMA20)
 
 # v1.2: KAMA效率比参数
 KAMA_ER_PERIOD = 10              # ER计算周期
-KAMA_ER_TANGLED_THRESHOLD = 0.22 # v2.1: 0.30→0.22 ER阈值过高导致大量信号被判为震荡
+KAMA_ER_TANGLED_THRESHOLD = 0.18 # v2.2: 0.22→0.18 小步降低纠缠阈值, 减少趋势市被误判为震荡
 # v2.0: SELL额外ER门槛已移除 — IRB修正后BUY/SELL触发条件对称
 KAMA_ER_ENABLED = True           # 开关 (可运行时关闭)
 DAILY_SIGNAL_CAP = 3             # KEY-006: 每品种每天最大信号数 (BUY+SELL合计)

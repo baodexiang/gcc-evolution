@@ -3,10 +3,17 @@
 ## 启动时自动读取
 
 每次任务前先读取：
-1. .GCC/skill/SKILL.md
+1. .GCC/ENTRYPOINTS.md
 2. .GCC/skill/evolution-log.md
-3. .GCC/skill/INDEX.md
-4. .GCC/branches/master/handoff.md（最新 handoff，了解上一次变更）
+3. .GCC/branches/master/handoff.md（最新 handoff，了解上一次变更）
+
+## 结构真相源
+
+程序结构与正式运行入口统一以 `.GCC/ENTRYPOINTS.md` 为准。
+
+- `.GCC/skill/SKILL.md` 仅作为 GCC/skill 体系说明
+- `.GCC/skill/INDEX.md` 仅作为知识索引
+- `.claude/skills/codemap-llm-server-v3570/` 仅作为历史镜像
 
 ## 代码修改后（自动执行）
 

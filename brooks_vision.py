@@ -979,6 +979,49 @@ def scan_symbol(symbol: str, mods: dict) -> Optional[Dict]:
     return record
 
 
+def log_dispatch_result(symbol: str, response: dict, radar: dict) -> None:
+    """Emit a normalized execution/gate log for BrooksVision dispatch results."""
+    executed = bool((response or {}).get("executed", False))
+    reason = str((response or {}).get("reason", "") or "")
+    pattern = radar.get("brooks_pattern", "NONE") if isinstance(radar, dict) else "NONE"
+    signal = radar.get("signal", "?") if isinstance(radar, dict) else "?"
+    confidence = radar.get("confidence", 0) if isinstance(radar, dict) else 0
+
+    if executed:
+        logger.info(
+            f"[GCC-0172][BV_DISPATCH] {symbol} {signal}[{pattern}] "
+            f"conf={confidence} executed=True"
+        )
+        return
+
+    if not reason:
+        logger.warning(
+            f"[GCC-0172][BV_DISPATCH] {symbol} {signal}[{pattern}] "
+            f"conf={confidence} executed=False reason=UNKNOWN"
+        )
+        return
+
+    if "DC拦截" in reason or "基准" in reason:
+        bucket = "BASELINE_DC_BLOCK"
+    elif "仓位" in reason:
+        bucket = "POSITION_LIMIT"
+    elif "限次" in reason or "冷却" in reason:
+        bucket = "COOLDOWN_LIMIT"
+    elif "FilterChain" in reason:
+        bucket = "FILTER_CHAIN_BLOCK"
+    elif "signal_gate" in reason:
+        bucket = "SIGNAL_GATE_BLOCK"
+    elif "发送失败" in reason or "HTTP" in reason or "连接" in reason:
+        bucket = "DELIVERY_FAILURE"
+    else:
+        bucket = "OTHER_BLOCK"
+
+    logger.info(
+        f"[GCC-0172][BV_DISPATCH] {symbol} {signal}[{pattern}] "
+        f"conf={confidence} executed=False bucket={bucket} reason={reason}"
+    )
+
+
 # ===================================================================
 # Main: Scan All
 # ===================================================================

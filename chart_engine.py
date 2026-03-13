@@ -193,14 +193,12 @@ def _generate_mplfinance(
             VISION_CHART_CONFIG["width"] / VISION_CHART_CONFIG["dpi"],
             VISION_CHART_CONFIG["height"] / VISION_CHART_CONFIG["dpi"],
         )
-        mpf.plot(
-            df,
+        plot_kwargs = dict(
             type="candle",
             volume=VISION_CHART_CONFIG["show_volume"],
             style=style,
             title=f" {symbol}",
             figsize=figsize,
-            addplot=addplots if addplots else None,
             savefig=dict(
                 fname=buf,
                 dpi=VISION_CHART_CONFIG["dpi"],
@@ -208,6 +206,9 @@ def _generate_mplfinance(
                 facecolor=VISION_CHART_CONFIG["background"],
             ),
         )
+        if addplots:
+            plot_kwargs["addplot"] = addplots
+        mpf.plot(df, **plot_kwargs)
         buf.seek(0)
         return buf.read()
 

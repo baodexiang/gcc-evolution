@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import importlib
 from typing import Any, Dict, Optional
@@ -34,14 +34,14 @@ class ValueDataCache:
     def set(self, key: str, value: Dict[str, Any], ttl_seconds: int) -> None:
         self.entries[key] = CacheEntry(
             value=value,
-            expires_at=datetime.utcnow() + timedelta(seconds=ttl_seconds),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds),
         )
 
     def get(self, key: str) -> Optional[Dict[str, Any]]:
         entry = self.entries.get(key)
         if not entry:
             return None
-        if datetime.utcnow() > entry.expires_at:
+        if datetime.now(timezone.utc) > entry.expires_at:
             self.entries.pop(key, None)
             return None
         return entry.value
