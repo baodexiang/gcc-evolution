@@ -167,25 +167,25 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 
 <!-- Tabs -->
 <div class="tab-bar" id="tab-bar">
-<div class="tab active" data-tab="ranking">策略排行</div>
-<div class="tab" data-tab="blockval">拦截验证</div>
-<div class="tab" data-tab="plugins">外挂运行</div>
+<div class="tab active" data-tab="gcctm">GCC-TM</div>
+<div class="tab" data-tab="trades">交易分析</div>
+<div class="tab" data-tab="ranking">策略排行</div>
 <div class="tab" data-tab="macd">L2 MACD</div>
 <div class="tab" data-tab="vision">Vision过滤</div>
 <div class="tab" data-tab="bv">BrooksVision</div>
+<div class="tab" data-tab="plugins">外挂运行</div>
 <div class="tab" data-tab="gates">门控拦截</div>
-<div class="tab" data-tab="tasks">GCC任务</div>
-<div class="tab" data-tab="issues">问题&风险</div>
-<div class="tab" data-tab="trades">交易分析</div>
+<div class="tab" data-tab="blockval">拦截验证</div>
 <div class="tab" data-tab="sigacc">信号准确率</div>
 <div class="tab" data-tab="baseline">仓位控制</div>
+<div class="tab" data-tab="tasks">GCC任务</div>
+<div class="tab" data-tab="issues">问题&风险</div>
 <div class="tab" data-tab="broker">券商对账</div>
 <div class="tab" data-tab="evolution">进化</div>
-<div class="tab" data-tab="gcctm">GCC-TM</div>
 </div>
 
 <!-- Tab: 策略排行 -->
-<div class="tab-content active" id="tab-ranking">
+<div class="tab-content" id="tab-ranking">
 <div class="summary" id="ranking-summary"></div>
 <h2>策略绩效排行 (FIFO配对)</h2>
 <table><thead><tr><th>排名</th><th>策略</th><th>交易数</th><th>胜率</th><th>平均PnL%</th><th>总PnL%</th><th>评分</th><th>建议</th></tr></thead>
@@ -413,7 +413,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 </div>
 
 <!-- Tab: GCC交易决策模块 (KEY-011) -->
-<div class="tab-content" id="tab-gcctm">
+<div class="tab-content active" id="tab-gcctm">
 
 <!-- 最终决策摘要 -->
 <h2>最终决策摘要 (每品种最新结论)</h2>
@@ -434,8 +434,29 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
   </div>
 </div>
 
+<!-- Vision门控 + K线实时状态 -->
+<h2>Vision门控 &amp; K线状态 (实时)</h2>
+<div id="gcctm-candle-states" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:20px"></div>
+
+<!-- GCC vs 主程序准确率对比 -->
+<h2>GCC-TM 准确率对比</h2>
+<div style="margin-bottom:16px">
+  <table>
+  <thead><tr><th>品种</th><th>总决策</th><th>一致率</th><th>分歧率</th><th>GCC最新</th><th>主程序最新</th><th>接管就绪</th></tr></thead>
+  <tbody id="gcctm-accuracy-body"></tbody>
+  </table>
+</div>
+
+<!-- 模拟交易P&L -->
+<h2>模拟交易 P&amp;L</h2>
+<div id="gcctm-sim-summary" class="summary" style="margin-bottom:12px"></div>
+<table>
+<thead><tr><th>时间</th><th>品种</th><th>动作</th><th>入场价</th><th>出场价</th><th>P&amp;L%</th><th>结果</th><th>轮次</th></tr></thead>
+<tbody id="gcctm-sim-body"></tbody>
+</table>
+
 <!-- 美股执行区域 -->
-<h2>🟢 美股 GCC-TM 执行</h2>
+<h2 style="margin-top:24px">美股 GCC-TM 决策明细</h2>
 <table>
 <thead><tr>
   <th>时间</th><th>品种</th><th>GCC裁决</th><th>主程序</th><th>一致</th>
@@ -445,26 +466,26 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 </table>
 
 <!-- crypto execute -->
-<h2 style="margin-top:24px">Crypto GCC-TM Execute</h2>
+<h2 style="margin-top:24px">加密 GCC-TM 执行</h2>
 <table>
 <thead><tr>
-  <th>Time</th><th>Symbol</th><th>GCC</th><th>Main</th><th>Match</th>
-  <th>Buy</th><th>Sell</th><th>Source</th><th>Tree</th><th>Consensus</th>
+  <th>时间</th><th>品种</th><th>GCC</th><th>主程序</th><th>一致</th>
+  <th>买票</th><th>卖票</th><th>信号源</th><th>树搜索</th><th>共识</th>
 </tr></thead>
 <tbody id="gcctm-crypto-exec-body"></tbody>
 </table>
 
 <!-- crypto observe -->
-<h2 style="margin-top:24px">Crypto GCC-TM Observe</h2>
+<h2 style="margin-top:24px">加密 GCC-TM 观察</h2>
 <table>
 <thead><tr>
-  <th>Time</th><th>Symbol</th><th>GCC</th><th>Main</th><th>Match</th>
-  <th>Buy</th><th>Sell</th><th>Source</th><th>Tree</th><th>Consensus</th>
+  <th>时间</th><th>品种</th><th>GCC</th><th>主程序</th><th>一致</th>
+  <th>买票</th><th>卖票</th><th>信号源</th><th>树搜索</th><th>共识</th>
 </tr></thead>
 <tbody id="gcctm-crypto-body"></tbody>
 </table>
 
-<!-- Pipeline 任务 -->
+<!-- KNN经验 -->
 <h2 style="margin-top:20px">KNN经验卡片</h2>
 <div id="gcctm-knn-cards" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px"></div>
 </div>
@@ -1984,7 +2005,7 @@ function loadGccTm() {
     const FEAT_NAMES = ['vision_conf','scan_conf','n_gate_buy','filter_passed',
         'filter_vol_score','win_rate','vol_ratio','topology_score','geometry_score'];
     const CRYPTO_SYMS = new Set(['BTCUSDC','ETHUSDC','SOLUSDC','ZECUSDC']);
-    const US_EXECUTE = new Set(['TSLA','CRWV','NBIS','ONDS','OPEN']);
+    const US_EXECUTE = new Set(['TSLA','CRWV','NBIS','ONDS','OPEN','HIMS','AMD','COIN','RKLB','RDDT','NVDA','PLTR']);
     const formatGccTmTimestamp = (rawTs) => {
         if (!rawTs) return '-';
         try {
@@ -2252,6 +2273,132 @@ function loadGccTm() {
 
         // Summary
         summary.textContent = `共 ${decisions.length} 条决策 | 美股执行:${usDec.length} | 加密观察:${cryptoDec.length} | 其他:${otherDec.length} | KNN:${knn.length} | 任务:${pipelineTasks.length}`;
+
+        // ── Vision门控 & K线实时状态 ──
+        const candleStates = d.candle_states || {};
+        const csEl = $('gcctm-candle-states');
+        const csSymbols = Object.keys(candleStates).sort();
+        if (!csSymbols.length) {
+            csEl.innerHTML = '<div style="color:#656d76;font-size:0.85em;padding:12px">暂无K线状态数据 (等待GCC-TM启动)</div>';
+        } else {
+            csEl.innerHTML = csSymbols.map(sym => {
+                const cs = candleStates[sym];
+                const dir = cs.effective_direction || 'HOLD';
+                const vDir = cs.vision_direction || '-';
+                const vConf = cs.vision_confidence != null ? (cs.vision_confidence * 100).toFixed(0) + '%' : '-';
+                const prevSum = cs.prev_summary || '-';
+                const round = cs.current_round || 0;
+                const traded = cs.traded;
+                const tradeRound = cs.trade_round >= 0 ? cs.trade_round : '-';
+                const dirColor = dir === 'BUY' ? '#1a7f37' : dir === 'SELL' ? '#cf222e' : '#9a6700';
+                const dirBg = dir === 'BUY' ? '#dafbe1' : dir === 'SELL' ? '#ffebe9' : '#fff8c5';
+                const tradedBadge = traded
+                    ? '<span style="background:#dafbe1;color:#1a7f37;padding:1px 6px;border-radius:8px;font-size:0.75em;font-weight:600">已交易 R' + tradeRound + '</span>'
+                    : '<span style="background:#fff8c5;color:#9a6700;padding:1px 6px;border-radius:8px;font-size:0.75em;font-weight:600">等待信号</span>';
+                // 轮次进度条
+                const pctDone = (round / 8 * 100).toFixed(0);
+                const rounds = cs.round_decisions || [];
+                const roundDots = Array.from({length:8}, (_,i) => {
+                    const r = rounds[i];
+                    if (!r) return '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#eaeef2;margin:1px" title="R'+i+' 未执行"></span>';
+                    const rc = r.action === 'BUY' ? '#1a7f37' : r.action === 'SELL' ? '#cf222e' : '#d0d7de';
+                    const border = r.executed ? '2px solid #0969da' : 'none';
+                    return '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:'+rc+';border:'+border+';margin:1px" title="R'+i+' '+r.action+' '+r.verdict+'"></span>';
+                }).join('');
+                return `<div style="background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:12px;border-left:4px solid ${dirColor}">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                        <span style="font-weight:700;font-size:1em">${sym}</span>
+                        <span style="background:${dirBg};color:${dirColor};padding:2px 10px;border-radius:12px;font-weight:700;font-size:0.9em">${dir}</span>
+                    </div>
+                    <div style="font-size:0.82em;color:#656d76;margin-bottom:6px">
+                        Vision: <b style="color:${vDir==='BUY'?'#1a7f37':vDir==='SELL'?'#cf222e':'#656d76'}">${vDir}</b> ${vConf}
+                        | 上K汇总: <b>${prevSum}</b>
+                        | ${vDir !== prevSum && vDir !== '-' && prevSum !== '-' ? '<span style="color:#cf222e">矛盾→HOLD</span>' : '<span style="color:#1a7f37">一致</span>'}
+                    </div>
+                    <div style="margin-bottom:6px">${roundDots}</div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.78em;color:#656d76">
+                        <span>轮次 ${round}/8 (${pctDone}%)</span>
+                        ${tradedBadge}
+                    </div>
+                    <div style="background:#eaeef2;border-radius:4px;height:4px;margin-top:6px;overflow:hidden">
+                        <div style="background:${dirColor};height:100%;width:${pctDone}%;border-radius:4px"></div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        // ── GCC-TM 准确率对比 ──
+        const accuracy = d.accuracy || {};
+        const accBody = $('gcctm-accuracy-body');
+        const accSymbols = Object.keys(accuracy).filter(s => !s.endsWith('USD') || accuracy[s].total > 5).sort((a,b) => (accuracy[b].total||0) - (accuracy[a].total||0));
+        if (!accSymbols.length) {
+            accBody.innerHTML = '<tr><td colspan="7" style="color:#656d76;text-align:center">暂无准确率数据</td></tr>';
+        } else {
+            accBody.innerHTML = accSymbols.map(sym => {
+                const a = accuracy[sym];
+                const rate = a.rate != null ? (a.rate * 100).toFixed(1) + '%' : '-';
+                const divRate = a.divergence_rate != null ? (a.divergence_rate * 100).toFixed(1) + '%' : '-';
+                const rateColor = (a.rate||0) >= 0.6 ? '#1a7f37' : (a.rate||0) >= 0.3 ? '#9a6700' : '#cf222e';
+                const gccColor = (a.last_gcc||'-') === 'BUY' ? '#1a7f37' : (a.last_gcc||'-') === 'SELL' ? '#cf222e' : '#656d76';
+                const takeover = a.takeover_ready ? '<span class="badge badge-ok">READY</span>' : '<span class="badge" style="background:#eaeef2;color:#656d76">NO</span>';
+                return `<tr>
+                    <td style="font-weight:600">${sym}</td>
+                    <td>${a.total||0}</td>
+                    <td style="color:${rateColor};font-weight:600">${rate}</td>
+                    <td>${divRate}</td>
+                    <td style="color:${gccColor};font-weight:600">${a.last_gcc||'-'}</td>
+                    <td>${a.last_main||'-'}</td>
+                    <td>${takeover}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        // ── 模拟交易 P&L ──
+        const simTrades = d.sim_trades || [];
+        const simBody = $('gcctm-sim-body');
+        const simSummaryEl = $('gcctm-sim-summary');
+        if (!simTrades.length) {
+            simBody.innerHTML = '<tr><td colspan="8" style="color:#656d76;text-align:center">暂无模拟交易数据</td></tr>';
+            simSummaryEl.innerHTML = '';
+        } else {
+            // 统计
+            const wins = simTrades.filter(t => t.outcome === true).length;
+            const losses = simTrades.filter(t => t.outcome === false).length;
+            const pending = simTrades.filter(t => t.outcome == null).length;
+            const totalPnl = simTrades.reduce((s, t) => s + (t.pnl_pct || 0), 0);
+            const winRate = (wins + losses) > 0 ? (wins / (wins + losses) * 100).toFixed(1) : '-';
+            simSummaryEl.innerHTML = `
+                <div class="card"><div class="label">总交易</div><div class="value">${simTrades.length}</div></div>
+                <div class="card"><div class="label">胜率</div><div class="value ${Number(winRate)>=50?'green':'red'}">${winRate}%</div></div>
+                <div class="card"><div class="label">盈利</div><div class="value green">${wins}</div></div>
+                <div class="card"><div class="label">亏损</div><div class="value red">${losses}</div></div>
+                <div class="card"><div class="label">待验证</div><div class="value yellow">${pending}</div></div>
+                <div class="card"><div class="label">累计P&L</div><div class="value ${totalPnl>=0?'green':'red'}">${totalPnl>=0?'+':''}${totalPnl.toFixed(2)}%</div></div>
+            `;
+            // 只显示最新50条
+            simBody.innerHTML = simTrades.slice(0, 50).map(t => {
+                const ts = formatGccTmTimestamp(t.ts || '');
+                const actColor = t.action === 'BUY' ? '#1a7f37' : '#cf222e';
+                const pnl = t.pnl_pct != null ? (t.pnl_pct >= 0 ? '+' : '') + t.pnl_pct.toFixed(2) + '%' : '-';
+                const pnlColor = (t.pnl_pct||0) >= 0 ? '#1a7f37' : '#cf222e';
+                const outcome = t.outcome === true ? '<span style="color:#1a7f37;font-weight:600">WIN</span>'
+                    : t.outcome === false ? '<span style="color:#cf222e;font-weight:600">LOSS</span>'
+                    : '<span style="color:#9a6700">待验证</span>';
+                const entry = t.entry_price != null ? '$' + Number(t.entry_price).toFixed(2) : '-';
+                const exit = t.exit_price != null ? '$' + Number(t.exit_price).toFixed(2) : '-';
+                return `<tr>
+                    <td style="font-size:0.85em;color:#656d76">${ts}</td>
+                    <td style="font-weight:600">${t.symbol||'-'}</td>
+                    <td style="color:${actColor};font-weight:600">${t.action||'-'}</td>
+                    <td>${entry}</td>
+                    <td>${exit}</td>
+                    <td style="color:${pnlColor};font-weight:600">${pnl}</td>
+                    <td>${outcome}</td>
+                    <td>R${t.round != null ? t.round : '-'}</td>
+                </tr>`;
+            }).join('');
+        }
+
         // KNN cards — features 是 List[float] 长度9, outcome 是 bool|null
         const cardsEl = $('gcctm-knn-cards');
         if (!knn.length) {

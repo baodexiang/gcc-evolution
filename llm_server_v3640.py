@@ -51069,9 +51069,35 @@ def key009_gcctm():
     except Exception:
         pass
 
+    # K线实时状态: gcc_candle_state_{symbol}.json
+    candle_states = {}
+    import glob as _gcctm_glob
+    for _cs_path in _gcctm_glob.glob(str(ROOT / "state" / "gcc_candle_state_*.json")):
+        try:
+            _cs_data = json.loads(open(_cs_path, encoding="utf-8").read())
+            _cs_sym = _cs_data.get("symbol", "")
+            if _cs_sym:
+                candle_states[_cs_sym] = _cs_data
+        except Exception:
+            pass
+
+    # 轮次决策明细: gcc_round_decisions.jsonl
+    round_decisions = []
+    rd_path = ROOT / "state" / "gcc_round_decisions.jsonl"
+    try:
+        if rd_path.exists():
+            for line in rd_path.read_text(encoding="utf-8").splitlines()[-200:]:
+                try:
+                    round_decisions.append(json.loads(line))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     decisions = list(reversed(decisions))
     knn_entries = list(reversed(knn_entries))
     sim_trades = list(reversed(sim_trades))
+    round_decisions = list(reversed(round_decisions))
     return app.response_class(
         json.dumps(
             {
@@ -51080,6 +51106,8 @@ def key009_gcctm():
                 "pipeline_tasks": pipeline_tasks,
                 "accuracy": accuracy,
                 "sim_trades": sim_trades,
+                "candle_states": candle_states,
+                "round_decisions": round_decisions,
             },
             ensure_ascii=False,
         ),
