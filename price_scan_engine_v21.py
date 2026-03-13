@@ -10089,8 +10089,95 @@ class PriceScanEngine:
             except Exception as e:
                 logger.debug(f"[S11] {symbol} SuperTrend_15m error: {e}")
 
+        # ═══════════════════════════════════════════════════════════
+        # GCC-0259 S1-S4: 技术指标信号 (从15min K线直接计算, 零API成本)
+        # ═══════════════════════════════════════════════════════════
+        try:
+            import numpy as np
+            closes = np.array([float(b["close"]) for b in bars_15m])
+            highs = np.array([float(b["high"]) for b in bars_15m])
+            lows = np.array([float(b["low"]) for b in bars_15m])
+            n = len(closes)
+
+            if n >= 21:
+                # ── S1: RSI(14) 超买超卖 ──
+                delta = np.diff(closes[-(15):])  # 最近15个close→14个diff
+                gain = np.where(delta > 0, delta, 0)
+                loss = np.where(delta < 0, -delta, 0)
+                avg_gain = np.mean(gain) if len(gain) > 0 else 0
+                avg_loss = np.mean(loss) if len(loss) > 0 else 0
+                if avg_loss > 0:
+                    rs = avg_gain / avg_loss
+                    rsi = 100 - (100 / (1 + rs))
+                else:
+                    rsi = 100.0 if avg_gain > 0 else 50.0
+
+                if rsi < 30:
+                    _gcc_push_15m(main_symbol, "RSI_15m", "BUY", 0.55)
+                    pushed += 1
+                    logger.info(f"[GCC-0259] {symbol} RSI_15m={rsi:.1f} → BUY")
+                elif rsi > 70:
+                    _gcc_push_15m(main_symbol, "RSI_15m", "SELL", 0.55)
+                    pushed += 1
+                    logger.info(f"[GCC-0259] {symbol} RSI_15m={rsi:.1f} → SELL")
+
+                # ── S2: EMA9×EMA21 金叉死叉 ──
+                def _ema(arr, period):
+                    alpha = 2.0 / (period + 1)
+                    ema = np.empty_like(arr, dtype=float)
+                    ema[0] = arr[0]
+                    for i in range(1, len(arr)):
+                        ema[i] = alpha * arr[i] + (1 - alpha) * ema[i - 1]
+                    return ema
+
+                ema9 = _ema(closes, 9)
+                ema21 = _ema(closes, 21)
+                # 交叉检测: 前一根 vs 当前根
+                if ema9[-2] <= ema21[-2] and ema9[-1] > ema21[-1]:
+                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "BUY", 0.6)
+                    pushed += 1
+                    logger.info(f"[GCC-0259] {symbol} EMA9×21金叉 → BUY")
+                elif ema9[-2] >= ema21[-2] and ema9[-1] < ema21[-1]:
+                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "SELL", 0.6)
+                    pushed += 1
+                    logger.info(f"[GCC-0259] {symbol} EMA9×21死叉 → SELL")
+
+                # ── S3: MACD柱状图翻转 ──
+                ema12 = _ema(closes, 12)
+                ema26 = _ema(closes, 26)
+                macd_line = ema12 - ema26
+                macd_signal = _ema(macd_line, 9)
+                histogram = macd_line - macd_signal
+                if histogram[-2] <= 0 and histogram[-1] > 0:
+                    _gcc_push_15m(main_symbol, "MACD_Hist_15m", "BUY", 0.55)
+                    pushed += 1
+                    logger.info(f"[GCC-0259] {symbol} MACD柱状图翻正 → BUY")
+                elif histogram[-2] >= 0 and histogram[-1] < 0:
+                    _gcc_push_15m(main_symbol, "MACD_Hist_15m", "SELL", 0.55)
+                    pushed += 1
+                    logger.info(f"[GCC-0259] {symbol} MACD柱状图翻负 → SELL")
+
+                # ── S4: Bollinger Band(20,2) 触碰 ──
+                if n >= 20:
+                    bb_mid = np.mean(closes[-20:])
+                    bb_std = np.std(closes[-20:])
+                    bb_upper = bb_mid + 2 * bb_std
+                    bb_lower = bb_mid - 2 * bb_std
+                    cur_close = closes[-1]
+                    if cur_close <= bb_lower:
+                        _gcc_push_15m(main_symbol, "BB_15m", "BUY", 0.5)
+                        pushed += 1
+                        logger.info(f"[GCC-0259] {symbol} BB下轨触碰 {cur_close:.2f}<={bb_lower:.2f} → BUY")
+                    elif cur_close >= bb_upper:
+                        _gcc_push_15m(main_symbol, "BB_15m", "SELL", 0.5)
+                        pushed += 1
+                        logger.info(f"[GCC-0259] {symbol} BB上轨触碰 {cur_close:.2f}>={bb_upper:.2f} → SELL")
+
+        except Exception as _ind_e:
+            logger.debug(f"[GCC-0259] {symbol} 技术指标信号异常: {_ind_e}")
+
         if pushed > 0:
-            logger.info(f"[S11] {symbol} 15m扫描完成: {pushed}个信号推入GCC-TM信号池")
+            logger.info(f"[S11+0259] {symbol} 15m扫描完成: {pushed}个信号推入GCC-TM信号池")
 
     def _scan_crypto(self):
         """扫描加密货币 - v3.545: P0-Tracking + 剥头皮 + L1外挂"""
