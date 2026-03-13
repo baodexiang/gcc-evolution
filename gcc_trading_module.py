@@ -2863,6 +2863,41 @@ def gcc_observe(
         closes = [float(b.get("close") or b.get("c") or 0) for b in bars if b]
         current_price = closes[-1] if closes else 0.0
 
+        # v0.2.1: 数据源校验 — Schwab(美股) / Coinbase(加密) 复查 yfinance 价格
+        if current_price > 0:
+            try:
+                _is_crypto = symbol.endswith("USDC") or symbol.endswith("USDT")
+                _verified_price = 0.0
+                _verify_src = ""
+                if _is_crypto:
+                    _crypto_map = {"BTCUSDC": "BTC", "ETHUSDC": "ETH",
+                                   "SOLUSDC": "SOL", "ZECUSDC": "ZEC"}
+                    _cb_sym = _crypto_map.get(symbol)
+                    if _cb_sym:
+                        from coinbase_sync_v6 import get_price as _cb_get_price
+                        _verified_price = _cb_get_price(_cb_sym)
+                        _verify_src = "Coinbase"
+                else:
+                    from schwab_data_provider import get_provider as _schwab_gp
+                    _q = _schwab_gp().get_quote(symbol)
+                    _verified_price = _q.get("last", 0)
+                    _verify_src = "Schwab"
+                if _verified_price > 0:
+                    _dev = abs(current_price - _verified_price) / _verified_price
+                    if _dev > 0.05:
+                        logger.warning(
+                            "[GCC-TM][DATA_CHECK] %s yfinance=%.2f %s=%.2f 偏差%.1f%% > 5%% → 用%s价格",
+                            symbol, current_price, _verify_src, _verified_price, _dev * 100, _verify_src,
+                        )
+                        current_price = _verified_price
+                    else:
+                        logger.debug(
+                            "[GCC-TM][DATA_CHECK] %s yfinance=%.2f %s=%.2f 偏差%.1f%% OK",
+                            symbol, current_price, _verify_src, _verified_price, _dev * 100,
+                        )
+            except Exception as _vc_e:
+                logger.debug("[GCC-TM][DATA_CHECK] %s 校验异常(不影响): %s", symbol, _vc_e)
+
         # ── 更新K线状态 ──
         buy_votes = sum(1 for s in signals if s.get("action") == "BUY")
         sell_votes = sum(1 for s in signals if s.get("action") == "SELL")
