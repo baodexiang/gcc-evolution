@@ -44828,7 +44828,8 @@ def llm_decide():
                 try:
                     from modules.key004_plugin_cache import CacheStorageBackend, FeatureVector
                     import time as _time_k4
-                    _mr4 = get_state_for_symbol(symbol).get("market_regime", {})
+                    _mr4 = get_state_for_symbol(symbol).get("market_regime", "unknown")
+                    _regime_label = _mr4.get("trend_state", "unknown") if isinstance(_mr4, dict) else str(_mr4)
                     _fv = FeatureVector(
                         symbol=symbol,
                         timeframe=str(timeframe),
@@ -44840,7 +44841,7 @@ def llm_decide():
                             "bypass_l2": getattr(plugin_result, "should_bypass_l2", None),
                         },
                         ohlcv={"close": float(last_close) if last_close else 0.0},
-                        regime_label=str(_mr4.get("trend_state", "unknown")),
+                        regime_label=_regime_label,
                     )
                     CacheStorageBackend().write_feature_vector(_fv)
                     log_to_server(
@@ -53825,10 +53826,10 @@ if __name__ == "__main__":
         远程服务器无OpenBB → import失败 → 静默退出。"""
         try:
             import sys as _sgsys
-            _sg_base = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".GCC")
+            _sg_base = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".GCC", "improvement", "key-010", "_unsorted")
             if _sg_base not in _sgsys.path:
                 _sgsys.path.insert(0, _sg_base)
-            from improvement.signal_gate import SignalGate
+            from signal_gate import SignalGate
         except ImportError:
             log_to_server("[SIGNAL_GATE_WORKER] OpenBB未安装，尝试自动安装...")
             try:
@@ -53839,7 +53840,7 @@ if __name__ == "__main__":
                      "openbb-yfinance", "numpy", "scipy", "pandas"],
                     timeout=300
                 )
-                from improvement.signal_gate import SignalGate
+                from signal_gate import SignalGate
                 log_to_server("[SIGNAL_GATE_WORKER] OpenBB安装成功")
             except Exception as _install_e:
                 log_to_server(f"[SIGNAL_GATE_WORKER] OpenBB安装失败，跳过预热: {_install_e}")
