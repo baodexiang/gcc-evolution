@@ -51167,6 +51167,76 @@ def key009_gcctm():
     except Exception:
         pass
 
+    # v3.679: 错误分类扫描 — 最近24h日志按通道归类
+    error_classify = []
+    _ec_cache_key = "_ec_cache"
+    _ec_cache_ts = getattr(key009_gcctm, "_ec_ts", 0)
+    import time as _ec_time
+    if _ec_time.time() - _ec_cache_ts > 120:  # 2分钟缓存
+        try:
+            import re as _ec_re
+            _EC_CHANNEL_RULES = [
+                ("S5", [r"\[GCC-TM\]", r"\[GCC-TRADE\]", r"gcc_trading", r"\[PUCT\]"]),
+                ("S3", [r"\[S3.*MACD\]", r"\[MACD.L2\]", r"\[L2_MACD\]", r"macd.*divergence"]),
+                ("S4", [r"\[S4.*Gate\]", r"\[L2.Gate\]", r"\[L2_Gate\]", r"\[L2门卫\]"]),
+                ("S2", [r"\[S2外挂\]", r"plugin.*bypass", r"\[RobHoffman\]", r"\[DoublePattern\]", r"\[ChanBS\]", r"\[SuperTrend\]"]),
+                ("S1", [r"\[v3\.6[5-9]\d\].*L1", r"\[L1[_\s]", r"L1参考"]),
+                ("P0", [r"\[P0\]", r"\[CycleSwitch\]", r"\[P0-", r"scan.engine", r"price_scan"]),
+                ("SYS", [r"Schwab", r"yfinance", r"Coinbase", r"SignalStack", r"3Commas", r"\[API\]", r"\[NETWORK\]"]),
+            ]
+            _EC_ERROR_RE = _ec_re.compile(
+                r"(ERROR|CRITICAL|Exception|Traceback|失败|NameError|TypeError|KeyError|ValueError|AttributeError|ImportError|ZeroDivision|ConnectionError|Timeout)",
+                _ec_re.IGNORECASE
+            )
+            _EC_TS_RE = _ec_re.compile(r"(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}:\d{2})")
+            _ec_cutoff = datetime.now().strftime("%Y-%m-%d")  # 今天
+            _ec_errors = []
+            for _ec_logpath in [ROOT / "logs" / "server.log", ROOT / "logs" / "price_scan_engine.log"]:
+                if not _ec_logpath.exists():
+                    continue
+                try:
+                    _ec_lines = _ec_logpath.read_text(encoding="utf-8", errors="ignore").splitlines()
+                    for _ecl in _ec_lines[-5000:]:  # 最近5000行
+                        if _ec_cutoff not in _ecl:
+                            continue
+                        if not _EC_ERROR_RE.search(_ecl):
+                            continue
+                        # 提取时间
+                        _ec_ts_m = _EC_TS_RE.search(_ecl)
+                        _ec_ts = _ec_ts_m.group(1) + " " + _ec_ts_m.group(2) if _ec_ts_m else ""
+                        # 分类通道
+                        _ec_ch = "OTHER"
+                        for _ch_name, _ch_pats in _EC_CHANNEL_RULES:
+                            for _cp in _ch_pats:
+                                if _ec_re.search(_cp, _ecl, _ec_re.IGNORECASE):
+                                    _ec_ch = _ch_name
+                                    break
+                            if _ec_ch != "OTHER":
+                                break
+                        # 提取品种
+                        _ec_sym_m = _ec_re.search(r"\$(\w+)|(?:^|\s)(\b(?:TSLA|COIN|RDDT|NBIS|CRWV|RKLB|HIMS|OPEN|AMD|ONDS|PLTR|BTCUSDC|ETHUSDC|SOLUSDC|ZECUSDC|XRPUSDC)\b)", _ecl)
+                        _ec_sym = (_ec_sym_m.group(1) or _ec_sym_m.group(2)) if _ec_sym_m else ""
+                        # 截短错误消息
+                        _ec_msg = _ecl.strip()
+                        if len(_ec_msg) > 200:
+                            _ec_msg = _ec_msg[:200] + "..."
+                        _ec_errors.append({
+                            "ts": _ec_ts,
+                            "channel": _ec_ch,
+                            "symbol": _ec_sym,
+                            "msg": _ec_msg,
+                            "source": "server" if "server" in str(_ec_logpath) else "scan",
+                        })
+                except Exception:
+                    pass
+            error_classify = _ec_errors[-200:]  # 最多200条
+            key009_gcctm._ec_cache = error_classify
+            key009_gcctm._ec_ts = _ec_time.time()
+        except Exception:
+            pass
+    else:
+        error_classify = getattr(key009_gcctm, "_ec_cache", [])
+
     # v3.679: 观察模式信号日志 — 最近500条
     observe_signals = []
     _obs_path = ROOT / "state" / "gcc_observe_log.jsonl"
@@ -51199,6 +51269,7 @@ def key009_gcctm():
                 "signal_pool": signal_pool,
                 "direction_locks": direction_locks,
                 "observe_signals": list(reversed(observe_signals)),
+                "error_classify": error_classify,
             },
             ensure_ascii=False,
         ),

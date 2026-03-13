@@ -177,6 +177,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div class="tab" data-tab="issues">问题&风险</div>
 <div class="tab" data-tab="broker">券商对账</div>
 <div class="tab" data-tab="evolution">进化</div>
+<div class="tab" data-tab="errors">错误分类</div>
 <div class="tab" data-tab="obs-s1">S1观察</div>
 <div class="tab" data-tab="obs-s2">S2观察</div>
 <div class="tab" data-tab="obs-s3">S3观察</div>
@@ -319,6 +320,20 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div id="evo-memory-list" style="margin-bottom:16px"></div>
 <h2>评分趋势</h2>
 <div id="evo-trend-info" style="font-size:0.9em;color:#656d76;margin-bottom:16px"></div>
+</div>
+
+<!-- Tab: 错误分类 -->
+<div class="tab-content" id="tab-errors">
+<div class="summary" id="err-cards"></div>
+<h2>按通道统计</h2>
+<table><thead><tr><th>通道</th><th>错误数</th><th>占比</th><th>Top品种</th><th>最近时间</th></tr></thead>
+<tbody id="err-by-channel"></tbody></table>
+<h2>按品种统计</h2>
+<table><thead><tr><th>品种</th><th>S1</th><th>S2</th><th>S3</th><th>S4</th><th>S5</th><th>P0</th><th>SYS</th><th>合计</th></tr></thead>
+<tbody id="err-by-symbol"></tbody></table>
+<h2>最近错误 (今天)</h2>
+<table><thead><tr><th>时间</th><th>通道</th><th>品种</th><th>来源</th><th>错误消息</th></tr></thead>
+<tbody id="err-recent"></tbody></table>
 </div>
 
 <!-- Tab: S1观察 (L1参考模式) -->
@@ -1825,6 +1840,66 @@ function loadGccTm() {
                  <td style="color:#656d76">${s.reason||''}</td></tr>`
             ).join('') : '<tr><td colspan="6" style="color:#656d76">暂无信号</td></tr>';
         }
+
+        // ══════════════════════════════════════════════════════
+        // 错误分类标签
+        // ══════════════════════════════════════════════════════
+        const errAll = d.error_classify || [];
+        const _chColors = {S1:'#656d76',S2:'#9a6700',S3:'#0969da',S4:'#bc4c00',S5:'#1a7f37',P0:'#8250df',SYS:'#cf222e',OTHER:'#afb8c1'};
+        // Summary cards
+        const errTotal = errAll.length;
+        const errByCh = {};
+        errAll.forEach(e => { errByCh[e.channel] = (errByCh[e.channel]||0) + 1; });
+        const errSyms = new Set(errAll.filter(e=>e.symbol).map(e=>e.symbol));
+        $('err-cards').innerHTML = `
+            <div class="card"><div class="label">总错误</div><div class="value red">${errTotal}</div></div>
+            <div class="card"><div class="label">涉及品种</div><div class="value">${errSyms.size}</div></div>
+            <div class="card"><div class="label">S5(GCC-TM)</div><div class="value" style="color:#1a7f37">${errByCh.S5||0}</div></div>
+            <div class="card"><div class="label">SYS(系统)</div><div class="value red">${errByCh.SYS||0}</div></div>
+            <div class="card"><div class="label">P0(扫描)</div><div class="value" style="color:#8250df">${errByCh.P0||0}</div></div>
+        `;
+        // By channel table
+        const chArr = Object.entries(errByCh).sort((a,b)=>b[1]-a[1]);
+        $('err-by-channel').innerHTML = chArr.length ? chArr.map(([ch,cnt]) => {
+            const pct = errTotal > 0 ? (cnt/errTotal*100).toFixed(1) : '0';
+            const chErrs = errAll.filter(e=>e.channel===ch);
+            const symCount = {};
+            chErrs.forEach(e => { if(e.symbol) symCount[e.symbol] = (symCount[e.symbol]||0)+1; });
+            const topSym = Object.entries(symCount).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([s,c])=>`${s}(${c})`).join(' ');
+            const lastTs = chErrs.length ? chErrs[chErrs.length-1].ts : '';
+            return `<tr>
+                <td style="font-weight:700;color:${_chColors[ch]||'#1f2328'}">${ch}</td>
+                <td>${cnt}</td>
+                <td>${pct}%</td>
+                <td style="font-size:0.85em">${topSym||'-'}</td>
+                <td style="color:#656d76;font-size:0.85em">${lastTs}</td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="5" style="color:#656d76">今日无错误</td></tr>';
+        // By symbol table
+        const errBySymCh = {};
+        const channels = ['S1','S2','S3','S4','S5','P0','SYS'];
+        errAll.forEach(e => {
+            const sym = e.symbol || '(无品种)';
+            if (!errBySymCh[sym]) errBySymCh[sym] = {S1:0,S2:0,S3:0,S4:0,S5:0,P0:0,SYS:0,OTHER:0,total:0};
+            errBySymCh[sym][e.channel] = (errBySymCh[sym][e.channel]||0) + 1;
+            errBySymCh[sym].total++;
+        });
+        const symErrArr = Object.entries(errBySymCh).sort((a,b)=>b[1].total-a[1].total);
+        $('err-by-symbol').innerHTML = symErrArr.length ? symErrArr.map(([sym,v]) =>
+            `<tr><td style="font-weight:600">${sym}</td>
+             ${channels.map(ch=>`<td style="color:${v[ch]?_chColors[ch]:'#afb8c1'}">${v[ch]||0}</td>`).join('')}
+             <td style="font-weight:700">${v.total}</td></tr>`
+        ).join('') : '<tr><td colspan="9" style="color:#656d76">今日无错误</td></tr>';
+        // Recent errors
+        $('err-recent').innerHTML = errAll.length ? errAll.slice(-100).reverse().map(e =>
+            `<tr>
+             <td style="color:#656d76;font-size:0.82em;white-space:nowrap">${e.ts||''}</td>
+             <td style="font-weight:700;color:${_chColors[e.channel]||'#1f2328'}">${e.channel}</td>
+             <td style="font-weight:600">${e.symbol||'-'}</td>
+             <td style="font-size:0.82em">${e.source}</td>
+             <td style="font-size:0.78em;color:#cf222e;word-break:break-all">${e.msg||''}</td>
+            </tr>`
+        ).join('') : '<tr><td colspan="5" style="color:#656d76">今日无错误</td></tr>';
 
     }).catch(err => {
         if (pipeline) {
