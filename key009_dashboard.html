@@ -267,8 +267,15 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 
 <!-- Tab: 信号池 -->
 <div class="tab-content" id="tab-sigpool">
-<div class="summary" id="sigpool-summary"></div>
-<h2>按品种信号统计</h2>
+<h2>实时信号池</h2>
+<div class="summary" id="sigpool-live-cards"></div>
+<table><thead><tr><th>品种</th><th>来源</th><th>方向</th><th>置信度</th><th>时间</th><th>方向锁</th></tr></thead>
+<tbody id="sigpool-live-body"></tbody></table>
+<h2>方向锁状态</h2>
+<table><thead><tr><th>品种</th><th>锁定方向</th><th>来源</th><th>过期时间</th><th>剩余</th></tr></thead>
+<tbody id="dirlock-body"></tbody></table>
+<div class="summary" id="sigpool-summary" style="margin-top:16px"></div>
+<h2>按品种信号统计 (历史)</h2>
 <table><thead><tr><th>品种</th><th>总轮次</th><th>平均买票</th><th>平均卖票</th><th>总信号</th></tr></thead>
 <tbody id="sigpool-symbol-body"></tbody></table>
 <h2>信号密度</h2>
@@ -1083,13 +1090,18 @@ function loadGccTm() {
         if (!ct.includes('json')) throw new Error('API未就绪(需重启服务器加载/key009/gcctm路由)');
         return r.json();
     }).then(d => {
-        const decisions = d.decisions || [];
-        const knn = d.knn_entries || [];
+        const signalPool = d.signal_pool || {};
+        const directionLocks = d.direction_locks || {};
+        // 只保留1天内的数据
+        const _1dayAgo = Date.now() - 24 * 3600 * 1000;
+        const _isRecent = (ts) => { if (!ts) return true; const d = new Date(ts.replace(' ', 'T')); return isNaN(d) || d.getTime() > _1dayAgo; };
+        const decisions = (d.decisions || []).filter(x => _isRecent(x.ts));
+        const knn = (d.knn_entries || []).filter(x => _isRecent(x.ts));
         const candleStates = d.candle_states || {};
         const candleSummaries = d.candle_summaries || {};
-        const roundDecs = d.round_decisions || [];
+        const roundDecs = (d.round_decisions || []).filter(x => _isRecent(x.ts));
         const accuracy = d.accuracy || {};
-        const simTrades = d.sim_trades || [];
+        const simTrades = (d.sim_trades || []).filter(x => _isRecent(x.ts));
 
         // ══════════════════════════════════════════════════════════
         // GCC-TM Tab: Pipeline View (品种面板 + 8轮时间线)
@@ -1323,8 +1335,10 @@ function loadGccTm() {
         // NEW TABS — all rendered from GCC-TM data
         // ══════════════════════════════════════════════════════
 
-        const roundDecs2 = d.round_decisions || [];
-        const simTrades2 = d.sim_trades || [];
+        const _1dayAgo2 = Date.now() - 24 * 3600 * 1000;
+        const _isRecent2 = (ts) => { if (!ts) return true; const dt = new Date(ts.replace(' ', 'T')); return isNaN(dt) || dt.getTime() > _1dayAgo2; };
+        const roundDecs2 = (d.round_decisions || []).filter(x => _isRecent2(x.ts));
+        const simTrades2 = (d.sim_trades || []).filter(x => _isRecent2(x.ts));
         const accuracy2 = d.accuracy || {};
         const candleStates2 = d.candle_states || {};
 
@@ -1533,7 +1547,37 @@ function loadGccTm() {
             `;
         }
 
-        // ── 信号池 Tab (tab-sigpool) ──
+        // ── 信号池 Tab: 实时信号池 + 方向锁 ──
+        {
+            const poolEntries = Object.entries(signalPool);
+            let liveCount = 0;
+            const liveRows = [];
+            poolEntries.forEach(([sym, signals]) => {
+                (signals || []).forEach(s => {
+                    liveCount++;
+                    const actColor = s.action === 'BUY' ? '#1a7f37' : '#cf222e';
+                    liveRows.push(`<tr><td><strong>${sym}</strong></td><td>${s.source||'-'}</td><td style="color:${actColor};font-weight:600">${s.action}</td><td>${(s.confidence||0).toFixed(2)}</td><td>${s.ts||'-'}</td><td style="font-size:0.8em;color:#656d76">${s.lock_status||'-'}</td></tr>`);
+                });
+            });
+            $('sigpool-live-cards').innerHTML = `
+                <div class="card"><div class="label">池内信号</div><div class="value blue">${liveCount}</div></div>
+                <div class="card"><div class="label">活跃品种</div><div class="value blue">${poolEntries.filter(([,s])=>s.length>0).length}</div></div>
+                <div class="card"><div class="label">方向锁</div><div class="value ${Object.keys(directionLocks).length>0?'yellow':'green'}">${Object.keys(directionLocks).length}</div></div>
+            `;
+            $('sigpool-live-body').innerHTML = liveRows.length ? liveRows.join('') : '<tr><td colspan="6" style="color:#656d76">信号池为空 (等待下次外挂信号)</td></tr>';
+
+            const lockRows = Object.entries(directionLocks).map(([sym, lk]) => {
+                const dirColor = lk.dir === 'BUY' ? '#1a7f37' : '#cf222e';
+                const expireDate = new Date(lk.expire_ts * 1000);
+                const remaining = Math.max(0, (lk.expire_ts * 1000 - Date.now()) / 60000);
+                const remStr = remaining > 0 ? remaining.toFixed(0) + 'min' : '已过期';
+                const remColor = remaining > 0 ? '#0969da' : '#cf222e';
+                return `<tr><td><strong>${sym}</strong></td><td style="color:${dirColor};font-weight:600">${lk.dir}</td><td>${lk.source||'-'}</td><td>${expireDate.toLocaleString()}</td><td style="color:${remColor}">${remStr}</td></tr>`;
+            });
+            $('dirlock-body').innerHTML = lockRows.length ? lockRows.join('') : '<tr><td colspan="5" style="color:#656d76">无方向锁</td></tr>';
+        }
+
+        // ── 信号池 Tab: 历史统计 ──
         {
             let totalSig = 0, totalBuy = 0, totalSell = 0;
             const perSym = {};

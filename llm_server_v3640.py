@@ -51130,6 +51130,24 @@ def key009_gcctm():
     except Exception:
         pass
 
+    # 信号池实时状态: gcc_signal_pool.json
+    signal_pool = {}
+    _sp_path = ROOT / "state" / "gcc_signal_pool.json"
+    try:
+        if _sp_path.exists():
+            signal_pool = json.loads(_sp_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+    # 方向锁实时状态: gcc_direction_lock.json
+    direction_locks = {}
+    _dl_path = ROOT / "state" / "gcc_direction_lock.json"
+    try:
+        if _dl_path.exists():
+            direction_locks = json.loads(_dl_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
     decisions = list(reversed(decisions))
     knn_entries = list(reversed(knn_entries))
     sim_trades = list(reversed(sim_trades))
@@ -51145,6 +51163,8 @@ def key009_gcctm():
                 "candle_states": candle_states,
                 "candle_summaries": candle_summaries,
                 "round_decisions": round_decisions,
+                "signal_pool": signal_pool,
+                "direction_locks": direction_locks,
             },
             ensure_ascii=False,
         ),
