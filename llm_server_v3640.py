@@ -51288,7 +51288,8 @@ def key009_gcctm():
                 ("S2", [r"\[S2外挂\]", r"plugin.*bypass", r"\[RobHoffman\]", r"\[DoublePattern\]", r"\[ChanBS\]", r"\[SuperTrend\]"]),
                 ("S1", [r"\[v3\.6[5-9]\d\].*L1", r"\[L1[_\s]", r"L1参考"]),
                 ("P0", [r"\[P0\]", r"\[CycleSwitch\]", r"\[P0-", r"scan.engine", r"price_scan"]),
-                ("SYS", [r"Schwab", r"yfinance", r"Coinbase", r"SignalStack", r"3Commas", r"\[API\]", r"\[NETWORK\]"]),
+                ("SYS", [r"Schwab", r"yfinance", r"Coinbase", r"SignalStack", r"3Commas", r"\[API\]", r"\[NETWORK\]",
+                         r"possibly delisted", r"SIGNAL_GATE_WORKER", r"KEY004-PCACHE"]),
             ]
             _EC_ERROR_RE = _ec_re.compile(
                 r"(ERROR|CRITICAL|Exception|Traceback|失败|NameError|TypeError|KeyError|ValueError|AttributeError|ImportError|ZeroDivision|ConnectionError|Timeout)",
@@ -51297,7 +51298,26 @@ def key009_gcctm():
             _EC_TS_RE = _ec_re.compile(r"(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}:\d{2})")
             _ec_cutoff = datetime.now().strftime("%Y-%m-%d")  # 今天
             _ec_errors = []
-            for _ec_logpath in [ROOT / "logs" / "server.log", ROOT / "logs" / "price_scan_engine.log"]:
+            _EC_LOG_SOURCES = {
+                "server.log": "server",
+                "filter_chain_worker.log": "server",
+                "price_scan_engine.log": "scan",
+            }
+            # 主日志 + 备份目录中包含今日日期的备份文件
+            _ec_log_paths = []
+            for _ec_name, _ec_src in _EC_LOG_SOURCES.items():
+                _ec_log_paths.append((ROOT / "logs" / _ec_name, _ec_src))
+            # 回退: 备份文件中可能包含今日数据(备份刚发生时)
+            _ec_backup_dir = ROOT / "logs" / "backup"
+            if _ec_backup_dir.exists():
+                import glob as _ec_glob
+                for _ec_bp in sorted(_ec_backup_dir.glob("*.log"), reverse=True)[:6]:
+                    _ec_bp_name = _ec_bp.name
+                    # 文件名格式: server_2026-03-07_2026-03-13.log
+                    if _ec_cutoff in _ec_bp_name or _ec_cutoff.replace("-", "") in _ec_bp_name:
+                        _ec_bp_src = "server" if "server" in _ec_bp_name or "worker" in _ec_bp_name else "scan"
+                        _ec_log_paths.append((_ec_bp, _ec_bp_src))
+            for _ec_logpath, _ec_source in _ec_log_paths:
                 if not _ec_logpath.exists():
                     continue
                 try:
@@ -51331,10 +51351,19 @@ def key009_gcctm():
                             "channel": _ec_ch,
                             "symbol": _ec_sym,
                             "msg": _ec_msg,
-                            "source": "server" if "server" in str(_ec_logpath) else "scan",
+                            "source": _ec_source,
                         })
                 except Exception:
                     pass
+            # 去重(备份和主文件可能有重叠行)
+            _ec_seen = set()
+            _ec_dedup = []
+            for _ece in _ec_errors:
+                _ece_key = (_ece["ts"], _ece["msg"][:80])
+                if _ece_key not in _ec_seen:
+                    _ec_seen.add(_ece_key)
+                    _ec_dedup.append(_ece)
+            _ec_errors = _ec_dedup
             error_classify = _ec_errors[-200:]  # 最多200条
             key009_gcctm._ec_cache = error_classify
             key009_gcctm._ec_ts = _ec_time.time()
@@ -55394,6 +55423,67 @@ def _autosave_worker():
                             log_to_server(f"[GCC-0258][HOLDOUT] 审计异常: {_e_ho}")
                 except Exception as _e_hos:
                     log_to_server(f"[GCC-0258][HOLDOUT] 调度异常: {_e_hos}")
+
+                # SYS: 每周日志备份 — 防止>50MB OneDrive同步错误
+                try:
+                    from datetime import datetime as _dt_lb
+                    from zoneinfo import ZoneInfo as _ZI_lb
+                    _now_lb = _dt_lb.now(_ZI_lb("America/New_York"))
+                    _today_lb = _now_lb.strftime("%Y-%m-%d")
+                    if not hasattr(_autosave_worker, "_log_backup_last"):
+                        _autosave_worker._log_backup_last = None
+                    # 每周日 8AM 或文件>40MB时触发
+                    _lb_force = False
+                    _LOG_BACKUP_TARGETS = [
+                        ROOT / "logs" / "server.log",
+                        ROOT / "logs" / "filter_chain_worker.log",
+                        ROOT / "logs" / "price_scan_engine.log",
+                    ]
+                    for _lb_p in _LOG_BACKUP_TARGETS:
+                        if _lb_p.exists() and _lb_p.stat().st_size > 40 * 1024 * 1024:
+                            _lb_force = True
+                            break
+                    _lb_is_sunday = _now_lb.weekday() == 6
+                    if ((_lb_is_sunday or _lb_force) and _now_lb.hour >= 8
+                            and _autosave_worker._log_backup_last != _today_lb):
+                        _autosave_worker._log_backup_last = _today_lb
+                        _lb_backup_dir = ROOT / "logs" / "backup"
+                        _lb_backup_dir.mkdir(exist_ok=True)
+                        for _lb_path in _LOG_BACKUP_TARGETS:
+                            if not _lb_path.exists() or _lb_path.stat().st_size < 1024:
+                                continue
+                            try:
+                                _lb_lines = _lb_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                                if not _lb_lines:
+                                    continue
+                                # 提取首行和末行日期作为备份文件名
+                                import re as _re_lb
+                                _lb_ts_re = _re_lb.compile(r"(\d{4}-\d{2}-\d{2})")
+                                _lb_start = "unknown"
+                                _lb_end = "unknown"
+                                for _ll in _lb_lines[:20]:
+                                    _m = _lb_ts_re.search(_ll)
+                                    if _m:
+                                        _lb_start = _m.group(1)
+                                        break
+                                for _ll in reversed(_lb_lines[-20:]):
+                                    _m = _lb_ts_re.search(_ll)
+                                    if _m:
+                                        _lb_end = _m.group(1)
+                                        break
+                                _lb_stem = _lb_path.stem  # e.g. "server"
+                                _lb_backup_name = f"{_lb_stem}_{_lb_start}_{_lb_end}.log"
+                                _lb_dest = _lb_backup_dir / _lb_backup_name
+                                # 写入备份 → 清空原文件
+                                import shutil as _sh_lb
+                                _sh_lb.copy2(str(_lb_path), str(_lb_dest))
+                                _lb_path.write_text("", encoding="utf-8")
+                                _lb_size_mb = _lb_dest.stat().st_size / (1024 * 1024)
+                                log_to_server(f"[SYS][LOG_BACKUP] {_lb_path.name} → {_lb_backup_name} ({_lb_size_mb:.1f}MB)")
+                            except Exception as _e_lb1:
+                                log_to_server(f"[SYS][LOG_BACKUP] {_lb_path.name} 备份失败: {_e_lb1}")
+                except Exception as _e_lbs:
+                    log_to_server(f"[SYS][LOG_BACKUP] 调度异常: {_e_lbs}")
 
             except Exception as e:
                 import traceback as _tb_autosave
