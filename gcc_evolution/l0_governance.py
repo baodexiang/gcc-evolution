@@ -1,5 +1,5 @@
 """
-GCC v5.400 - L0 governance gate for framework prerequisites and outputs.
+GCC v5.405 - L0 governance gate for framework prerequisites and outputs.
 
 S2: Three prerequisites must be explicitly satisfied before loop execution:
   1. data_quality

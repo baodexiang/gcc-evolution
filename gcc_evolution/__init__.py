@@ -1,5 +1,5 @@
 """
-gcc-evo - AI Self-Evolution Engine v5.401
+gcc-evo - AI Self-Evolution Engine v5.405
 
 Open-source framework for LLM agent persistent memory + continuous learning.
 
@@ -24,7 +24,7 @@ so basic commands such as `gcc-evo version` do not fail during package import.
 
 from importlib import import_module
 
-__version__ = "5.401"
+__version__ = "5.405"
 __author__ = "baodexiang"
 __license__ = "BUSL-1.1"
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gcc-evo v5.401 — GCC Evolution Engine with Visual Dashboard"""
+"""gcc-evo v5.405 — GCC Evolution Engine with Visual Dashboard"""
 from __future__ import annotations
 
 import json
@@ -31,7 +31,7 @@ if _GCC_SELF_DIR not in sys.path:
 
 KEYS_FILE = Path(".gcc/keys.yaml")
 
-HELP_TEXT = """  GCC v5.401 — Active Evolution Engine
+HELP_TEXT = """  GCC v5.405 — Active Evolution Engine
   ═══════════════════════════════════════════════════
 
   Daily Use:
