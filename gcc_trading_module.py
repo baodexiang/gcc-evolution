@@ -301,17 +301,13 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
         effective_direction=effective,
     )
 
-    # 如果程序重启, 当前已经不在round 0, 补齐缺失轮次
+    # 如果程序重启, 当前已经不在round 0, 标记起点
+    # 不在此处做HOLD占位回填 — 交给gcc_observe()用完整决策回填(有bars+mod)
     actual_round = _get_current_round(now, symbol=symbol)
     if actual_round > 0:
-        for i in range(actual_round):
-            state.round_decisions.append({
-                "round": i, "action": "HOLD",
-                "verdict": "BACKFILL", "executed": False,
-                "note": "program_restart_backfill",
-            })
         state.current_round = actual_round
-        logger.info("[GCC-TM] %s backfilled %d missed rounds", symbol, actual_round)
+        logger.info("[GCC-TM] %s restart at round %d, pending backfill with decisions",
+                    symbol, actual_round)
 
     logger.info(
         "[GCC-TM] %s new candle: vision=%s(%.0f%%) prev=%s effective=%s round=%d",
@@ -2995,24 +2991,53 @@ def gcc_observe(
                          symbol, actual_round)
             return
 
-        # ── 缺失轮次回填: 确保4H数据完整 ──
+        # ── 缺失轮次回填: 用当前bars跑完整决策(不执行交易) ──
         recorded_rounds = {r.get("round") for r in state.round_decisions}
         _backfill_count = 0
         for _missing_r in range(actual_round):
             if _missing_r not in recorded_rounds:
-                state.round_decisions.append({
-                    "round": _missing_r, "action": "HOLD",
-                    "verdict": "BACKFILL", "executed": False,
-                    "signals": 0, "buy_votes": 0, "sell_votes": 0,
-                    "price": 0.0,
-                    "ts": datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
-                    "note": "mid_candle_backfill",
-                })
+                try:
+                    _bf_result = mod.process_round(
+                        bars, signals, state,
+                        main_decision=main_decision,
+                        observe_only=True,  # 回填轮不执行交易
+                    )
+                    _bf_action = _bf_result.get("final_action", "HOLD")
+                    _bf_verdict = _bf_result.get("verdict", "BACKFILL")
+                    _bf_consensus = _bf_result.get("consensus", 0)
+                    _bf_price = _bf_result.get("current_price", 0.0)
+                    # 从process_round结果中提取信号统计
+                    _bf_ctx = _bf_result.get("context", {})
+                    _bf_sp = _bf_ctx.get("signal_pool", {})
+                    state.round_decisions.append({
+                        "round": _missing_r,
+                        "action": _bf_action,
+                        "verdict": f"BACKFILL_{_bf_verdict}",
+                        "executed": False,
+                        "signals": _bf_sp.get("total", 0),
+                        "buy_votes": _bf_sp.get("buy", 0),
+                        "sell_votes": _bf_sp.get("sell", 0),
+                        "price": _bf_price,
+                        "consensus": _bf_consensus,
+                        "ts": datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+                        "note": "backfill_with_decision",
+                    })
+                except Exception as _bf_dec_e:
+                    logger.warning("[GCC-TM] %s backfill round %d decision failed: %s",
+                                   symbol, _missing_r, _bf_dec_e)
+                    state.round_decisions.append({
+                        "round": _missing_r, "action": "HOLD",
+                        "verdict": "BACKFILL_ERROR", "executed": False,
+                        "signals": 0, "buy_votes": 0, "sell_votes": 0,
+                        "price": 0.0,
+                        "ts": datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+                        "note": f"backfill_error: {_bf_dec_e}",
+                    })
                 _backfill_count += 1
         if _backfill_count:
             state.round_decisions.sort(key=lambda r: r.get("round", 0))
             state.current_round = actual_round
-            logger.info("[GCC-TM] %s backfilled %d missed rounds (now round %d)",
+            logger.info("[GCC-TM] %s backfilled %d missed rounds with decisions (now round %d)",
                         symbol, _backfill_count, actual_round)
             _save_candle_state(state)
 
