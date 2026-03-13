@@ -3109,6 +3109,9 @@ def gcc_observe(
         # ── 更新K线状态 ──
         buy_votes = sum(1 for s in signals if s.get("action") == "BUY")
         sell_votes = sum(1 for s in signals if s.get("action") == "SELL")
+        # GCC-0259: 记录每个信号源的投票方向 (供dashboard显示)
+        buy_sources = [s.get("source", "?") for s in signals if s.get("action") == "BUY"]
+        sell_sources = [s.get("source", "?") for s in signals if s.get("action") == "SELL"]
 
         round_record = {
             "round": state.current_round,
@@ -3118,6 +3121,8 @@ def gcc_observe(
             "signals": len(signals),
             "buy_votes": buy_votes,
             "sell_votes": sell_votes,
+            "buy_sources": buy_sources,
+            "sell_sources": sell_sources,
             "price": current_price,
             "ts": datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
         }

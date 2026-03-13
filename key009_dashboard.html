@@ -1444,6 +1444,13 @@ function loadGccTm() {
                         const actColor = r.action === 'BUY' ? '#1a7f37' : r.action === 'SELL' ? '#cf222e' : '#656d76';
                         const buyBg = r.buy_votes > 0 ? 'background:#dafbe1' : '';
                         const sellBg = r.sell_votes > 0 ? 'background:#ffebe9' : '';
+                        // GCC-0259: 信号源明细 (buy_sources/sell_sources)
+                        const buySrc = (r.buy_sources || []).map(s => s.replace('_15m','').replace('_Hist','')).join(', ');
+                        const sellSrc = (r.sell_sources || []).map(s => s.replace('_15m','').replace('_Hist','')).join(', ');
+                        const buyLabel = r.buy_votes > 0 ? `${r.buy_votes}` : '0';
+                        const sellLabel = r.sell_votes > 0 ? `${r.sell_votes}` : '0';
+                        const buySrcHtml = buySrc ? `<div style="font-size:0.75em;color:#57606a;font-weight:400;margin-top:1px">${buySrc}</div>` : '';
+                        const sellSrcHtml = sellSrc ? `<div style="font-size:0.75em;color:#57606a;font-weight:400;margin-top:1px">${sellSrc}</div>` : '';
                         const verdictShort = (r.verdict || '').replace('DIRECTION_','').replace('ALREADY_','');
                         const verdictColor = r.executed ? '#0969da' : r.verdict === 'DIRECTION_HOLD' ? '#9a6700' : r.verdict === 'ALREADY_TRADED' ? '#656d76' : '#1f2328';
                         const execBadge = r.executed
@@ -1453,8 +1460,8 @@ function loadGccTm() {
                         roundsHTML += `<tr${r.executed?' style="background:#ddf4ff"':''}>
                             <td style="font-weight:700">R${i}</td>
                             <td style="color:#656d76">${ts}</td>
-                            <td style="${buyBg};font-weight:${r.buy_votes>0?'700':'400'};color:#1a7f37">${r.buy_votes || 0}</td>
-                            <td style="${sellBg};font-weight:${r.sell_votes>0?'700':'400'};color:#cf222e">${r.sell_votes || 0}</td>
+                            <td style="${buyBg};font-weight:${r.buy_votes>0?'700':'400'};color:#1a7f37">${buyLabel}${buySrcHtml}</td>
+                            <td style="${sellBg};font-weight:${r.sell_votes>0?'700':'400'};color:#cf222e">${sellLabel}${sellSrcHtml}</td>
                             <td style="color:${actColor};font-weight:600">${r.action || 'HOLD'}</td>
                             <td style="color:${verdictColor};font-size:0.9em">${verdictShort}</td>
                             <td>${price}</td>
