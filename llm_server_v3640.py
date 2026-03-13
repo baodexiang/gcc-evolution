@@ -118,7 +118,7 @@ except ImportError:
 # -----------------------------------------------------------------------------
 class SystemConfig:
     """系统级配置"""
-    VERSION = "3.682"  # v3.682: GCC-0258 S1 KNN升级为L1六模块投票者(Phase1仅日志) | v3.681: GCC-TM后台消费线程
+    VERSION = "3.683"  # v3.683: GCC-0258 S7 Hold-out过拟合审计(每日8AM,Phase1仅日志) | v3.682: GCC-0258 S1 KNN六模块
     LOG_DIR = "logs"
     STATE_FILE = "state.json"
     ENABLE_DEBUG = False
@@ -55312,6 +55312,87 @@ def _autosave_worker():
                     import traceback as _tb_k9
                     _autosave_worker._k9_phase = "IDLE"  # 异常恢复
                     log_to_server(f"[KEY-009][REVIEW] 审计异常: {_e_k9}\n{_tb_k9.format_exc()}")
+
+                # GCC-0258 S7: Hold-out走步验证 — KNN过拟合每日审计 (8AM NY, Phase1仅日志)
+                try:
+                    from datetime import datetime as _dt_ho
+                    from zoneinfo import ZoneInfo as _ZI_ho
+                    _now_ho = _dt_ho.now(_ZI_ho("America/New_York"))
+                    _today_ho = _now_ho.strftime("%Y-%m-%d")
+                    if not hasattr(_autosave_worker, "_holdout_last_date"):
+                        _autosave_worker._holdout_last_date = None
+                    if _now_ho.hour >= 8 and _autosave_worker._holdout_last_date != _today_ho:
+                        _autosave_worker._holdout_last_date = _today_ho
+                        try:
+                            import numpy as _np_ho
+                            from gcc_evolution.holdout import HoldoutSplitter, OverfitDetector
+
+                            _ho_path = os.path.join("state", "knn_history.npz")
+                            if os.path.exists(_ho_path):
+                                _ho_data = _np_ho.load(_ho_path, allow_pickle=True)
+                                _ho_db = _ho_data["db"].item()
+                                _ho_splitter = HoldoutSplitter(validate_ratio=0.15, test_ratio=0.15, min_train=30)
+                                _ho_detector = OverfitDetector(overfit_threshold=2.0, negative_oos_floor=-0.01)
+                                _ho_flags_total = 0
+                                _ho_symbols_checked = 0
+
+                                for _ho_sym, _ho_v in _ho_db.items():
+                                    if not isinstance(_ho_v, dict) or "features" not in _ho_v or "returns" not in _ho_v:
+                                        continue
+                                    _ho_feats = _ho_v["features"]
+                                    _ho_rets = _ho_v["returns"]
+                                    if len(_ho_rets) < 60:
+                                        continue
+
+                                    # walk-forward split: 窗口200条
+                                    _ho_records = list(range(len(_ho_rets)))
+                                    _ho_windows = _ho_splitter.split(_ho_records, window_size=200)
+                                    if not _ho_windows:
+                                        continue
+
+                                    _ho_symbols_checked += 1
+                                    _ho_sym_flags = []
+
+                                    for _ho_w in _ho_windows:
+                                        _ho_train_idx = _ho_w.train
+                                        _ho_val_idx = _ho_w.validate
+
+                                        # IS/OOS IC = mean return (正=赚,负=亏)
+                                        _ho_is_ic = float(_np_ho.mean(_ho_rets[_ho_train_idx]))
+                                        _ho_oos_ic = float(_np_ho.mean(_ho_rets[_ho_val_idx]))
+
+                                        _ho_result = _ho_detector.check(_ho_is_ic, _ho_oos_ic)
+                                        if _ho_result.is_overfit:
+                                            _ho_sym_flags.append(
+                                                f"W{_ho_w.window_id}:{','.join(_ho_result.flags)}"
+                                                f"(IS={_ho_is_ic:.4f}/OOS={_ho_oos_ic:.4f})"
+                                            )
+
+                                    if _ho_sym_flags:
+                                        _ho_flags_total += len(_ho_sym_flags)
+                                        _ho_top3 = _ho_sym_flags[:3]
+                                        log_to_server(
+                                            f"[GCC-0258][HOLDOUT] {_ho_sym} OVERFIT "
+                                            f"{len(_ho_sym_flags)}/{len(_ho_windows)}窗口 | "
+                                            f"{'; '.join(_ho_top3)}"
+                                        )
+
+                                if _ho_flags_total == 0:
+                                    log_to_server(
+                                        f"[GCC-0258][HOLDOUT] 每日审计完成: "
+                                        f"{_ho_symbols_checked}品种 全部OK, 无过拟合"
+                                    )
+                                else:
+                                    log_to_server(
+                                        f"[GCC-0258][HOLDOUT] 每日审计完成: "
+                                        f"{_ho_symbols_checked}品种, {_ho_flags_total}窗口有过拟合风险"
+                                    )
+                            else:
+                                log_to_server("[GCC-0258][HOLDOUT] knn_history.npz 不存在, 跳过审计")
+                        except Exception as _e_ho:
+                            log_to_server(f"[GCC-0258][HOLDOUT] 审计异常: {_e_ho}")
+                except Exception as _e_hos:
+                    log_to_server(f"[GCC-0258][HOLDOUT] 调度异常: {_e_hos}")
 
             except Exception as e:
                 import traceback as _tb_autosave
