@@ -55843,6 +55843,16 @@ def _qqq_options_manager_worker():
                                         f" → 平仓(下轮再开新方向)"
                                     )
                                     log_to_server(_rev_msg)
+                                    # 写入exit信息供交易历史记录
+                                    from qqq_options import STATE_FILE as _qsf, _position_lock as _qpl
+                                    try:
+                                        with _qpl:
+                                            _qd = json.loads(_qsf.read_text(encoding="utf-8"))
+                                            _qd["exit_action"] = "REVERSAL"
+                                            _qd["exit_reason"] = f"Vision={vision_dir} 反转 {opt_type}"
+                                            _qsf.write_text(json.dumps(_qd, indent=2, ensure_ascii=False), encoding="utf-8")
+                                    except Exception:
+                                        pass
                                     _qqq_close(_opt_d, dry_run=False, market_order=True)
                                     try:
                                         send_email_notification(

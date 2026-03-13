@@ -1578,6 +1578,17 @@ def _fifo_pair_trades(hours: int) -> dict:
 # KEY-009 券商对账: CSV实际交易 vs 系统信号匹配
 # ============================================================
 
+def _load_options_history() -> list:
+    """读取 state/tsla_options_history.json (由 qqq_options.py 生成)"""
+    try:
+        _oh_path = ROOT / "state" / "tsla_options_history.json"
+        if _oh_path.exists():
+            return json.loads(_oh_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return []
+
+
 def _load_broker_pnl() -> dict:
     """读取 state/broker_pnl.json (由 broker_reconciler.py 生成)"""
     try:
@@ -3005,6 +3016,7 @@ def _build_result(now_str, hours, tasks, summary_metrics,
         "strategy_ranking": strategy_ranking or [],
         "broker_match": broker_match or {"enabled": False},
         "broker_pnl": _load_broker_pnl(),
+        "options_history": _load_options_history(),
         "plugin_accuracy": plugin_accuracy or {},
         "plugin_phases": plugin_phases or {},
         "baseline": baseline_data or {"stats": {"total": 0, "pass": 0, "block": 0, "no_data": 0, "by_symbol": {}, "by_direction": {}}, "state": {}},

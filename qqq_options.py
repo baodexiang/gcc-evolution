@@ -95,7 +95,7 @@ def _save_position(position: dict):
 
 
 def _clear_position():
-    """清除持仓 (平仓后, 线程安全)"""
+    """清除持仓 (平仓后, 线程安全), 同时记录到交易历史"""
     with _position_lock:
         if STATE_FILE.exists():
             try:
@@ -104,8 +104,53 @@ def _clear_position():
                     data["status"] = "closed"
                     data["closed_at"] = datetime.now().isoformat()
                     STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                    # 记录到交易历史 (exit_action/exit_reason已在auto_manage中写入state)
+                    _append_trade_history(data,
+                                          data.get("exit_action", ""),
+                                          data.get("exit_reason", ""))
             except Exception:
                 pass
+
+
+HISTORY_FILE = Path(__file__).parent / "state" / "tsla_options_history.json"
+
+
+def _append_trade_history(pos_data: dict, exit_action: str = "", exit_reason: str = ""):
+    """将完成的交易追加到历史记录"""
+    opt = pos_data.get("option") or pos_data.get("spread") or {}
+    entry_cost = pos_data.get("entry_cost", 0)
+    opened_at = pos_data.get("opened_at", "")
+    closed_at = pos_data.get("closed_at", "")
+    contracts = opt.get("contracts", 0)
+    partial_tp = pos_data.get("partial_tp_done", False)
+
+    record = {
+        "type": opt.get("type", ""),         # CALL / PUT
+        "strike": opt.get("strike", 0),
+        "expiration": opt.get("expiration", ""),
+        "contracts": contracts,
+        "entry_cost": entry_cost,
+        "peak_value": pos_data.get("peak_value", 0),
+        "opened_at": opened_at,
+        "closed_at": closed_at,
+        "exit_action": exit_action,           # TRAILING_STOP / STOP_LOSS / TIME_EXIT / REVERSAL
+        "exit_reason": exit_reason,
+        "partial_tp_done": partial_tp,
+        "date": opened_at[:10] if opened_at else "",
+    }
+
+    try:
+        history = []
+        if HISTORY_FILE.exists():
+            history = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        history.append(record)
+        # 保留最近90天
+        if len(history) > 500:
+            history = history[-500:]
+        HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        HISTORY_FILE.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        logger.error(f"[TSLA_OPT] 写入交易历史失败: {e}")
 
 
 def _get_daily_trades() -> dict:
@@ -910,6 +955,17 @@ def auto_manage(dry_run: bool = True) -> Optional[dict]:
                               market_order=False, limit_price=_tp_limit)
     else:
         result = close_option(option, contracts=close_qty, dry_run=dry_run, market_order=True)
+
+    # 记录exit信息到position state, 供_clear_position写入历史
+    if result.get("success") and not dry_run:
+        with _position_lock:
+            try:
+                data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+                data["exit_action"] = action
+                data["exit_reason"] = exit_signal["reason"]
+                STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
 
     # 部分止盈: 不立即更新合约数, 等check_pending_close确认FILLED后再更新
     # close_option已设status=pending_close, 这里只记录pending_action让确认逻辑知道是部分平仓

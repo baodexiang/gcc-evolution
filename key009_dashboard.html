@@ -414,6 +414,9 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <!-- Tab: GCC交易决策模块 (KEY-011) -->
 <div class="tab-content active" id="tab-gcctm">
 
+<!-- TSLA期权交易明细 -->
+<div id="options-trade-section" style="margin-bottom:18px"></div>
+
 <!-- 总览统计 -->
 <div class="summary" id="gcctm-overview-cards"></div>
 
@@ -1292,6 +1295,80 @@ function loadGccTm() {
         const roundDecs = (d.round_decisions || []).filter(x => _isRecent(x.ts));
         const accuracy = d.accuracy || {};
         const simTrades = (d.sim_trades || []).filter(x => _isRecent(x.ts));
+
+        // ══════════════════════════════════════════════════════════
+        // TSLA 期权交易明细 (GCC-TM顶部)
+        // ══════════════════════════════════════════════════════════
+        {
+            const optHist = d.options_history || [];
+            const optEl = $('options-trade-section');
+            if (optHist.length > 0) {
+                const today = new Date().toISOString().slice(0, 10);
+                const todayTrades = optHist.filter(t => (t.opened_at || '').slice(0, 10) === today || (t.closed_at || '').slice(0, 10) === today);
+                // 按周: 本周一开始
+                const now = new Date();
+                const monday = new Date(now); monday.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1)); monday.setHours(0,0,0,0);
+                const weekTrades = optHist.filter(t => new Date(t.opened_at || '') >= monday);
+                // 按月
+                const monthStart = today.slice(0, 7);
+                const monthTrades = optHist.filter(t => (t.opened_at || '').slice(0, 7) === monthStart);
+
+                const fmtTime = s => s ? s.replace('T', ' ').slice(0, 16) : '-';
+                const pnlBadge = (entry, peak) => {
+                    if (!entry || !peak) return '-';
+                    const pct = ((peak - entry) / entry * 100).toFixed(1);
+                    return `<span style="color:${pct >= 0 ? '#16a34a' : '#dc2626'}">${pct >= 0 ? '+' : ''}${pct}%</span>`;
+                };
+                const exitBadge = a => {
+                    const m = {'TRAILING_STOP':'🔻追踪止损','STOP_LOSS':'🛑止损','TIME_EXIT':'⏰到期','REVERSAL':'🔄反转','TAKE_PROFIT_PARTIAL':'💰部分止盈'};
+                    return `<span style="padding:2px 6px;border-radius:3px;background:#f0f0f0;font-size:12px">${m[a]||a||'-'}</span>`;
+                };
+                const typeBadge = t => t === 'CALL' ? '<span style="color:#16a34a;font-weight:700">📈CALL</span>' : '<span style="color:#dc2626;font-weight:700">📉PUT</span>';
+
+                // 今日明细
+                let todayHtml = '';
+                if (todayTrades.length > 0) {
+                    const rows = todayTrades.map(t => `<tr>
+                        <td>${typeBadge(t.type)}</td><td>$${t.strike}</td><td>${t.contracts}张</td>
+                        <td>$${t.entry_cost?.toFixed(2) || '-'}</td><td>$${t.peak_value?.toFixed(2) || '-'}</td>
+                        <td>${pnlBadge(t.entry_cost, t.peak_value)}</td>
+                        <td>${fmtTime(t.opened_at)}</td><td>${fmtTime(t.closed_at)}</td>
+                        <td>${exitBadge(t.exit_action)}</td>
+                        <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${t.exit_reason || '-'}</td>
+                    </tr>`).join('');
+                    todayHtml = `<h3 style="margin:0 0 8px;color:#2563eb">📋 今日期权交易 (${todayTrades.length}笔)</h3>
+                    <table style="margin-bottom:12px"><thead><tr><th>方向</th><th>Strike</th><th>数量</th><th>入场价</th><th>峰值</th><th>P&L</th><th>开仓</th><th>平仓</th><th>出场方式</th><th>出场原因</th></tr></thead>
+                    <tbody>${rows}</tbody></table>`;
+                } else {
+                    todayHtml = `<h3 style="margin:0 0 8px;color:#2563eb">📋 今日期权交易</h3><p style="color:#888;margin:0 0 12px">今日暂无期权交易</p>`;
+                }
+
+                // 周汇总
+                const weekPnl = weekTrades.reduce((s, t) => s + ((t.peak_value || 0) - (t.entry_cost || 0)) * (t.contracts || 0) * 100, 0);
+                const weekWins = weekTrades.filter(t => (t.peak_value || 0) > (t.entry_cost || 0)).length;
+                let weekHtml = `<div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap">
+                    <div class="card" style="min-width:120px"><div class="label">本周交易</div><div class="value blue">${weekTrades.length}笔</div></div>
+                    <div class="card" style="min-width:120px"><div class="label">本周胜率</div><div class="value ${weekWins/Math.max(weekTrades.length,1)>=0.5?'green':'red'}">${weekTrades.length?((weekWins/weekTrades.length*100).toFixed(0)+'%'):'-'}</div></div>
+                    <div class="card" style="min-width:120px"><div class="label">本周P&L</div><div class="value ${weekPnl>=0?'green':'red'}">$${weekPnl>=0?'+':''}${weekPnl.toFixed(0)}</div></div>
+                </div>`;
+
+                // 月汇总
+                const monthPnl = monthTrades.reduce((s, t) => s + ((t.peak_value || 0) - (t.entry_cost || 0)) * (t.contracts || 0) * 100, 0);
+                const monthWins = monthTrades.filter(t => (t.peak_value || 0) > (t.entry_cost || 0)).length;
+                weekHtml += `<div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap">
+                    <div class="card" style="min-width:120px"><div class="label">本月交易</div><div class="value blue">${monthTrades.length}笔</div></div>
+                    <div class="card" style="min-width:120px"><div class="label">本月胜率</div><div class="value ${monthWins/Math.max(monthTrades.length,1)>=0.5?'green':'red'}">${monthTrades.length?((monthWins/monthTrades.length*100).toFixed(0)+'%'):'-'}</div></div>
+                    <div class="card" style="min-width:120px"><div class="label">本月P&L</div><div class="value ${monthPnl>=0?'green':'red'}">$${monthPnl>=0?'+':''}${monthPnl.toFixed(0)}</div></div>
+                </div>`;
+
+                optEl.innerHTML = `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:16px">
+                    <h2 style="margin:0 0 12px;font-size:16px">🎯 TSLA期权交易</h2>
+                    ${todayHtml}${weekHtml}
+                </div>`;
+            } else {
+                optEl.innerHTML = '';
+            }
+        }
 
         // ══════════════════════════════════════════════════════════
         // GCC-TM Tab: Pipeline View (品种面板 + 8轮时间线)
