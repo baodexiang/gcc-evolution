@@ -1578,6 +1578,19 @@ def _fifo_pair_trades(hours: int) -> dict:
 # KEY-009 券商对账: CSV实际交易 vs 系统信号匹配
 # ============================================================
 
+def _load_broker_pnl() -> dict:
+    """读取 state/broker_pnl.json (由 broker_reconciler.py 生成)"""
+    try:
+        import json as _json
+        _bp_path = os.path.join("state", "broker_pnl.json")
+        if os.path.exists(_bp_path):
+            with open(_bp_path, "r", encoding="utf-8") as _f:
+                return _json.load(_f)
+    except Exception:
+        pass
+    return {}
+
+
 def _match_broker_trades(hours: int) -> dict:
     """????CSV (AIPro/XXXX-X306.CSV/.csv) ? trade_history.json ?????
     ???? state/broker_pnl.json ?? Coinbase fills ?????"""
@@ -2993,6 +3006,7 @@ def _build_result(now_str, hours, tasks, summary_metrics,
                                                   "by_reason": {}, "by_source": {}},
         "strategy_ranking": strategy_ranking or [],
         "broker_match": broker_match or {"enabled": False},
+        "broker_pnl": _load_broker_pnl(),
         "plugin_accuracy": plugin_accuracy or {},
         "plugin_phases": plugin_phases or {},
         "baseline": baseline_data or {"stats": {"total": 0, "pass": 0, "block": 0, "no_data": 0, "by_symbol": {}, "by_direction": {}}, "state": {}},

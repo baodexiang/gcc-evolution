@@ -1,20 +1,18 @@
 """
-broker_reconciler.py — SYS-029 每日对账
-Schwab 1099-B CSV 解析 + Coinbase fills API → state/broker_pnl.json
+broker_reconciler.py — SYS-029 券商对账 v2
+Schwab API + Coinbase fills API → state/broker_pnl.json
+按日/周/月聚合真实P&L，显示在KEY-009 dashboard券商对账标签
 
 用法:
   python broker_reconciler.py          # 手动运行
   (llm_server 每日8AM NY 自动调度)
 """
 
-import csv
-import glob
 import json
 import os
-import re
-import time
-import secrets
-from datetime import datetime, timezone
+import logging
+from collections import defaultdict
+from datetime import datetime, timedelta, date
 from pathlib import Path
 
 try:
@@ -24,175 +22,65 @@ except ImportError:
     from zoneinfo import ZoneInfo
     NY_TZ = ZoneInfo("America/New_York")
 
-# ============================================================
-# Schwab 1099-B 品种名→ticker 映射
-# ============================================================
-NAME_TO_TICKER = {
-    "TESLA INC": "TSLA",
-    "ALPHABET INC": "GOOGL",
-    "INTEL CORP": "INTC",
-    "ASML HLDG N V": "ASML",
-    "OKLO INC": "OKLO",
-    "BROADCOM INC": "AVGO",
-    "SOFI TECHNOLOGIES INC": "SOFI",
-    "UPSTART HLDGS INC": "UPST",
-    "PAYONEER GLOBAL INC": "PAYO",
-    "STRATEGY INC": "MSTR",
-    "RECURSION PHARMACEUTICAL": "RXRX",
-    "INNODATA INC": "INOD",
-    "REDDIT INC": "RDDT",
-    "HIMS & HERS HEALTH INC": "HIMS",
-    "TEMPUS AI INC": "TEM",
-    "NEBIUS GROUP N V A": "NBIS",
-    "APPLOVIN CORP": "APP",
-    "UNITEDHEALTH GROUP INC": "UNH",
-    "COINBASE GLOBAL INC": "COIN",
-    "COREWEAVE INC": "CRWV",
-    "ROCKET LAB CORP": "RKLB",
-    "ADVANCED MICRO DEVIC": "AMD",
-    "OPENDOOR TECHNOLOGIES IN": "OPEN",
-    "PROSHARES ULTRAPRO SH": "TQQQ",
-    "BITMINE IMMERSION TECNOL": "BIMI",
-    "FIGURE TECHNOLOGY SOLUTI": "FIG",
-    "SHARPLINK GAMING IN": "SBET",
-    "SHARPLINK": "SBET",
-    "ISHARES ETHEREUM TRUST": "ETHA",
-    "OPENDOOR TECHNOLO": "OPEN-WT",
-}
-
-# 期权前缀 — 归类到 OPTIONS-XXX
-OPTIONS_PREFIXES = ("PUT ", "CALL ")
+logger = logging.getLogger("broker_reconciler")
 
 OUTPUT_FILE = "state/broker_pnl.json"
 
+# 日切分: 8AM NY → 次日8AM NY (8AM前的交易算前一天)
+_DAY_CUTOFF_HOUR = 8
+
+
+def _trade_day(utc_time_str: str) -> str:
+    """将UTC交易时间转为NY时区，按8AM切分归属到哪一天。
+    8AM NY之前的交易算前一天。返回 'YYYY-MM-DD'。"""
+    try:
+        # 解析UTC时间 "2026-03-12T18:00:15+0000"
+        ts = utc_time_str.replace("+0000", "+00:00").replace("Z", "+00:00")
+        dt = datetime.fromisoformat(ts)
+        # 转NY时区
+        dt_ny = dt.astimezone(NY_TZ)
+        # 8AM前算前一天
+        if dt_ny.hour < _DAY_CUTOFF_HOUR:
+            dt_ny -= timedelta(days=1)
+        return dt_ny.strftime("%Y-%m-%d")
+    except Exception:
+        # fallback: 直接用date字段
+        return utc_time_str[:10] if utc_time_str else ""
+
+
+def _trade_week(day_str: str) -> str:
+    """按周一8AM切分。返回该周周一日期 'YYYY-MM-DD'。"""
+    try:
+        dt = datetime.strptime(day_str, "%Y-%m-%d")
+        # 周一为起始
+        week_start = dt - timedelta(days=dt.weekday())
+        return week_start.strftime("%Y-%m-%d")
+    except ValueError:
+        return day_str[:7]
+
+
 # ============================================================
-# Schwab CSV 解析
+# Schwab API 交易历史
 # ============================================================
 
-def _parse_description(desc: str):
-    """从1099-B描述提取 (数量, ticker)
-    例: '50.00 ALPHABET INC            CLASS            CLASS A' → (50.0, 'GOOGL')
+def fetch_schwab_trades(days: int = 60) -> list:
+    """通过Schwab API拉取交易记录。
+
+    Returns:
+        [{symbol, action, qty, price, amount, fees, net_amount, date, order_id, asset_type}, ...]
     """
-    desc = desc.strip()
-    # 提取前面的数量
-    m = re.match(r"^([\d.]+)\s+(.+)$", desc)
-    if not m:
-        return None, None
-    qty = float(m.group(1))
-    name_raw = m.group(2)
-
-    # 清理多余空格, 去掉CLASS/ADR等后缀信息
-    name_clean = re.sub(r"\s+", " ", name_raw).strip()
-
-    # 期权: PUT/CALL开头 → 归类为 OPTIONS
-    for prefix in OPTIONS_PREFIXES:
-        if name_clean.upper().startswith(prefix):
-            return qty, "OPTIONS"
-
-    # 尝试匹配: 从最长前缀开始匹配
-    for known_name, ticker in NAME_TO_TICKER.items():
-        if name_clean.upper().startswith(known_name.upper()):
-            return qty, ticker
-
-    # 未匹配 — 返回原始名称作为ticker
-    # 取第一个有意义的词组(去掉CLASS/ADR等)
-    fallback = re.sub(r"\s+(CLASS|FSPONSORED|ADR|REPS|ORD|SHS|INC).*", "", name_clean, flags=re.IGNORECASE).strip()
-    return qty, fallback or name_clean
-
-
-def _parse_dollar(val: str) -> float:
-    """'$1,234.56' or '1234.56' → 1234.56"""
-    if not val:
-        return 0.0
-    return float(val.replace("$", "").replace(",", "").strip() or "0")
-
-
-def parse_schwab_csv(filepath: str) -> dict:
-    """解析单个Schwab 1099-B CSV，返回按品种汇总的P&L"""
-    result = {}
-    in_1099b = False
-
-    with open(filepath, "r", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if not row:
-                continue
-
-            # 找到1099-B区域开始
-            if row[0].strip() == "Form 1099 B":
-                in_1099b = True
-                continue
-
-            if not in_1099b:
-                continue
-
-            # 跳过列头行
-            if row[0].strip() in ("1a", "Description of property (Example 100 sh. XYZ Co.)"):
-                continue
-
-            # 数据行: 至少需要5列 (1a描述, 1b日期, 1c日期, 1d收入, 1e成本)
-            if len(row) < 7:
-                continue
-
-            desc = row[0].strip()
-            if not desc or not desc[0].isdigit():
-                continue
-
-            qty, ticker = _parse_description(desc)
-            if not ticker:
-                continue
-
-            proceeds = _parse_dollar(row[3])
-            cost_basis = _parse_dollar(row[4])
-            wash_sale = _parse_dollar(row[6])
-
-            if ticker not in result:
-                result[ticker] = {
-                    "lots": 0,
-                    "proceeds": 0.0,
-                    "cost_basis": 0.0,
-                    "realized_pnl": 0.0,
-                    "wash_sale": 0.0,
-                }
-
-            result[ticker]["lots"] += 1
-            result[ticker]["proceeds"] += proceeds
-            result[ticker]["cost_basis"] += cost_basis
-            result[ticker]["realized_pnl"] += (proceeds - cost_basis)
-            result[ticker]["wash_sale"] += wash_sale
-
-    # 四舍五入
-    for ticker in result:
-        for k in ("proceeds", "cost_basis", "realized_pnl", "wash_sale"):
-            result[ticker][k] = round(result[ticker][k], 2)
-
-    return result
-
-
-def parse_all_schwab() -> dict:
-    """扫描AIPro/*.CSV，合并所有Schwab数据"""
-    csv_files = glob.glob("AIPro/*.CSV") + glob.glob("AIPro/*.csv")
-    csv_files = list(set(csv_files))  # 去重
-
-    merged = {}
-    for fpath in csv_files:
-        try:
-            data = parse_schwab_csv(fpath)
-            for ticker, info in data.items():
-                if ticker not in merged:
-                    merged[ticker] = {"lots": 0, "proceeds": 0.0, "cost_basis": 0.0,
-                                      "realized_pnl": 0.0, "wash_sale": 0.0}
-                for k in ("lots", "proceeds", "cost_basis", "realized_pnl", "wash_sale"):
-                    merged[ticker][k] += info[k]
-        except Exception as e:
-            print(f"[SYS-029] Schwab CSV解析失败 {fpath}: {e}")
-
-    # 四舍五入
-    for ticker in merged:
-        for k in ("proceeds", "cost_basis", "realized_pnl", "wash_sale"):
-            merged[ticker][k] = round(merged[ticker][k], 2)
-
-    return merged
+    try:
+        from schwab_data_provider import get_provider
+        provider = get_provider()
+        trades = provider.get_transactions(days=days)
+        # 用8AM NY切分日期
+        for t in trades:
+            t["date"] = _trade_day(t.get("time", t.get("date", "")))
+        logger.info("[SYS-029] Schwab API: %d trades in %d days", len(trades), days)
+        return trades
+    except Exception as e:
+        logger.error("[SYS-029] Schwab API error: %s", e)
+        return []
 
 
 # ============================================================
@@ -200,7 +88,6 @@ def parse_all_schwab() -> dict:
 # ============================================================
 
 def _coinbase_available() -> bool:
-    """检查coinbase依赖是否可用"""
     try:
         import jwt
         from cryptography.hazmat.primitives import serialization
@@ -210,23 +97,24 @@ def _coinbase_available() -> bool:
         return False
 
 
-def fetch_coinbase_fills() -> dict:
-    """拉取Coinbase成交记录，FIFO匹配算realized P&L"""
+def fetch_coinbase_trades() -> list:
+    """拉取Coinbase成交记录，返回统一格式。
+
+    Returns:
+        [{symbol, action, qty, price, amount, fees, date, asset_type}, ...]
+    """
     if not _coinbase_available():
-        print("[SYS-029] Coinbase依赖缺失(jwt/cryptography/requests)，跳过")
-        return {}
+        return []
 
     try:
-        # 动态导入coinbase_sync_v6的auth函数
         import importlib.util
         spec = importlib.util.spec_from_file_location("coinbase_sync_v6", "coinbase_sync_v6.py")
         cb = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cb)
 
-        # 拉取fills: 最近90天
         all_fills = []
         cursor = None
-        for _ in range(10):  # 最多10页
+        for _ in range(10):
             path = "/api/v3/brokerage/orders/historical/fills?limit=100"
             if cursor:
                 path += f"&cursor={cursor}"
@@ -241,102 +129,232 @@ def fetch_coinbase_fills() -> dict:
             if not cursor:
                 break
 
-        if not all_fills:
-            return {}
-
-        # 按品种分组 FIFO 匹配
-        by_product = {}
+        trades = []
         for fill in all_fills:
             product = fill.get("product_id", "")
-            if product not in by_product:
-                by_product[product] = {"buys": [], "sells": []}
-
             side = fill.get("side", "").upper()
             size = float(fill.get("size", 0))
             price = float(fill.get("price", 0))
             fee = float(fill.get("commission", 0))
+            trade_time = fill.get("trade_time", "")
+            trade_date = trade_time[:10] if trade_time else ""
 
-            entry = {"size": size, "price": price, "fee": fee}
-            if side == "BUY":
-                by_product[product]["buys"].append(entry)
-            elif side == "SELL":
-                by_product[product]["sells"].append(entry)
+            trades.append({
+                "symbol": product,
+                "action": side,
+                "qty": size,
+                "price": round(price, 4),
+                "amount": round(size * price, 2),
+                "fees": round(fee, 4),
+                "net_amount": round(size * price * (1 if side == "SELL" else -1), 2),
+                "date": trade_date,
+                "time": trade_time,
+                "order_id": fill.get("order_id", ""),
+                "asset_type": "crypto",
+            })
 
-        # FIFO 匹配
-        result = {}
-        for product, sides in by_product.items():
-            buys = list(sides["buys"])  # copy
-            total_pnl = 0.0
-            total_fees = 0.0
-            matched_sells = 0
-            total_buys = len(buys)
-
-            for sell in sides["sells"]:
-                sell_size = sell["size"]
-                sell_revenue = sell_size * sell["price"]
-                total_fees += sell["fee"]
-                matched_sells += 1
-
-                # FIFO match buys
-                cost = 0.0
-                remaining = sell_size
-                while remaining > 0 and buys:
-                    buy = buys[0]
-                    matched = min(remaining, buy["size"])
-                    cost += matched * buy["price"]
-                    total_fees += buy["fee"] * (matched / buy["size"]) if buy["size"] > 0 else 0
-                    buy["size"] -= matched
-                    remaining -= matched
-                    if buy["size"] <= 1e-10:
-                        buys.pop(0)
-
-                total_pnl += (sell_revenue - cost)
-
-            if matched_sells > 0 or total_buys > 0:
-                result[product] = {
-                    "buys": total_buys,
-                    "sells": matched_sells,
-                    "realized_pnl": round(total_pnl, 2),
-                    "fees": round(total_fees, 2),
-                }
-
-        return result
-
+        logger.info("[SYS-029] Coinbase: %d fills", len(trades))
+        return trades
     except Exception as e:
-        print(f"[SYS-029] Coinbase fills拉取异常: {e}")
-        return {}
+        logger.error("[SYS-029] Coinbase error: %s", e)
+        return []
+
+
+# ============================================================
+# FIFO P&L 计算
+# ============================================================
+
+def _fifo_pnl(trades: list) -> dict:
+    """FIFO匹配计算realized P&L。
+
+    Args:
+        trades: 按时间排序的交易列表 (已统一格式)
+
+    Returns:
+        {
+            "by_symbol": {symbol: {buys, sells, realized_pnl, fees}},
+            "by_date": {date_str: {realized_pnl, fees, trade_count, details: [...]}},
+            "completed_trades": [{symbol, buy_price, sell_price, qty, pnl, pnl_pct, date}],
+            "open_positions": {symbol: [{price, qty, date}]},
+        }
+    """
+    # 按品种分组
+    open_buys = defaultdict(list)  # symbol → [{price, qty, date, fees}]
+    completed = []
+    by_date_pnl = defaultdict(lambda: {"realized_pnl": 0.0, "fees": 0.0, "trade_count": 0, "details": []})
+    by_symbol = defaultdict(lambda: {"buys": 0, "sells": 0, "realized_pnl": 0.0, "fees": 0.0, "qty_bought": 0.0, "qty_sold": 0.0})
+
+    for t in trades:
+        sym = t["symbol"]
+        action = t["action"]
+        qty = t["qty"]
+        price = t["price"]
+        fees = t.get("fees", 0)
+        trade_date = t.get("date", "")
+
+        by_symbol[sym]["fees"] += fees
+        by_date_pnl[trade_date]["fees"] += fees
+        by_date_pnl[trade_date]["trade_count"] += 1
+
+        if action == "BUY":
+            by_symbol[sym]["buys"] += 1
+            by_symbol[sym]["qty_bought"] += qty
+            open_buys[sym].append({"price": price, "qty": qty, "date": trade_date})
+        elif action == "SELL":
+            by_symbol[sym]["sells"] += 1
+            by_symbol[sym]["qty_sold"] += qty
+            # FIFO match
+            remaining = qty
+            while remaining > 0 and open_buys[sym]:
+                buy = open_buys[sym][0]
+                matched = min(remaining, buy["qty"])
+                pnl = (price - buy["price"]) * matched
+                pnl_pct = ((price - buy["price"]) / buy["price"] * 100) if buy["price"] > 0 else 0
+
+                completed.append({
+                    "symbol": sym,
+                    "buy_price": buy["price"],
+                    "sell_price": price,
+                    "qty": matched,
+                    "pnl": round(pnl, 2),
+                    "pnl_pct": round(pnl_pct, 2),
+                    "buy_date": buy["date"],
+                    "sell_date": trade_date,
+                })
+                by_symbol[sym]["realized_pnl"] += pnl
+                by_date_pnl[trade_date]["realized_pnl"] += pnl
+                by_date_pnl[trade_date]["details"].append({
+                    "symbol": sym, "pnl": round(pnl, 2),
+                    "qty": matched, "buy_price": buy["price"], "sell_price": price,
+                })
+
+                buy["qty"] -= matched
+                remaining -= matched
+                if buy["qty"] <= 1e-10:
+                    open_buys[sym].pop(0)
+
+    # Round
+    for sym in by_symbol:
+        for k in ("realized_pnl", "fees"):
+            by_symbol[sym][k] = round(by_symbol[sym][k], 2)
+    for d in by_date_pnl:
+        by_date_pnl[d]["realized_pnl"] = round(by_date_pnl[d]["realized_pnl"], 2)
+        by_date_pnl[d]["fees"] = round(by_date_pnl[d]["fees"], 4)
+
+    open_positions = {}
+    for sym, buys in open_buys.items():
+        if buys:
+            open_positions[sym] = [{"price": b["price"], "qty": round(b["qty"], 6), "date": b["date"]}
+                                   for b in buys if b["qty"] > 1e-10]
+
+    return {
+        "by_symbol": dict(by_symbol),
+        "by_date": dict(by_date_pnl),
+        "completed_trades": completed,
+        "open_positions": open_positions,
+    }
+
+
+# ============================================================
+# 日/周/月 聚合
+# ============================================================
+
+def _aggregate_periods(by_date: dict) -> dict:
+    """将by_date聚合为weekly和monthly。
+
+    Returns:
+        {"daily": [...], "weekly": [...], "monthly": [...]}
+    """
+    # Daily: 按日期排序
+    daily = []
+    for d in sorted(by_date.keys()):
+        info = by_date[d]
+        daily.append({
+            "date": d,
+            "pnl": info["realized_pnl"],
+            "fees": info["fees"],
+            "trades": info["trade_count"],
+        })
+
+    # Weekly: 周一8AM → 下周一8AM
+    weekly_agg = defaultdict(lambda: {"pnl": 0.0, "fees": 0.0, "trades": 0})
+    for d, info in by_date.items():
+        week_key = _trade_week(d)
+        weekly_agg[week_key]["pnl"] += info["realized_pnl"]
+        weekly_agg[week_key]["fees"] += info["fees"]
+        weekly_agg[week_key]["trades"] += info["trade_count"]
+
+    weekly = [{"week_start": k, "pnl": round(v["pnl"], 2), "fees": round(v["fees"], 4), "trades": v["trades"]}
+              for k, v in sorted(weekly_agg.items())]
+
+    # Monthly
+    monthly_agg = defaultdict(lambda: {"pnl": 0.0, "fees": 0.0, "trades": 0})
+    for d, info in by_date.items():
+        month_key = d[:7]  # "2026-03"
+        monthly_agg[month_key]["pnl"] += info["realized_pnl"]
+        monthly_agg[month_key]["fees"] += info["fees"]
+        monthly_agg[month_key]["trades"] += info["trade_count"]
+
+    monthly = [{"month": k, "pnl": round(v["pnl"], 2), "fees": round(v["fees"], 4), "trades": v["trades"]}
+               for k, v in sorted(monthly_agg.items())]
+
+    return {"daily": daily, "weekly": weekly, "monthly": monthly}
 
 
 # ============================================================
 # 主逻辑
 # ============================================================
 
-def run():
+def run(days: int = 60) -> dict:
     """执行对账，输出 state/broker_pnl.json"""
     now = datetime.now(NY_TZ)
     ts = now.strftime("%Y-%m-%dT%H:%M:%S%z")
-    # 格式化timezone offset: +0500 → +05:00
     ts = ts[:-2] + ":" + ts[-2:]
 
-    # Schwab
-    schwab_data = parse_all_schwab()
-    schwab_total = sum(v["realized_pnl"] for v in schwab_data.values())
+    # Schwab API
+    schwab_trades = fetch_schwab_trades(days=days)
+    schwab_result = _fifo_pnl(schwab_trades)
+    schwab_periods = _aggregate_periods(schwab_result["by_date"])
+    schwab_total = sum(v["realized_pnl"] for v in schwab_result["by_symbol"].values())
 
-    # Coinbase
-    cb_data = fetch_coinbase_fills()
-    cb_total = sum(v["realized_pnl"] for v in cb_data.values())
+    # Coinbase API
+    cb_trades = fetch_coinbase_trades()
+    cb_result = _fifo_pnl(cb_trades)
+    cb_periods = _aggregate_periods(cb_result["by_date"])
+    cb_total = sum(v["realized_pnl"] for v in cb_result["by_symbol"].values())
+
+    # 合并daily/weekly/monthly (schwab + coinbase)
+    all_by_date = defaultdict(lambda: {"realized_pnl": 0.0, "fees": 0.0, "trade_count": 0})
+    for src in (schwab_result["by_date"], cb_result["by_date"]):
+        for d, info in src.items():
+            all_by_date[d]["realized_pnl"] += info["realized_pnl"]
+            all_by_date[d]["fees"] += info["fees"]
+            all_by_date[d]["trade_count"] += info["trade_count"]
+    combined_periods = _aggregate_periods(dict(all_by_date))
 
     output = {
         "updated_at": ts,
         "schwab": {
-            "symbols": schwab_data,
+            "symbols": schwab_result["by_symbol"],
             "total_realized": round(schwab_total, 2),
+            "total_trades": len(schwab_trades),
+            "periods": schwab_periods,
+            "open_positions": schwab_result["open_positions"],
+            "recent_trades": schwab_result["completed_trades"][-20:],
         },
         "coinbase": {
-            "symbols": cb_data,
+            "symbols": cb_result["by_symbol"],
             "total_realized": round(cb_total, 2),
+            "total_trades": len(cb_trades),
+            "periods": cb_periods,
+            "open_positions": cb_result["open_positions"],
+            "recent_trades": cb_result["completed_trades"][-20:],
         },
-        "total_pnl": round(schwab_total + cb_total, 2),
+        "combined": {
+            "total_pnl": round(schwab_total + cb_total, 2),
+            "total_trades": len(schwab_trades) + len(cb_trades),
+            "periods": combined_periods,
+        },
     }
 
     os.makedirs("state", exist_ok=True)
@@ -344,12 +362,21 @@ def run():
         json.dump(output, f, indent=2, ensure_ascii=False)
 
     print(f"[SYS-029] 对账完成 → {OUTPUT_FILE}")
-    print(f"  Schwab: {len(schwab_data)}品种, P&L=${schwab_total:+,.2f}")
-    print(f"  Coinbase: {len(cb_data)}品种, P&L=${cb_total:+,.2f}")
+    print(f"  Schwab: {len(schwab_trades)}笔, P&L=${schwab_total:+,.2f}")
+    print(f"  Coinbase: {len(cb_trades)}笔, P&L=${cb_total:+,.2f}")
     print(f"  Total: ${schwab_total + cb_total:+,.2f}")
+    if combined_periods["daily"]:
+        today_str = now.strftime("%Y-%m-%d")
+        today_pnl = next((d["pnl"] for d in combined_periods["daily"] if d["date"] == today_str), 0)
+        print(f"  Today: ${today_pnl:+,.2f}")
+    if combined_periods["weekly"]:
+        print(f"  This week: ${combined_periods['weekly'][-1]['pnl']:+,.2f}")
+    if combined_periods["monthly"]:
+        print(f"  This month: ${combined_periods['monthly'][-1]['pnl']:+,.2f}")
 
     return output
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     run()

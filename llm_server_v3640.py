@@ -39981,6 +39981,18 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
                     f"success={_qqq_result.get('success')} "
                     f"type={_opt_info.get('type', 'N/A')} strike={_opt_info.get('strike', 'N/A')}"
                 )
+                _qqq_action = _qqq_result.get('action', final_action)
+                try:
+                    send_email_notification(
+                        f"[TSLA期权] L1 {final_action} → {_qqq_action}",
+                        f"来源: L1主循环\n方向: {final_action}\n"
+                        f"结果: {_qqq_action}\n"
+                        f"合约: {_opt_info.get('type','N/A')} {_opt_info.get('strike','N/A')} "
+                        f"x{_opt_info.get('contracts','N/A')}\n"
+                        f"成功: {_qqq_result.get('success')}"
+                    )
+                except Exception:
+                    pass
                 return _qqq_result.get("success", False)
             except Exception as _qqq_e:
                 log_to_server(f"[TSLA_OPT][ERROR] {final_action}: {_qqq_e}")
@@ -43058,6 +43070,16 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                 f"[TSLA_OPT] GCC-TM {_gcc_act} → success={send_ok} "
                 f"type={_opt_info.get('type', 'N/A')} strike={_opt_info.get('strike', 'N/A')}"
             )
+            try:
+                send_email_notification(
+                    f"[TSLA期权] GCC-TM {_gcc_act}",
+                    f"来源: GCC-TM\n方向: {_gcc_act}\n"
+                    f"合约: {_opt_info.get('type','N/A')} {_opt_info.get('strike','N/A')} "
+                    f"x{_opt_info.get('contracts','N/A')}\n"
+                    f"成功: {send_ok}"
+                )
+            except Exception:
+                pass
         except Exception as _qqq_e:
             log_to_server(f"[TSLA_OPT][ERROR] GCC-TM {_gcc_act}: {_qqq_e}")
     elif is_us_stock(symbol):
@@ -55783,11 +55805,25 @@ def _qqq_options_manager_worker():
                     # 2a. 价格止盈/止损/时间止损 (每5分钟, 不需要Vision)
                     exit_result = _qqq_auto(dry_run=False)
                     if exit_result:
-                        log_to_server(
+                        _exit_msg = (
                             f"[TSLA_OPT][EXIT] {exit_result['action']}: {exit_result['reason']} "
                             f"PnL=${exit_result.get('pnl', 0):.0f} "
                             f"success={exit_result['result'].get('success')}"
                         )
+                        log_to_server(_exit_msg)
+                        try:
+                            _opt_d2 = pos.get("option") or pos.get("spread") or {}
+                            send_email_notification(
+                                f"[TSLA期权] {exit_result['action']} PnL=${exit_result.get('pnl', 0):.0f}",
+                                f"动作: {exit_result['action']}\n"
+                                f"原因: {exit_result['reason']}\n"
+                                f"PnL: ${exit_result.get('pnl', 0):.0f}\n"
+                                f"合约: {_opt_d2.get('type','')} {_opt_d2.get('strike','')} "
+                                f"x{_opt_d2.get('contracts','')}\n"
+                                f"成功: {exit_result['result'].get('success')}"
+                            )
+                        except Exception:
+                            pass
                     else:
                         # 2b. Vision反转检测 (每1小时)
                         _now_ts = _t.time()
@@ -55802,11 +55838,23 @@ def _qqq_options_manager_worker():
                                     (vision_dir == "BUY" and opt_type in ("PUT", "BEAR_PUT"))
                                 )
                                 if is_reversal:
-                                    log_to_server(
+                                    _rev_msg = (
                                         f"[TSLA_OPT][REVERSAL] Vision={vision_dir} 但持仓={opt_type}"
                                         f" → 平仓(下轮再开新方向)"
                                     )
+                                    log_to_server(_rev_msg)
                                     _qqq_close(_opt_d, dry_run=False, market_order=True)
+                                    try:
+                                        send_email_notification(
+                                            f"[TSLA期权] 反转平仓 {opt_type}→{vision_dir}",
+                                            f"Vision检测到趋势反转\n"
+                                            f"原持仓: {opt_type} {_opt_d.get('strike','')} "
+                                            f"x{_opt_d.get('contracts','')}\n"
+                                            f"Vision方向: {vision_dir}\n"
+                                            f"动作: 全部平仓"
+                                        )
+                                    except Exception:
+                                        pass
                                     # 不立即开新仓! 等pending_close确认后下轮step(3)开
 
                 # ── (3) 无仓: 检查进场 ────────────────────────────────
@@ -55825,12 +55873,26 @@ def _qqq_options_manager_worker():
                                     opt = _qqq_select(direction, chain)
                                     if opt:
                                         result = _qqq_place(opt, dry_run=False)
-                                        log_to_server(
+                                        _entry_msg = (
                                             f"[TSLA_OPT][ENTRY] {opt['type']} "
                                             f"{opt['strike']} "
                                             f"x{opt['contracts']} cost=${opt['total_cost']:.0f} "
                                             f"success={result.get('success')}"
                                         )
+                                        log_to_server(_entry_msg)
+                                        try:
+                                            send_email_notification(
+                                                f"[TSLA期权] 开仓 {opt['type']} {opt['strike']}",
+                                                f"方向: {direction}\n"
+                                                f"合约: {opt['type']} Strike={opt['strike']} "
+                                                f"DTE={opt.get('dte','?')}\n"
+                                                f"数量: x{opt['contracts']}\n"
+                                                f"成本: ${opt['total_cost']:.0f}\n"
+                                                f"Delta: {opt.get('delta','?')}\n"
+                                                f"成功: {result.get('success')}"
+                                            )
+                                        except Exception:
+                                            pass
                                         _qqq_last_signal["direction"] = direction
                                         _qqq_last_signal["time"] = _now_ts
 

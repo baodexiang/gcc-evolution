@@ -416,6 +416,79 @@ class SchwabDataProvider:
             return {"success": False, "error": str(e)}
 
     # ──────────────────────────────────────────
+    # 交易历史 (券商对账用)
+    # ──────────────────────────────────────────
+    def get_transactions(self, days: int = 60) -> list:
+        """拉取最近N天的TRADE类型交易记录。
+
+        Returns:
+            [{symbol, action, qty, price, amount, fees, date, time, order_id, asset_type}, ...]
+        """
+        from datetime import date as _date
+        try:
+            from schwab.client import Client as _C
+            client = self._get_client()
+            account_hash = self._get_account_hash()
+            end = _date.today()
+            start = end - timedelta(days=days)
+            resp = client.get_transactions(
+                account_hash,
+                start_date=start,
+                end_date=end,
+                transaction_types=[_C.Transactions.TransactionType.TRADE],
+            )
+            if resp.status_code != 200:
+                logger.error("[SCHWAB] get_transactions HTTP %d", resp.status_code)
+                return []
+            raw = resp.json()
+            if not isinstance(raw, list):
+                return []
+
+            trades = []
+            for tx in raw:
+                trade_date = tx.get("tradeDate", "")[:10]  # "2026-03-12"
+                trade_time = tx.get("time", "")
+                order_id = str(tx.get("orderId", ""))
+                net_amount = float(tx.get("netAmount", 0))
+                # 提取EQUITY/OPTION条目
+                for item in tx.get("transferItems", []):
+                    inst = item.get("instrument", {})
+                    asset_type = inst.get("assetType", "")
+                    if asset_type in ("EQUITY", "OPTION"):
+                        symbol = inst.get("symbol", "")
+                        qty = abs(float(item.get("amount", 0)))
+                        price = float(item.get("price", 0))
+                        effect = item.get("positionEffect", "")
+                        action = "BUY" if effect == "OPENING" else "SELL" if effect == "CLOSING" else effect
+                        cost = float(item.get("cost", 0))
+                        # 提取费用
+                        fees = sum(
+                            abs(float(fi.get("cost", 0)))
+                            for fi in tx.get("transferItems", [])
+                            if fi.get("instrument", {}).get("assetType") == "CURRENCY"
+                            and fi.get("feeType") in ("COMMISSION", "SEC_FEE", "TAF_FEE", "OPT_REG_FEE")
+                        )
+                        trades.append({
+                            "symbol": symbol,
+                            "action": action,
+                            "qty": qty,
+                            "price": round(price, 4),
+                            "amount": round(abs(cost), 2),
+                            "fees": round(fees, 4),
+                            "net_amount": round(net_amount, 2),
+                            "date": trade_date,
+                            "time": trade_time,
+                            "order_id": order_id,
+                            "asset_type": "option" if asset_type == "OPTION" else "stock",
+                        })
+            trades.sort(key=lambda t: t["time"])
+            logger.info("[SCHWAB] get_transactions: %d trades in %d days", len(trades), days)
+            return trades
+        except Exception as e:
+            logger.error("[SCHWAB] get_transactions error: %s", e)
+            return []
+
+    # ──────────────────────────────────────────
     # 核心接口
     # ──────────────────────────────────────────
     def get_kline(

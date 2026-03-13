@@ -168,6 +168,12 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <!-- Tabs -->
 <div class="tab-bar" id="tab-bar">
 <div class="tab active" data-tab="gcctm">GCC-TM</div>
+<div class="tab" data-tab="broker">券商对账</div>
+<div class="tab" data-tab="errors">错误分类</div>
+<div class="tab" data-tab="obs-s1">S1观察</div>
+<div class="tab" data-tab="obs-s2">S2观察</div>
+<div class="tab" data-tab="obs-s3">S3观察</div>
+<div class="tab" data-tab="obs-s4">S4/P0观察</div>
 <div class="tab" data-tab="trades">交易分析</div>
 <div class="tab" data-tab="verdict">裁决分析</div>
 <div class="tab" data-tab="vgate">Vision门控</div>
@@ -175,13 +181,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div class="tab" data-tab="accuracy">准确率</div>
 <div class="tab" data-tab="tasks">GCC任务</div>
 <div class="tab" data-tab="issues">问题&风险</div>
-<div class="tab" data-tab="broker">券商对账</div>
 <div class="tab" data-tab="evolution">进化</div>
-<div class="tab" data-tab="errors">错误分类</div>
-<div class="tab" data-tab="obs-s1">S1观察</div>
-<div class="tab" data-tab="obs-s2">S2观察</div>
-<div class="tab" data-tab="obs-s3">S3观察</div>
-<div class="tab" data-tab="obs-s4">S4/P0观察</div>
 </div>
 
 
@@ -296,7 +296,20 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 </div>
 
 <div class="tab-content" id="tab-broker">
-<div class="summary" id="broker-cards"></div>
+<div class="summary" id="broker-pnl-cards"></div>
+<h2>每日P&L</h2>
+<table><thead><tr><th>日期</th><th>P&L</th><th>手续费</th><th>交易笔数</th><th>累计</th></tr></thead><tbody id="broker-daily"></tbody></table>
+<div class="two-col">
+<div>
+<h2>品种P&L</h2>
+<table><thead><tr><th>品种</th><th>买入</th><th>卖出</th><th>已实现P&L</th><th>手续费</th></tr></thead><tbody id="broker-symbols"></tbody></table>
+</div>
+<div>
+<h2>最近成交</h2>
+<table><thead><tr><th>品种</th><th>买入价</th><th>卖出价</th><th>数量</th><th>P&L</th><th>回报%</th></tr></thead><tbody id="broker-recent"></tbody></table>
+</div>
+</div>
+<div class="summary" id="broker-cards" style="margin-top:16px"></div>
 <h2>系统信号 → 实际执行</h2>
 <table><thead><tr><th>时间</th><th>信号</th><th>品种</th><th>系统价</th><th>外挂</th><th>实际价</th><th>价差</th><th>金额</th><th>匹配</th></tr></thead><tbody id="broker-matches"></tbody></table>
 <h2>实际交易无系统信号</h2>
@@ -800,7 +813,73 @@ function _doRender() {
         issList.innerHTML = '<div class="issue-item" style="color:#1a7f37">All systems OK - no issues detected</div>';
     }
 
-    // ── 券商对账 Tab ──
+    // ── 券商对账 Tab: P&L面板 ──
+    const bp = DATA.broker_pnl || {};
+    const bpCards = $('broker-pnl-cards');
+    if (bp.combined) {
+        const comb = bp.combined;
+        const periods = comb.periods || {};
+        const daily = periods.daily || [];
+        const weekly = periods.weekly || [];
+        const monthly = periods.monthly || [];
+        // 找今天P&L
+        const todayStr = new Date().toISOString().slice(0,10);
+        const todayEntry = daily.find(d => d.date === todayStr);
+        const todayPnl = todayEntry ? todayEntry.pnl : 0;
+        const weekPnl = weekly.length ? weekly[weekly.length-1].pnl : 0;
+        const monthPnl = monthly.length ? monthly[monthly.length-1].pnl : 0;
+        const totalPnl = comb.total_pnl || 0;
+        const pnlColor = v => v >= 0 ? 'green' : 'red';
+        const pnlFmt = v => (v >= 0 ? '+$' : '-$') + Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+        bpCards.innerHTML = `
+            <div class="card"><div class="label">今日P&L</div><div class="value ${pnlColor(todayPnl)}">${pnlFmt(todayPnl)}</div><div class="sub">${todayEntry?todayEntry.trades+'笔':'无交易'}</div></div>
+            <div class="card"><div class="label">本周P&L</div><div class="value ${pnlColor(weekPnl)}">${pnlFmt(weekPnl)}</div><div class="sub">${weekly.length?weekly[weekly.length-1].trades+'笔':'-'}</div></div>
+            <div class="card"><div class="label">本月P&L</div><div class="value ${pnlColor(monthPnl)}">${pnlFmt(monthPnl)}</div><div class="sub">${monthly.length?monthly[monthly.length-1].trades+'笔':'-'}</div></div>
+            <div class="card"><div class="label">60天累计</div><div class="value ${pnlColor(totalPnl)}">${pnlFmt(totalPnl)}</div><div class="sub">${comb.total_trades||0}笔</div></div>
+        `;
+        // Daily P&L table
+        const bDaily = $('broker-daily');
+        let cumPnl = 0;
+        bDaily.innerHTML = daily.slice().reverse().map(d => {
+            // 累计要从头算
+            return d;
+        }).length ? '' : '';
+        // 正序累计再倒序显示
+        const dailyWithCum = [];
+        let runSum = 0;
+        for (const d of daily) { runSum += d.pnl; dailyWithCum.push({...d, cum: runSum}); }
+        bDaily.innerHTML = dailyWithCum.slice().reverse().map(d => {
+            const pc = d.pnl >= 0 ? '#1a7f37' : '#cf222e';
+            const cc = d.cum >= 0 ? '#1a7f37' : '#cf222e';
+            return `<tr><td>${d.date}</td><td style="color:${pc};font-weight:600">${pnlFmt(d.pnl)}</td><td>$${d.fees.toFixed(2)}</td><td>${d.trades}</td><td style="color:${cc}">${pnlFmt(d.cum)}</td></tr>`;
+        }).join('');
+        // Symbol P&L table
+        const schwabSyms = (bp.schwab||{}).symbols || {};
+        const cbSyms = (bp.coinbase||{}).symbols || {};
+        const allSyms = {...schwabSyms};
+        for (const [k,v] of Object.entries(cbSyms)) {
+            if (allSyms[k]) { allSyms[k].realized_pnl += v.realized_pnl; allSyms[k].fees += v.fees; }
+            else allSyms[k] = v;
+        }
+        const symEntries = Object.entries(allSyms).sort((a,b) => b[1].realized_pnl - a[1].realized_pnl);
+        $('broker-symbols').innerHTML = symEntries.map(([sym, s]) => {
+            const pc = s.realized_pnl >= 0 ? '#1a7f37' : '#cf222e';
+            return `<tr><td><strong>${sym}</strong></td><td>${s.buys||0}</td><td>${s.sells||0}</td><td style="color:${pc};font-weight:600">${pnlFmt(s.realized_pnl)}</td><td>$${(s.fees||0).toFixed(2)}</td></tr>`;
+        }).join('');
+        // Recent trades
+        const recentTrades = [...((bp.schwab||{}).recent_trades||[]), ...((bp.coinbase||{}).recent_trades||[])].slice(-15).reverse();
+        $('broker-recent').innerHTML = recentTrades.map(t => {
+            const pc = t.pnl >= 0 ? '#1a7f37' : '#cf222e';
+            return `<tr><td><strong>${t.symbol}</strong></td><td>$${t.buy_price.toFixed(2)}</td><td>$${t.sell_price.toFixed(2)}</td><td>${t.qty}</td><td style="color:${pc};font-weight:600">${pnlFmt(t.pnl)}</td><td style="color:${pc}">${t.pnl_pct>=0?'+':''}${t.pnl_pct.toFixed(1)}%</td></tr>`;
+        }).join('');
+    } else {
+        bpCards.innerHTML = '<div class="card" style="grid-column:1/-1"><div class="label">券商P&L</div><div class="sub">运行 broker_reconciler.py 生成数据</div></div>';
+        $('broker-daily').innerHTML = '';
+        $('broker-symbols').innerHTML = '';
+        $('broker-recent').innerHTML = '';
+    }
+
+    // ── 券商对账 Tab: 信号匹配 ──
     const bm = DATA.broker_match || {};
     const bmCards = $('broker-cards');
     if (bm.enabled) {

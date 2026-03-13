@@ -46,11 +46,11 @@ SYMBOL = "TSLA"         # 标的
 STOP_LOSS_PCT = 0.25    # 止损: 亏损成本的25%平仓
 EXIT_DTE = 1            # 时间止损: 到期前1天平仓
 
-# 分阶段止盈 — 到10%利润先卖一半，剩余用6%移动止盈
-TAKE_PROFIT_PCT = 0.10        # 第一阶段: 盈利达10%卖50%仓位
+# 分阶段止盈 — 到12%利润限价卖一半，剩余回撤6%市价卖
+TAKE_PROFIT_PCT = 0.12        # 第一阶段: 盈利达12%限价卖50%仓位
 TAKE_PROFIT_CLOSE_RATIO = 0.5 # 卖出比例: 50%
-TRAILING_ACTIVATE_PCT = 0.10  # 追踪止损激活门槛(剩余仓位)
-TRAILING_PULLBACK_PCT = 0.06  # 从最高价值回撤6%就平仓(剩余仓位)
+TRAILING_ACTIVATE_PCT = 0.12  # 追踪止损激活门槛(剩余仓位)
+TRAILING_PULLBACK_PCT = 0.06  # 从最高价值回撤6%市价平仓(剩余仓位)
 
 # 持仓状态文件
 STATE_FILE = Path(__file__).parent / "state" / "tsla_options_position.json"
@@ -144,6 +144,24 @@ def check_pending_close() -> Optional[str]:
             order_data = resp.json()
             status = order_data.get("status", "")
             if status == "FILLED":
+                # 部分止盈确认: 更新合约数, 不清除持仓
+                if data.get("pending_action") == "TAKE_PROFIT_PARTIAL":
+                    _pq = data.get("pending_close_qty", 1)
+                    _cv = data.get("pending_current_value", 0)
+                    with _position_lock:
+                        opt_key = "option" if "option" in data else "spread"
+                        old_qty = data[opt_key].get("contracts", 0)
+                        data[opt_key]["contracts"] = old_qty - _pq
+                        data["partial_tp_done"] = True
+                        data["status"] = "open"
+                        data["peak_value"] = _cv  # 从此刻起算追踪止损
+                        for _k in ("close_order_id", "close_submitted_at",
+                                   "pending_action", "pending_close_qty", "pending_current_value"):
+                            data.pop(_k, None)
+                        STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                    logger.info(f"[TSLA_OPT] 部分止盈确认: {old_qty}→{old_qty - _pq}张, 追踪止损已激活")
+                    return "FILLED"
+                # 全部平仓确认: 清除持仓
                 _clear_position()
                 logger.info(f"[TSLA_OPT] 平仓订单{close_order_id}已FILLED，持仓已清除")
                 return "FILLED"
@@ -447,13 +465,14 @@ def place_option(option: dict, dry_run: bool = True) -> dict:
 
 
 def close_option(option: dict, contracts: int = None, dry_run: bool = True,
-                 market_order: bool = False) -> dict:
+                 market_order: bool = False, limit_price: float = None) -> dict:
     """平仓: 卖出已持有的期权 (sell to close)
 
     Args:
         option: 持仓中的option字典
         contracts: 卖出张数 (默认=全部)
         market_order: True=市价平仓, False=限价(用bid价)
+        limit_price: 指定限价 (优先于bid, 仅market_order=False时生效)
     """
     if not option:
         return {"success": False, "error": "无期权数据"}
@@ -468,9 +487,9 @@ def close_option(option: dict, contracts: int = None, dry_run: bool = True,
         if market_order:
             order_spec = option_sell_to_close_market(opt_symbol, qty)
         else:
-            # 用当前bid价作为限价
-            bid = option.get("bid", option.get("cost_per_contract", 0.01))
-            order_spec = option_sell_to_close_limit(opt_symbol, qty, str(bid))
+            # 优先用指定限价, 否则用bid
+            price = limit_price or option.get("bid", option.get("cost_per_contract", 0.01))
+            order_spec = option_sell_to_close_limit(opt_symbol, qty, str(round(price, 2)))
 
         label = f"Close {option.get('type','?')} {option.get('strike', option.get('long_strike','?'))} x{qty}"
 
@@ -622,12 +641,12 @@ def check_exit_rules() -> Optional[dict]:
             "option": option,
         }
 
-    # 4. 分阶段止盈: 盈利达25% → 卖一部分(奇数卖1张, 偶数卖一半)
+    # 4. 分阶段止盈: 盈利达12% → 卖50%(向下取整)
     partial_tp_done = position.get("partial_tp_done", False)
     take_profit_threshold = entry_cost * (1 + TAKE_PROFIT_PCT)
     if not partial_tp_done and current_value >= take_profit_threshold and contracts >= 2:
-        # 奇数(3,5): 卖1张; 偶数(2,4): 卖一半
-        close_qty = 1 if contracts % 2 == 1 else contracts // 2
+        # 50%向下取整: 2→1, 3→1, 4→2, 5→2
+        close_qty = contracts // 2
         close_pnl = pnl_per_contract * 100 * close_qty
         return {
             "action": "TAKE_PROFIT_PARTIAL",
@@ -681,26 +700,27 @@ def auto_manage(dry_run: bool = True) -> Optional[dict]:
         f"PnL=${pnl:.0f} qty={close_qty or 'ALL'}"
     )
 
-    result = close_option(option, contracts=close_qty, dry_run=dry_run, market_order=True)
+    # 第一次卖(TAKE_PROFIT_PARTIAL)用限价单(目标价=止盈阈值), 其他用市价
+    if action == "TAKE_PROFIT_PARTIAL":
+        _tp_limit = exit_signal.get("current_value", 0)  # 当前价>=阈值, 用当前价挂限价
+        result = close_option(option, contracts=close_qty, dry_run=dry_run,
+                              market_order=False, limit_price=_tp_limit)
+    else:
+        result = close_option(option, contracts=close_qty, dry_run=dry_run, market_order=True)
 
-    # 部分止盈成功 → 更新持仓张数 + 标记partial_tp_done + 恢复status=open
-    # 注意: close_option会调_mark_pending_close设status=pending_close，
-    #       部分平仓必须恢复为open，否则check_pending_close确认后会清掉剩余仓位
+    # 部分止盈: 不立即更新合约数, 等check_pending_close确认FILLED后再更新
+    # close_option已设status=pending_close, 这里只记录pending_action让确认逻辑知道是部分平仓
     if action == "TAKE_PROFIT_PARTIAL" and result.get("success") and not dry_run:
         with _position_lock:
             try:
                 data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-                opt_key = "option" if "option" in data else "spread"
-                old_qty = data[opt_key].get("contracts", 0)
-                data[opt_key]["contracts"] = old_qty - close_qty
-                data["partial_tp_done"] = True
-                data["status"] = "open"  # 恢复open，剩余仓位继续追踪
-                # 重置peak_value为当前值，让追踪止损从此刻起算
-                data["peak_value"] = round(exit_signal["current_value"], 2)
+                data["pending_action"] = "TAKE_PROFIT_PARTIAL"
+                data["pending_close_qty"] = close_qty
+                data["pending_current_value"] = round(exit_signal["current_value"], 2)
                 STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-                logger.info(f"[TSLA_OPT] 部分止盈完成: {old_qty}→{old_qty - close_qty}张, 追踪止损已激活")
+                logger.info(f"[TSLA_OPT] 部分止盈限价单已提交, 等确认FILLED后更新合约数")
             except Exception as _e:
-                logger.error(f"[TSLA_OPT] 更新部分止盈状态失败: {_e}")
+                logger.error(f"[TSLA_OPT] 记录pending_action失败: {_e}")
 
     return {
         "action": action,
