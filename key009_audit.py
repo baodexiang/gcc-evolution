@@ -2474,15 +2474,23 @@ def _plugin_phase_update(plugin_accuracy: dict) -> dict:
 def _get_price_at_time(symbol: str, target_ts: "datetime") -> float:
     """获取指定时间点的历史价格 (yfinance 1H K线)。
     用于信号准确率回填: 取 target_ts 附近最近的收盘价。
+    v3.679: 美股盘后时间(16:00-09:30 ET)跳过yfinance请求，避免大量"possibly delisted"错误
     """
     try:
         import yfinance as yf
         # 品种映射: BTCUSDC → BTC-USD, TSLA → TSLA
         yf_symbol = symbol
+        is_crypto = symbol.endswith("USDC") or symbol.endswith("USDT")
         if symbol.endswith("USDC"):
             yf_symbol = symbol[:-4] + "-USD"
         elif symbol.endswith("USDT"):
             yf_symbol = symbol[:-4] + "-USD"
+
+        # v3.679: 美股盘后时间跳过 — yfinance对盘后1h数据返回空
+        if not is_crypto:
+            _eval_hour = target_ts.hour if target_ts.tzinfo else target_ts.replace(tzinfo=NY_TZ).hour
+            if _eval_hour >= 16 or _eval_hour < 9 or (_eval_hour == 9 and target_ts.minute < 30):
+                return 0.0
 
         # 取 target_ts 前后各1H 的数据窗口
         start = target_ts - timedelta(hours=1)
