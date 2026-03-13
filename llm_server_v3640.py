@@ -25751,6 +25751,10 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
 
     # GCC-0194: 所有信号(含移动止损/止盈)均在扫描引擎FilterChain Vision门控统一过滤，主程序不再重复
 
+    # GCC-TM 裁决信号: 已经过Vision门控+8轮决策, 跳过KEY-001/KEY-002二次审查直接发单
+    if source == "gcc_tm":
+        return _send_3commas_webhook(final_action, last_close, symbol, signal_type, bypass_cooldown)
+
     # ── gate block计数器(传入Master Hub blocked_gate_count) ──────────────
     _gate_block_count = 0
 
@@ -39932,20 +39936,24 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
 
     # GCC-0194: 所有信号(含移动止损/止盈)均在扫描引擎FilterChain Vision门控统一过滤，主程序不再重复
 
+    # GCC-TM 裁决信号: 已经过Vision门控+8轮决策, 跳过KEY-001/KEY-002/KEY-003二次审查
+    _ss_gcc_tm_bypass = (source == "gcc_tm")
+
     # ── gate block计数器(传入Master Hub blocked_gate_count) ──────────────
     _ss_gate_block_count = 0
 
     # ── KEY-001 Human Anchor 冲突检查 ─────────────────────────────────────
-    try:
-        _ss_anchor_block, _ss_anchor_reason = _check_human_anchor_gate(symbol, final_action, signal_type)
-        if _ss_anchor_block:
-            log_to_server(f"[KEY001-ANCHOR][拦截] {symbol} {final_action}: {_ss_anchor_reason}")
-            return None  # 门控拦截，非API失败
-    except Exception as _ss_ae:
-        log_to_server(f"[KEY001-ANCHOR][ERROR] {symbol}: {_ss_ae}")
+    if not _ss_gcc_tm_bypass:
+        try:
+            _ss_anchor_block, _ss_anchor_reason = _check_human_anchor_gate(symbol, final_action, signal_type)
+            if _ss_anchor_block:
+                log_to_server(f"[KEY001-ANCHOR][拦截] {symbol} {final_action}: {_ss_anchor_reason}")
+                return None  # 门控拦截，非API失败
+        except Exception as _ss_ae:
+            log_to_server(f"[KEY001-ANCHOR][ERROR] {symbol}: {_ss_ae}")
 
     # ── KEY-001 动态门控误杀控制 (Phase2 真实拦截) ──────────────────────────
-    _ss_k1_exempt = signal_type in ("移动止损", "移动止盈")
+    _ss_k1_exempt = signal_type in ("移动止损", "移动止盈") or _ss_gcc_tm_bypass
     if not _ss_k1_exempt:
         try:
             from modules.vision_adaptive import apply_key001_gate as _ss_k1_gate
@@ -39962,7 +39970,7 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
 
     # ── KEY-001 Vision Cache Gate (GCC-0062: Phase3 full拦截) ──────────────
     KEY001_VCACHE_MODE_SS = "observe"  # GCC-0062: "observe"/"soft"/"full"
-    if not _ss_k1_exempt:
+    if not _ss_k1_exempt and not _ss_gcc_tm_bypass:
         try:
             from modules.key001_vision_cache import VisionCache as _SS_VCCache, vision_gate as _ss_vc_gate
             _ss_vc_cache = _SS_VCCache()
@@ -39986,7 +39994,7 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
             log_to_server(f"[KEY001-VCACHE][GATE][ERROR] {symbol}: {_ss_vc_e}")
 
     # ── KEY-002 Regime自适应入场门控 (Phase2 真实拦截) ──────────────────────
-    _ss_k2_exempt = signal_type in ("移动止损", "移动止盈")
+    _ss_k2_exempt = signal_type in ("移动止损", "移动止盈") or _ss_gcc_tm_bypass
     if not _ss_k2_exempt:
         try:
             from modules.key002_regime import (
@@ -40016,7 +40024,7 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
             log_to_server(f"[KEY-002][GATE][ERROR] {symbol}: {_ss_k2_e}")
 
     # ── AUD-052 方向翻转冷却门控 (direction_flip_cooldown_bars) ────────────
-    _ss_dfc_exempt = signal_type in ("移动止损", "移动止盈")
+    _ss_dfc_exempt = signal_type in ("移动止损", "移动止盈") or _ss_gcc_tm_bypass
     if not _ss_dfc_exempt:
         try:
             import time as _ss_dfc_time
@@ -40046,7 +40054,7 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
 
     # ── KEY-001 大师模块 (观察模式, 异常fail-open) ─────────────────────────
     MASTER_GATE_SS_ENABLED = True
-    if MASTER_GATE_SS_ENABLED and final_action in ("BUY", "SELL") and signal_type not in ("移动止损", "移动止盈"):
+    if MASTER_GATE_SS_ENABLED and final_action in ("BUY", "SELL") and signal_type not in ("移动止损", "移动止盈") and not _ss_gcc_tm_bypass:
         try:
             from modules.key001_master_validation.hub import MasterValidationHub
             from modules.key001_master_validation.contracts import MasterContext
@@ -40094,7 +40102,7 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
             log_to_server(f"[KEY001-MASTER][ERROR] {symbol}: {_me_ss} → fail-open放行")
 
     # v3.663 KEY-003: 后5名美股每天限买1次
-    if final_action == "BUY":
+    if final_action == "BUY" and not _ss_gcc_tm_bypass:
         allowed, reason = _key003_check_buy_allowed(symbol)
         if not allowed:
             log_to_server(f"[KEY-003][VALUE-GUARD][拦截] {symbol} BUY被拦截: {reason}")
@@ -42940,20 +42948,20 @@ def llm_decide():
             )
             if _gcc_act in ("BUY", "SELL"):
                 send_ok = False
-                if symbol == "BTCUSDC":
-                    # BTCUSDC走永续合约通道
-                    try:
-                        from btc_perp import execute_signal as _btc_execute
-                        _btc_res = _btc_execute(_gcc_act, dry_run=False)
-                        send_ok = _btc_res.get("success", False)
-                        log_to_server(
-                            f"[BTC_PERP] GCC-TM {_gcc_act} → success={send_ok} "
-                            f"action={_btc_res.get('action', 'N/A')}"
-                        )
-                    except Exception as _btc_e:
-                        log_to_server(f"[BTC_PERP][ERROR] GCC-TM {_gcc_act}: {_btc_e}")
-                        send_ok = False
-                elif symbol == "TSLA":
+                # BTCUSDC永续合约暂停 — API key无INTX权限，走3Commas现货
+                # if symbol == "BTCUSDC":
+                #     try:
+                #         from btc_perp import execute_signal as _btc_execute
+                #         _btc_res = _btc_execute(_gcc_act, dry_run=False)
+                #         send_ok = _btc_res.get("success", False)
+                #         log_to_server(
+                #             f"[BTC_PERP] GCC-TM {_gcc_act} → success={send_ok} "
+                #             f"action={_btc_res.get('action', 'N/A')}"
+                #         )
+                #     except Exception as _btc_e:
+                #         log_to_server(f"[BTC_PERP][ERROR] GCC-TM {_gcc_act}: {_btc_e}")
+                #         send_ok = False
+                if symbol == "TSLA":
                     # TSLA走期权通道
                     try:
                         from qqq_options import execute_signal as _qqq_execute
