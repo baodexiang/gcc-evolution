@@ -118,7 +118,7 @@ except ImportError:
 # -----------------------------------------------------------------------------
 class SystemConfig:
     """系统级配置"""
-    VERSION = "3.681"  # v3.681: GCC-TM后台消费线程(解决pending_order积压) | v3.680: S5+VisionWorker双通道期权执行
+    VERSION = "3.682"  # v3.682: GCC-0258 S1 KNN升级为L1六模块投票者(Phase1仅日志) | v3.681: GCC-TM后台消费线程
     LOG_DIR = "logs"
     STATE_FILE = "state.json"
     ENABLE_DEBUG = False
@@ -9120,10 +9120,52 @@ def compute_l1_five_module_v3300(
     grid_volumes = [float(b.get("volume", b.get("v", 0))) for b in ohlcv_bars] if ohlcv_bars else []
     grid_position = compute_grid_position_v3411(ohlcv_bars, volumes=grid_volumes)
 
-    # 5. 决策矩阵
+    # 5. KNN模块 - 历史经验匹配 (GCC-0258 S1: Phase1仅日志)
+    knn_module = {"bias": "NEUTRAL", "confidence": 0.0, "sample_count": 0, "win_rate": 0.5, "phase": 1, "agree": None}
+    try:
+        if ohlcv_bars and len(ohlcv_bars) >= 20:
+            from plugin_knn import (extract_price_shape, extract_volume_shape,
+                                    extract_atr_features, extract_regime_feature,
+                                    get_plugin_knn_db, query_knn, infer_regime_from_bars)
+            import numpy as _knn_np
+            _knn_feat = _knn_np.concatenate([
+                extract_price_shape(ohlcv_bars),
+                extract_volume_shape(ohlcv_bars),
+                extract_atr_features(ohlcv_bars),
+                extract_regime_feature(ohlcv_bars),
+            ])
+            _knn_regime = infer_regime_from_bars(ohlcv_bars)
+            _knn_db = get_plugin_knn_db()
+            _knn_res = query_knn(_knn_db, "generic", symbol or "UNKNOWN", _knn_feat,
+                                 regime=_knn_regime, bars=ohlcv_bars)
+            if _knn_res and _knn_res.sample_count >= 5:
+                knn_module = {
+                    "bias": _knn_res.bias,
+                    "confidence": round(_knn_res.confidence, 3),
+                    "sample_count": _knn_res.sample_count,
+                    "win_rate": round(_knn_res.win_rate, 3),
+                    "avg_return": round(_knn_res.avg_return, 4),
+                    "phase": 1,
+                    "agree": None,  # 决策后填充
+                }
+    except Exception as _knn_e:
+        log_to_server(f"[GCC-0258][KNN_L1] {symbol} 查询异常: {_knn_e}")
+
+    # 6. 决策矩阵
     decision = compute_l1_decision_matrix_v3300(
         ai_big_trend, human_phase, tech_strength, grid_position, deepseek_result
     )
+
+    # GCC-0258 S1: KNN与决策矩阵一致性检查 (Phase1仅日志)
+    if knn_module["bias"] != "NEUTRAL" and knn_module["sample_count"] >= 5:
+        _knn_bias_action = {"BUY": "BUY", "SELL": "SELL"}.get(knn_module["bias"], "HOLD")
+        _matrix_action = {"STRONG_BUY": "BUY", "BUY": "BUY", "STRONG_SELL": "SELL", "SELL": "SELL"}.get(decision["signal"], "HOLD")
+        _knn_agree = _knn_bias_action == _matrix_action
+        knn_module["agree"] = _knn_agree
+        _agree_tag = "AGREE" if _knn_agree else "DISAGREE"
+        log_to_server(f"[GCC-0258][KNN_L1] {symbol} KNN={knn_module['bias']}(conf={knn_module['confidence']:.2f}, "
+                      f"wr={knn_module['win_rate']:.0%}, n={knn_module['sample_count']}) "
+                      f"vs Matrix={decision['signal']} → {_agree_tag}")
 
     # 打印诊断信息 (v3.411: 显示中枢状态)
     consensus_tag = ai_big_trend.get('consensus', 'N/A')
@@ -9135,10 +9177,11 @@ def compute_l1_five_module_v3300(
     reversal_tag = "⚠反转" if grid_position.get('reversal_signal') else ""
     fake_tag = "⚠假突破" if grid_position.get('fake_breakout') else ""
     special_tags = f" {reversal_tag}{fake_tag}" if (reversal_tag or fake_tag) else ""
-    print(f"[v3.411] L1五模块: x4趋势={ai_big_trend['big_trend']}({consensus_tag}) | {dow_info} | "
+    _knn_tag = f" | KNN={knn_module['bias']}({knn_module['confidence']:.2f})" if knn_module["sample_count"] >= 5 else ""
+    print(f"[v3.682] L1六模块: x4趋势={ai_big_trend['big_trend']}({consensus_tag}) | {dow_info} | "
           f"当前趋势={current_trend} | 阶段={human_phase['phase']} | "
-          f"强度={tech_strength['strength']} | 位置={grid_position['position']}({zhongshu_tag}) | 中枢={evolution_tag}{special_tags} → {decision['signal']}")
-    print(f"[v3.411] 决策原因: {decision['reason']}")
+          f"强度={tech_strength['strength']} | 位置={grid_position['position']}({zhongshu_tag}) | 中枢={evolution_tag}{special_tags}{_knn_tag} → {decision['signal']}")
+    print(f"[v3.682] 决策原因: {decision['reason']}")
 
     # v3.390: 把道氏整体趋势添加到ai_module中
     ai_big_trend["dow_overall_trend"] = dow_overall_trend
@@ -9170,6 +9213,7 @@ def compute_l1_five_module_v3300(
         "human_module": human_phase,
         "tech_module": tech_strength,
         "grid_module": grid_position,
+        "knn_module": knn_module,  # GCC-0258 S1: KNN历史经验匹配(Phase1)
         "matrix_detail": decision["matrix_detail"],
         "macd_divergence": macd_divergence,  # v3.440: MACD背驰结果
     }
@@ -25739,6 +25783,25 @@ def _check_human_anchor_gate(symbol: str, final_action: str, signal_type: str) -
             block = True
             reason = "anchor=SHORT(美股) vs BUY → 冲突"
 
+    # GCC-0258 S3: DA-01~06完整验证 (Phase1仅日志)
+    try:
+        from gcc_evolution.direction_anchor import DirectionAnchorValidator, DAContext
+        _da_ctx = DAContext(
+            anchor=anchor,
+            proposed_action={"action": final_action, "subject": symbol},
+            state={"market_regime": get_state_for_symbol(symbol).get("market_regime", ""),
+                   "signal_type": signal_type},
+        )
+        _da_result = DirectionAnchorValidator().validate(_da_ctx)
+        if not _da_result.passed:
+            _da_codes = ",".join(v.code.value for v in _da_result.violations)
+            _da_reasons = "; ".join(v.reason[:60] for v in _da_result.violations)
+            log_to_server(f"[GCC-0258][DA_GATE] {symbol} {final_action} DA BLOCKED: {_da_codes} | {_da_reasons}")
+        else:
+            log_to_server(f"[GCC-0258][DA_GATE] {symbol} {final_action} DA OK (all 6 passed)")
+    except Exception as _da_e:
+        log_to_server(f"[GCC-0258][DA_GATE] {symbol} DA验证异常: {_da_e}")
+
     if ANCHOR_GATE_PHASE == 1:
         # Phase1: 只记录，不真正拦截
         if block:
@@ -40266,7 +40329,8 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
                     _key003_record_buy_sent(symbol)
                 log_to_server(f"[SignalStack] {symbol} {payload['action']} qty={qty} 成功")
                 return True
-            log_to_server(f"[SignalStack] {symbol} HTTP {resp.status_code}")
+            _ss_body = resp.text[:200] if resp.text else ""
+            log_to_server(f"[SignalStack] {symbol} HTTP {resp.status_code} body={_ss_body}")
             if attempt < 2:
                 time_module.sleep(2 ** attempt)
         except Exception as e:
@@ -47240,6 +47304,31 @@ def llm_decide():
         print(f"[DECISION_ENGINE] 决定者: {engine_result['override_by']}")
         for trace in engine_result["decision_trace"]:
             print(f"[DECISION_ENGINE]   {trace}")
+
+    # GCC-0258 S4: Skeptic Gate幻觉检测 (Phase1仅日志)
+    try:
+        from gcc_evolution.L4_decision.skeptic import SkepticValidator
+        _skeptic_decision = {
+            "signal": final_action,
+            "action": final_action,
+            "confidence": engine_result.get("confidence", 0.5),
+            "reasoning": "; ".join(engine_result.get("decision_trace", [])),
+            "conditions": engine_result.get("decision_trace", []),
+        }
+        _skeptic_ctx = {
+            "market_regime": engine_result.get("market_regime", ""),
+            "override_by": engine_result.get("override_by", ""),
+        }
+        _skeptic_res = SkepticValidator().validate(_skeptic_decision, _skeptic_ctx)
+        if not _skeptic_res.is_valid:
+            _sk_issues = "; ".join(_skeptic_res.issues[:3])
+            log_to_server(f"[GCC-0258][SKEPTIC] {symbol} {final_action} SUSPECT: "
+                          f"conf={_skeptic_res.confidence:.2f} soft={_skeptic_res.soft_score:.2f} | {_sk_issues}")
+        else:
+            log_to_server(f"[GCC-0258][SKEPTIC] {symbol} {final_action} OK "
+                          f"(conf={_skeptic_res.confidence:.2f} soft={_skeptic_res.soft_score:.2f})")
+    except Exception as _sk_e:
+        log_to_server(f"[GCC-0258][SKEPTIC] {symbol} 验证异常: {_sk_e}")
         
         # 如果是Supreme保护改变的，标记为fallback
         if engine_result.get("protection_active"):
