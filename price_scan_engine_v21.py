@@ -2797,7 +2797,7 @@ def check_position_control(position: int, action: str,
                 _bd = f"+{breakdown_reason}" if breakdown_ok else "(未创新低)"
                 resonance = "共振" if (big == "DOWN" and current == "DOWN") else "无共振"
                 return (True, f"[v21.31] 仓位3/5 SELL ✓ | 三卖(<EMA10{_bd}+{resonance})→2档(逐级) | {restriction_info}", 2)
-            return (False, f"[v21.31] 仓位3/5 SELL ✗ | 三卖需<EMA10({ema10:.2f if ema10 else 0}) | {restriction_info}", position)
+            return (False, f"[v21.31] 仓位3/5 SELL ✗ | 三卖需<EMA10({ema10:.2f if ema10 is not None else 'N/A'}) | {restriction_info}", position)
 
         # 仓位2: 四卖 - <EMA10 (v21.31: 创新低为OR加分项) → 1档(逐级)
         if position == 2:
@@ -2806,7 +2806,7 @@ def check_position_control(position: int, action: str,
                 _bd = f"+{breakdown_reason}" if breakdown_ok else "(未创新低)"
                 resonance = "共振" if (big == "DOWN" and current == "DOWN") else "无共振"
                 return (True, f"[v21.31] 仓位2/5 SELL ✓ | 四卖(<EMA10{_bd}+{resonance})→1档(逐级) | {restriction_info}", 1)
-            return (False, f"[v21.31] 仓位2/5 SELL ✗ | 四卖需<EMA10({ema10:.2f if ema10 else 0}) | {restriction_info}", position)
+            return (False, f"[v21.31] 仓位2/5 SELL ✗ | 四卖需<EMA10({ema10:.2f if ema10 is not None else 'N/A'}) | {restriction_info}", position)
 
         # 仓位1: 清仓 - v21.32 仅需价格<EMA10 (取消cur=DOWN趋势限制)
         if position == 1:

@@ -51287,7 +51287,7 @@ def key009_gcctm():
                 ("S4", [r"\[S4.*Gate\]", r"\[L2.Gate\]", r"\[L2_Gate\]", r"\[L2门卫\]"]),
                 ("S2", [r"\[S2外挂\]", r"plugin.*bypass", r"\[RobHoffman\]", r"\[DoublePattern\]", r"\[ChanBS\]", r"\[SuperTrend\]"]),
                 ("S1", [r"\[v3\.6[5-9]\d\].*L1", r"\[L1[_\s]", r"L1参考"]),
-                ("P0", [r"\[P0\]", r"\[CycleSwitch\]", r"\[P0-", r"scan.engine", r"price_scan"]),
+                ("P0", [r"\[P0\]", r"\[CycleSwitch\]", r"\[P0-", r"scan.engine", r"price_scan", r"扫描.*异常"]),
                 ("SYS", [r"Schwab", r"yfinance", r"Coinbase", r"SignalStack", r"3Commas", r"\[API\]", r"\[NETWORK\]",
                          r"possibly delisted", r"SIGNAL_GATE_WORKER", r"KEY004-PCACHE"]),
             ]
