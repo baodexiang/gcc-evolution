@@ -46,11 +46,11 @@ SYMBOL = "TSLA"         # 标的
 STOP_LOSS_PCT = 0.25    # 止损: 亏损成本的25%平仓
 EXIT_DTE = 1            # 时间止损: 到期前1天平仓
 
-# 分阶段止盈 — 到15%利润先卖一半，剩余用15%追踪止损
-TAKE_PROFIT_PCT = 0.15        # 第一阶段: 盈利达15%卖50%仓位
+# 分阶段止盈 — 到10%利润先卖一半，剩余用6%移动止盈
+TAKE_PROFIT_PCT = 0.10        # 第一阶段: 盈利达10%卖50%仓位
 TAKE_PROFIT_CLOSE_RATIO = 0.5 # 卖出比例: 50%
-TRAILING_ACTIVATE_PCT = 0.15  # 追踪止损激活门槛(剩余仓位)
-TRAILING_PULLBACK_PCT = 0.15  # 从最高价值回撤15%就平仓(剩余仓位)
+TRAILING_ACTIVATE_PCT = 0.10  # 追踪止损激活门槛(剩余仓位)
+TRAILING_PULLBACK_PCT = 0.06  # 从最高价值回撤6%就平仓(剩余仓位)
 
 # 持仓状态文件
 STATE_FILE = Path(__file__).parent / "state" / "tsla_options_position.json"
