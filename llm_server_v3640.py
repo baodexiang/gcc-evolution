@@ -42939,8 +42939,20 @@ def llm_decide():
         if _gcc_order:
             _gcc_act = _gcc_order.get("action", "HOLD")
             _gcc_price = float(_gcc_order.get("price_ref", 0))
-            _cp_list = data.get("close_prices", [])
-            _gcc_cur_price = float(_cp_list[-1]) if _cp_list else _gcc_price
+            # v3.663: 当前价优先用yfinance(与决策同源)，避免TV脏数据
+            _gcc_cur_price = _gcc_price  # fallback = 决策价
+            try:
+                _gcc_yf_map = {"BTCUSDC": "BTC-USD", "ETHUSDC": "ETH-USD",
+                               "SOLUSDC": "SOL-USD", "ZECUSDC": "ZEC-USD"}
+                _yf_sym = _gcc_yf_map.get(symbol, symbol)
+                _yf_bars = YFinanceDataFetcher.get_ohlcv(_yf_sym, 30, 3)
+                if _yf_bars and len(_yf_bars) > 0:
+                    _gcc_cur_price = float(_yf_bars[-1].get("close", _yf_bars[-1].get("c", 0)))
+            except Exception as _yf_e:
+                log_to_server(f"[GCC-TM][EXECUTE] {symbol}: yfinance取价失败({_yf_e}), 用price_ref")
+            if _gcc_cur_price <= 0:
+                _cp_list = data.get("close_prices", [])
+                _gcc_cur_price = float(_cp_list[-1]) if _cp_list else _gcc_price
             log_to_server(
                 f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} "
                 f"price_ref={_gcc_price:.2f} cur={_gcc_cur_price:.2f} "
@@ -43001,7 +43013,7 @@ def llm_decide():
                     try:
                         _gcc_state = get_state_for_symbol(symbol) or {}
                         _gcc_trade_rec = {
-                            "ts": _gcc_order.get("ts", get_ny_now().strftime("%Y-%m-%d %H:%M:%S")),
+                            "ts": _gcc_order.get("ts", datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")),
                             "tz": "America/New_York",
                             "symbol": symbol,
                             "timeframe": _gcc_tf,
@@ -55261,7 +55273,7 @@ def _qqq_options_manager_worker():
     while not _qqq_opt_stop.is_set():
         try:
             # 只在美股盘中运行 (9:30-15:50 ET, 留10分钟给平仓成交)
-            _now_et = get_ny_now()
+            _now_et = datetime.now(ZoneInfo("America/New_York"))
             _mkt_open = _now_et.replace(hour=9, minute=30, second=0)
             _mkt_close = _now_et.replace(hour=15, minute=50, second=0)
             _is_weekday = _now_et.weekday() < 5
