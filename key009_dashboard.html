@@ -297,8 +297,23 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 
 <div class="tab-content" id="tab-broker">
 <div class="summary" id="broker-pnl-cards"></div>
+<div style="display:flex;gap:8px;margin:12px 0">
+<div class="tab broker-period-tab active" data-period="daily" onclick="switchBrokerPeriod('daily')">24小时</div>
+<div class="tab broker-period-tab" data-period="weekly" onclick="switchBrokerPeriod('weekly')">1周</div>
+<div class="tab broker-period-tab" data-period="monthly" onclick="switchBrokerPeriod('monthly')">1个月</div>
+</div>
+<div id="broker-period-daily">
 <h2>每日P&L</h2>
 <table><thead><tr><th>日期</th><th>P&L</th><th>手续费</th><th>交易笔数</th><th>累计</th></tr></thead><tbody id="broker-daily"></tbody></table>
+</div>
+<div id="broker-period-weekly" style="display:none">
+<h2>每周P&L</h2>
+<table><thead><tr><th>周</th><th>P&L</th><th>手续费</th><th>交易笔数</th><th>累计</th></tr></thead><tbody id="broker-weekly"></tbody></table>
+</div>
+<div id="broker-period-monthly" style="display:none">
+<h2>每月P&L</h2>
+<table><thead><tr><th>月份</th><th>P&L</th><th>手续费</th><th>交易笔数</th><th>累计</th></tr></thead><tbody id="broker-monthly"></tbody></table>
+</div>
 <div class="two-col">
 <div>
 <h2>品种P&L</h2>
@@ -503,6 +518,16 @@ function topSymbols(obj, n) {
 }
 
 function $(id) { return document.getElementById(id) || {innerHTML:'',textContent:'',style:{},closest:()=>({insertAdjacentHTML:()=>{}}),classList:{add:()=>{},remove:()=>{}}}; }
+
+function switchBrokerPeriod(period) {
+    ['daily','weekly','monthly'].forEach(p => {
+        const el = document.getElementById('broker-period-'+p);
+        if (el) el.style.display = p === period ? '' : 'none';
+    });
+    document.querySelectorAll('.broker-period-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.period === period);
+    });
+}
 
 // ── Human Guidance ──
 const _HG_DEL_KEY = 'key009_deleted_anchors';
@@ -853,6 +878,24 @@ function _doRender() {
             const cc = d.cum >= 0 ? '#1a7f37' : '#cf222e';
             return `<tr><td>${d.date}</td><td style="color:${pc};font-weight:600">${pnlFmt(d.pnl)}</td><td>$${d.fees.toFixed(2)}</td><td>${d.trades}</td><td style="color:${cc}">${pnlFmt(d.cum)}</td></tr>`;
         }).join('');
+        // Weekly P&L table
+        const weeklyWithCum = [];
+        let wSum = 0;
+        for (const w of weekly) { wSum += w.pnl; weeklyWithCum.push({...w, cum: wSum}); }
+        $('broker-weekly').innerHTML = weeklyWithCum.slice().reverse().map(w => {
+            const pc = w.pnl >= 0 ? '#1a7f37' : '#cf222e';
+            const cc = w.cum >= 0 ? '#1a7f37' : '#cf222e';
+            return `<tr><td>${w.week_start||w.week||w.date||'-'}</td><td style="color:${pc};font-weight:600">${pnlFmt(w.pnl)}</td><td>$${(w.fees||0).toFixed(2)}</td><td>${w.trades||0}</td><td style="color:${cc}">${pnlFmt(w.cum)}</td></tr>`;
+        }).join('');
+        // Monthly P&L table
+        const monthlyWithCum = [];
+        let mSum = 0;
+        for (const m of monthly) { mSum += m.pnl; monthlyWithCum.push({...m, cum: mSum}); }
+        $('broker-monthly').innerHTML = monthlyWithCum.slice().reverse().map(m => {
+            const pc = m.pnl >= 0 ? '#1a7f37' : '#cf222e';
+            const cc = m.cum >= 0 ? '#1a7f37' : '#cf222e';
+            return `<tr><td>${m.month||m.date||'-'}</td><td style="color:${pc};font-weight:600">${pnlFmt(m.pnl)}</td><td>$${(m.fees||0).toFixed(2)}</td><td>${m.trades||0}</td><td style="color:${cc}">${pnlFmt(m.cum)}</td></tr>`;
+        }).join('');
         // Symbol P&L table
         const schwabSyms = (bp.schwab||{}).symbols || {};
         const cbSyms = (bp.coinbase||{}).symbols || {};
@@ -875,6 +918,8 @@ function _doRender() {
     } else {
         bpCards.innerHTML = '<div class="card" style="grid-column:1/-1"><div class="label">券商P&L</div><div class="sub">运行 broker_reconciler.py 生成数据</div></div>';
         $('broker-daily').innerHTML = '';
+        $('broker-weekly').innerHTML = '';
+        $('broker-monthly').innerHTML = '';
         $('broker-symbols').innerHTML = '';
         $('broker-recent').innerHTML = '';
     }

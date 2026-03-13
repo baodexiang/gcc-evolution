@@ -6,11 +6,17 @@ TSLA期权直接买入模块 (GCC-0256 S5)
   BUY信号 → 买入ATM Call (无限上行空间)
   SELL信号 → 买入ATM Put (无限下行空间)
 
-卖出规则 (自动平仓, 优先级从高到低):
-  1. 时间止损: DTE ≤ 1天 → 到期前强制平仓
-  2. 止损: 期权价值跌到成本50%以下 → 市价平仓
-  3. 追踪止损: 盈利达成本25%后激活, 从最高回撤40%平仓 (让利润跑)
-  4. 信号反转: Vision方向反转 → 先平旧仓(下轮再开)
+买入规则 (分批建仓, 买大后买小):
+  1. 第1批(大): 信号确认后市价买 contracts-1 张 (如3→先买2)
+  2. 第2批(小): 1小时内期权价格从入场价跌5%以内时限价买1张, entry_cost加权平均
+     买不到就放弃, 直接用第1批仓位等平仓
+
+卖出规则 (分批平仓, 先卖小留大, 优先级从高到低):
+  1. 时间止损: DTE ≤ 1天 → 到期前强制全部平仓
+  2. 止损: 期权价值跌到成本25%以下 → 市价全部平仓
+  3. 分阶段止盈: 盈利达12% → 限价卖1张锁利, 留大头博更多
+  4. 追踪止损: 部分止盈后激活, 从最高回撤6%市价卖剩余
+  5. 信号反转: Vision方向反转 → 先平旧仓(下轮再开)
 
 资金控制:
   - 严格 ≤ $3000/笔，向下取整
@@ -52,8 +58,12 @@ TAKE_PROFIT_CLOSE_RATIO = 0.5 # 卖出比例: 50%
 TRAILING_ACTIVATE_PCT = 0.12  # 追踪止损激活门槛(剩余仓位)
 TRAILING_PULLBACK_PCT = 0.06  # 从最高价值回撤6%市价平仓(剩余仓位)
 
+# 每日交易次数限制: 每个方向每天最多1次 (最多1次CALL + 1次PUT)
+MAX_DAILY_PER_DIRECTION = 1
+
 # 持仓状态文件
 STATE_FILE = Path(__file__).parent / "state" / "tsla_options_position.json"
+DAILY_TRADES_FILE = Path(__file__).parent / "state" / "tsla_options_daily.json"
 
 
 # ── 持仓管理 ─────────────────────────────────────────────────────────────
@@ -96,6 +106,44 @@ def _clear_position():
                     STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
             except Exception:
                 pass
+
+
+def _get_daily_trades() -> dict:
+    """获取今日已开仓记录 {direction: count}"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    if DAILY_TRADES_FILE.exists():
+        try:
+            data = json.loads(DAILY_TRADES_FILE.read_text(encoding="utf-8"))
+            if data.get("date") == today:
+                return data.get("trades", {})
+        except Exception:
+            pass
+    return {}
+
+
+def _record_daily_trade(direction: str):
+    """记录一次开仓 (BUY=CALL, SELL=PUT)"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    data = {"date": today, "trades": {}}
+    if DAILY_TRADES_FILE.exists():
+        try:
+            data = json.loads(DAILY_TRADES_FILE.read_text(encoding="utf-8"))
+            if data.get("date") != today:
+                data = {"date": today, "trades": {}}
+        except Exception:
+            data = {"date": today, "trades": {}}
+    trades = data.get("trades", {})
+    trades[direction] = trades.get(direction, 0) + 1
+    data["trades"] = trades
+    DAILY_TRADES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DAILY_TRADES_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _can_trade_today(direction: str) -> bool:
+    """检查该方向今天是否还能交易 (每方向每天最多1次)"""
+    trades = _get_daily_trades()
+    used = trades.get(direction, 0)
+    return used < MAX_DAILY_PER_DIRECTION
 
 
 def _mark_pending_close(close_order_id: str):
@@ -416,17 +464,19 @@ def place_option(option: dict, dry_run: bool = True) -> dict:
             return {"success": False, "error": f"资金检查失败: {_bal_e}"}
 
     try:
-        from schwab.orders.options import option_buy_to_open_limit
+        from schwab.orders.options import option_buy_to_open_limit, option_buy_to_open_market
 
         client, account_hash = _get_schwab_client()
         opt_symbol = option["option_symbol"]
         contracts = option["contracts"]
-        limit_price = str(option["cost_per_contract"])
 
-        order_spec = option_buy_to_open_limit(
-            opt_symbol, contracts, limit_price
-        )
-        label = f"Buy {option['type']} {option['strike']} x{contracts}"
+        # 分批建仓: 3张→先市价买2张, 留1张待跌5%内加仓
+        batch1_qty = max(contracts - 1, 1) if contracts >= 2 else contracts
+        addon_qty = contracts - batch1_qty  # 0 or 1
+
+        # 第1批: 市价单 (快速入场)
+        order_spec = option_buy_to_open_market(opt_symbol, batch1_qty)
+        label = f"Buy {option['type']} {option['strike']} x{batch1_qty} MKT" + (f" (+{addon_qty}待跌加仓)" if addon_qty else "")
 
         if dry_run:
             resp = client.preview_order(account_hash, order_spec)
@@ -440,17 +490,53 @@ def place_option(option: dict, dry_run: bool = True) -> dict:
             order_id = location.split("/")[-1] if location else ""
             logger.info(f"[TSLA_OPT] PLACED {label} cost=${option['total_cost']:.0f} order_id={order_id}")
 
-            # 保存持仓
-            _save_position({
+            # 查询实际成交价 (Schwab常优化成交, ask $9.90 → fill $9.81)
+            fill_price = option["cost_per_contract"]  # 默认用ask
+            if order_id:
+                import time as _t
+                _t.sleep(2)  # 等待成交
+                try:
+                    _fill_resp = client.get_order(account_hash, int(order_id))
+                    if _fill_resp.status_code == 200:
+                        _fill_data = _fill_resp.json()
+                        if _fill_data.get("status") == "FILLED":
+                            _acts = _fill_data.get("orderActivityCollection", [])
+                            for _act in _acts:
+                                for _ex in _act.get("executionLegs", []):
+                                    _fp = _ex.get("price")
+                                    if _fp and _fp > 0:
+                                        fill_price = _fp
+                                        logger.info(f"[TSLA_OPT] 实际成交价=${fill_price} (ask=${option['cost_per_contract']})")
+                except Exception as _fe:
+                    logger.warning(f"[TSLA_OPT] 查询成交价失败, 用ask价: {_fe}")
+
+            # 保存持仓 (用实际成交价, 非ask价)
+            # 分批建仓: option.contracts=总目标, 实际先买batch1_qty张
+            option_saved = dict(option)
+            option_saved["contracts"] = batch1_qty  # 当前实际持有张数
+            pos_data = {
                 "status": "open",
                 "order_id": order_id,
-                "option": option,
+                "option": option_saved,
                 "opened_at": datetime.now().isoformat(),
-                "entry_cost": option["cost_per_contract"],
-                "peak_value": option["cost_per_contract"],  # 追踪止损用
-            })
+                "entry_cost": fill_price,
+                "peak_value": fill_price,  # 追踪止损用
+            }
+            # 记录待加仓信息 (下次auto_manage检查时, 方向确认后买入)
+            if addon_qty > 0:
+                pos_data["addon_pending"] = {
+                    "qty": addon_qty,
+                    "option_symbol": opt_symbol,
+                    "limit_price": option["cost_per_contract"],
+                    "type": option["type"],
+                    "strike": option["strike"],
+                    "expiration": option["expiration"],
+                }
+                logger.info(f"[TSLA_OPT] 分批建仓: 先买{batch1_qty}张, 待确认后加仓{addon_qty}张")
+            _save_position(pos_data)
 
-            return {"success": True, "order_id": order_id, "label": label, "option": option}
+            return {"success": True, "order_id": order_id, "label": label, "option": option,
+                    "fill_price": fill_price}
         else:
             error_body = ""
             try:
@@ -570,9 +656,12 @@ def check_exit_rules() -> Optional[dict]:
     """
     检查卖出规则 (优先级: TIME_EXIT > STOP_LOSS > TAKE_PROFIT_PARTIAL > TRAILING_STOP)
 
-    分阶段止盈:
-      1) 盈利达25% → 卖掉一部分(单数卖1张, 偶数卖一半)
-      2) 剩余仓位 → 追踪止损(从峰值回撤15%平仓)
+    分阶段止盈 (2张以上):
+      1) 盈利达12% → 限价卖1张锁利(先卖小留大)
+      2) 剩余仓位 → 追踪止损(从峰值回撤6%市价平仓)
+
+    单张止盈 (1张):
+      盈利达12% → 激活追踪止损, 从峰值回撤6%市价平仓
 
     Returns:
         None = 无持仓或不需要操作
@@ -641,12 +730,12 @@ def check_exit_rules() -> Optional[dict]:
             "option": option,
         }
 
-    # 4. 分阶段止盈: 盈利达12% → 卖50%(向下取整)
+    # 4. 分阶段止盈: 盈利达12% → 先卖小留大(卖1张锁利, 留大头博更多)
     partial_tp_done = position.get("partial_tp_done", False)
     take_profit_threshold = entry_cost * (1 + TAKE_PROFIT_PCT)
     if not partial_tp_done and current_value >= take_profit_threshold and contracts >= 2:
-        # 50%向下取整: 2→1, 3→1, 4→2, 5→2
-        close_qty = contracts // 2
+        # 先卖小留大: 3→卖1留2, 4→卖1留3, 5→卖1留4
+        close_qty = 1
         close_pnl = pnl_per_contract * 100 * close_qty
         return {
             "action": "TAKE_PROFIT_PARTIAL",
@@ -658,8 +747,8 @@ def check_exit_rules() -> Optional[dict]:
             "contracts": close_qty,
         }
 
-    # 5. 追踪止损: 部分止盈完成后 或 盈利达25%后激活
-    #    从峰值回撤15%平仓(剩余全部), 不要求current_value>entry_cost
+    # 5. 追踪止损: 部分止盈完成后 或 盈利达12%后激活
+    #    从峰值回撤6%平仓(剩余全部)
     trailing_activate = entry_cost * (1 + TRAILING_ACTIVATE_PCT)
     if peak_value >= trailing_activate or partial_tp_done:
         pullback = peak_value - current_value
@@ -678,14 +767,128 @@ def check_exit_rules() -> Optional[dict]:
     return None
 
 
+def _check_addon_buy(dry_run: bool = True) -> Optional[dict]:
+    """分批建仓第2批: 期权价格从入场价跌5%以内时加仓
+
+    触发条件: entry_cost * 0.95 <= current_value < entry_cost (跌了但没跌太多)
+    放弃条件: 价格涨超入场价(已确认方向, 不需要摊薄) 或 超30分钟
+    """
+    position = _load_position()
+    if not position or not position.get("addon_pending"):
+        return None
+
+    addon = position["addon_pending"]
+    option = position.get("option") or {}
+    entry_cost = position.get("entry_cost", 0)
+
+    # 超30分钟未触发 → 放弃加仓, 用现有仓位交易
+    opened_at = position.get("opened_at", "")
+    if opened_at:
+        try:
+            elapsed = (datetime.now() - datetime.fromisoformat(opened_at)).total_seconds()
+            if elapsed > 3600:  # 1小时
+                with _position_lock:
+                    data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+                    data.pop("addon_pending", None)
+                    STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                logger.info(f"[TSLA_OPT] 加仓超时1h, 放弃, 用{option.get('contracts', 0)}张交易")
+                return None
+        except Exception:
+            pass
+
+    # 查当前价值
+    current_value = get_option_current_value(option)
+    if current_value is None:
+        return None
+
+    # 触发: 跌了但在5%以内 (低吸摊薄)
+    dip_floor = entry_cost * 0.95
+    if current_value >= entry_cost:
+        # 价格没跌, 等
+        return None
+    if current_value < dip_floor:
+        # 跌太多(>5%), 不加仓, 等止损
+        logger.info(f"[TSLA_OPT] 加仓跳过: 当前${current_value:.2f} < 5%底线${dip_floor:.2f}, 跌太多")
+        return None
+
+    # 在跌5%以内, 执行加仓
+    addon_qty = addon["qty"]
+    opt_symbol = addon["option_symbol"]
+    limit_price = round(current_value, 2)  # 用当前bid价作限价
+
+    logger.info(f"[TSLA_OPT] 加仓触发: 当前${current_value:.2f} 跌至入场${entry_cost:.2f}的5%内, 买{addon_qty}张@${limit_price}")
+
+    if dry_run:
+        return {"action": "ADDON_BUY", "qty": addon_qty, "price": limit_price, "dry_run": True}
+
+    try:
+        from schwab.orders.options import option_buy_to_open_limit
+        client, account_hash = _get_schwab_client()
+        order_spec = option_buy_to_open_limit(opt_symbol, addon_qty, str(limit_price))
+        resp = client.place_order(account_hash, order_spec)
+        if resp.status_code == 201:
+            location = resp.headers.get("Location", "")
+            addon_order_id = location.split("/")[-1] if location else ""
+
+            # 查询加仓成交价
+            addon_fill = limit_price
+            if addon_order_id:
+                import time as _t
+                _t.sleep(2)
+                try:
+                    _fr = client.get_order(account_hash, int(addon_order_id))
+                    if _fr.status_code == 200:
+                        _fd = _fr.json()
+                        if _fd.get("status") == "FILLED":
+                            for _a in _fd.get("orderActivityCollection", []):
+                                for _e in _a.get("executionLegs", []):
+                                    if _e.get("price", 0) > 0:
+                                        addon_fill = _e["price"]
+                except Exception:
+                    pass
+
+            # 更新持仓: 合约数增加, entry_cost加权平均
+            with _position_lock:
+                data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+                opt_key = "option" if "option" in data else "spread"
+                old_qty = data[opt_key].get("contracts", 0)
+                old_entry = data.get("entry_cost", 0)
+                new_qty = old_qty + addon_qty
+                # 加权平均成本
+                new_entry = round((old_entry * old_qty + addon_fill * addon_qty) / new_qty, 4)
+                data[opt_key]["contracts"] = new_qty
+                data["entry_cost"] = new_entry
+                data["peak_value"] = max(data.get("peak_value", 0), new_entry)
+                data.pop("addon_pending", None)
+                STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+            logger.info(
+                f"[TSLA_OPT] 加仓完成: {old_qty}→{new_qty}张, "
+                f"成本${old_entry:.2f}→${new_entry:.2f}(加权), fill=${addon_fill}"
+            )
+            return {"action": "ADDON_BUY", "qty": addon_qty, "fill": addon_fill,
+                    "new_total": new_qty, "new_entry": new_entry}
+        else:
+            logger.error(f"[TSLA_OPT] 加仓下单失败: HTTP {resp.status_code}")
+            return None
+    except Exception as e:
+        logger.error(f"[TSLA_OPT] 加仓异常: {e}")
+        return None
+
+
 def auto_manage(dry_run: bool = True) -> Optional[dict]:
     """
-    自动持仓管理: 检查卖出规则 → 执行平仓(支持部分平仓)
+    自动持仓管理: 加仓检查 → 卖出规则检查 → 执行平仓(支持部分平仓)
 
     Returns:
         None = 无操作
-        {"action": str, "result": dict} = 已执行平仓
+        {"action": str, "result": dict} = 已执行操作
     """
+    # 分批建仓: 检查是否需要加仓 (优先于卖出检查)
+    addon_result = _check_addon_buy(dry_run=dry_run)
+    if addon_result:
+        return {"action": "ADDON_BUY", "reason": "分批建仓第2批", "pnl": 0, "result": addon_result}
+
     exit_signal = check_exit_rules()
     if not exit_signal:
         return None
@@ -742,7 +945,12 @@ def execute_signal(direction: str, dry_run: bool = True) -> dict:
     """
     logger.info(f"[TSLA_OPT] 收到{direction}信号, dry_run={dry_run}")
 
-    # 0. 检查是否有pending_close (旧仓等确认中, 不开新仓)
+    # 0a. 每日交易次数限制: 每方向每天最多1次
+    if not _can_trade_today(direction):
+        logger.info(f"[TSLA_OPT] {direction}方向今日已交易, 跳过 (每方向每天限1次)")
+        return {"success": True, "action": "DAILY_LIMIT", "reason": f"{direction}方向今日已交易"}
+
+    # 0b. 检查是否有pending_close (旧仓等确认中, 不开新仓)
     pending_pos = _load_position(include_pending=True)
     if pending_pos and pending_pos.get("status") == "pending_close":
         logger.info("[TSLA_OPT] 旧仓pending_close等确认中，跳过开仓")
@@ -794,6 +1002,10 @@ def execute_signal(direction: str, dry_run: bool = True) -> dict:
 
     # 5. 下单
     order_result = place_option(option, dry_run=dry_run)
+
+    # 记录每日交易 (成功开仓后)
+    if order_result.get("success") and not dry_run:
+        _record_daily_trade(direction)
 
     return {"success": order_result.get("success", False), "option": option, "order": order_result}
 

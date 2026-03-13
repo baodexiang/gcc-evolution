@@ -1581,11 +1581,9 @@ def _fifo_pair_trades(hours: int) -> dict:
 def _load_broker_pnl() -> dict:
     """读取 state/broker_pnl.json (由 broker_reconciler.py 生成)"""
     try:
-        import json as _json
-        _bp_path = os.path.join("state", "broker_pnl.json")
-        if os.path.exists(_bp_path):
-            with open(_bp_path, "r", encoding="utf-8") as _f:
-                return _json.load(_f)
+        _bp_path = ROOT / "state" / "broker_pnl.json"
+        if _bp_path.exists():
+            return json.loads(_bp_path.read_text(encoding="utf-8"))
     except Exception:
         pass
     return {}
