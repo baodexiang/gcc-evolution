@@ -830,7 +830,7 @@ CONFIG = {
         # v3.546: 飞云双突破外挂配置 (L1层扫描引擎集成)
         # 改为4小时周期，触发后冻结到次日纽约时间8AM
         "feiyun": {
-            "enabled": False,           # 安全期暂停
+            "enabled": True,            # v21.28: 恢复启用
             "timeframe": "4h",          # v3.546: 改为4小时K线
             "ohlcv_lookback": 40,       # OHLCV回溯40根
             "freeze_until_8am": True,   # v3.546: 触发后冻结到次日纽约时间8AM
@@ -876,7 +876,7 @@ CONFIG = {
             "freeze_until_8am": True,
         },
         "feiyun": {
-            "enabled": False,           # 安全期暂停
+            "enabled": True,            # v21.28: 恢复启用
             "timeframe": "4h",          # v3.546: 4小时K线
             "ohlcv_lookback": 40,
             "freeze_until_8am": True,
@@ -985,7 +985,7 @@ REVERSE_SYMBOL_MAP = {
 # ============================================================
 VISION_PATTERN_OBSERVE_STOCK = False    # v21.5: 美股改为执行模式 (仓位0/1/4/5边界激活)
 VISION_PATTERN_OBSERVE_CRYPTO = False   # 加密货币: 执行模式 (直接交易)
-P0_TRACKING_ENABLED = False             # 安全期禁用 P0-Tracking 极值追踪
+P0_TRACKING_ENABLED = True              # v21.28: 恢复启用 P0-Tracking 极值追踪
 TRAILING_STOP_ENABLED = True            # 移动止损/止盈独立开关
 MAX_UNITS_PER_SYMBOL = 5                # 每品种最大仓位单位 (与主程序一致)
 
@@ -9712,12 +9712,10 @@ class PriceScanEngine:
             "position_valid_range": "无限制",
         }
 
-        # v21.25: 缠论外挂降级为观察模式 — 准确率过低(25.5%)，只记录不执行
+        # v21.26: 缠论恢复执行模式 — 信号同时推入GCC-TM信号池 + 走正常执行路径
         main_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
-        logger.info(f"[ChanBS][OBSERVE] {symbol} {action} 信号已记录(观察模式，不发送执行)")
-        logger.info(f"  └─ 降级原因: 缠论准确率25.5%，暂停实际交易，仅观察")
 
-        # GCC-0254: 缠论信号推入GCC-TM信号池 — 主路径不执行，但让树搜索评估
+        # GCC-TM: 缠论信号推入信号池（与执行路径并行）
         try:
             from gcc_trading_module import gcc_push_signal
             _chanbs_conf = float(result.strength) if result.strength else 0.5
@@ -9727,21 +9725,17 @@ class PriceScanEngine:
             pass
         except Exception as _gcc_err:
             logger.debug("[ChanBS→GCC-TM] push failed: %s", _gcc_err)
-        signal_data["server_executed"] = False
-        signal_data["server_reason"] = "ChanBS观察模式(准确率不足)"
-        server_response = {"executed": False, "reason": "ChanBS观察模式"}
-        # 原执行路径保留但注释，待准确率回升后恢复:
-        # main_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
-        # server_response = self._notify_main_server(main_symbol, signal_data)
-        # signal_data["server_executed"] = server_response.get("executed", False)
-        # signal_data["server_reason"] = server_response.get("reason", "")
-        # if server_response.get("executed", False):
-        #     status_msg = update_plugin_daily_state(state, action, trend=current_trend_for_limit, market_type=market_type)
-        #     logger.info(f"[v21.1] {symbol} 缠论BS 执行成功，更新配额: {status_msg}")
-        #     self._save_chan_bs_state()
-        #     self.email_notifier.send_signal_notification(symbol, signal_data)
-        # else:
-        #     logger.info(f"[{symbol}] 缠论BS: 未执行({server_response.get('reason', '')}), 不消耗配额")
+
+        server_response = self._notify_main_server(main_symbol, signal_data)
+        signal_data["server_executed"] = server_response.get("executed", False)
+        signal_data["server_reason"] = server_response.get("reason", "")
+        if server_response.get("executed", False):
+            status_msg = update_plugin_daily_state(state, action, trend=current_trend_for_limit, market_type=market_type)
+            logger.info(f"[v21.1] {symbol} 缠论BS 执行成功，更新配额: {status_msg}")
+            self._save_chan_bs_state()
+            self.email_notifier.send_signal_notification(symbol, signal_data)
+        else:
+            logger.info(f"[{symbol}] 缠论BS: 未执行({server_response.get('reason', '')}), 不消耗配额")
 
         # 外挂利润追踪
         if self.profit_tracker:
