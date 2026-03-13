@@ -1789,6 +1789,26 @@ class GCCTradingModule:
         # S40: 所有模式都写决策日志
         self._write_decision_log(result)
 
+        # S45: KNN经验卡写入 (每次BUY/SELL决策记录9维特征，供dashboard展示+outcome回填)
+        if final_action in ("BUY", "SELL"):
+            try:
+                _knn_feat = _build_knn_features(context, ver_results)
+                _knn_exp = {
+                    "symbol": self.symbol,
+                    "action": final_action,
+                    "features": _knn_feat,
+                    "outcome": None,
+                    "ts": ts,
+                    "price": current_price,
+                    "ref_price": current_price,
+                    "strongest_source": signal_pool_data.get("strongest", "") if signal_pool_data else "",
+                    "vote_detail": signal_pool_data.get("vote_detail", {}) if signal_pool_data else {},
+                    "signals_count": signal_pool_data.get("total", 0) if signal_pool_data else 0,
+                }
+                _write_knn_experience_dict(_knn_exp)
+            except Exception as _knn_w_e:
+                logger.warning("[GCC-TRADE] KNN experience write: %s", _knn_w_e)
+
         # S41: pending_order 由 gcc_observe() 轮次逻辑统一控制
         # (v0.2: 避免process()和gcc_observe()双写)
 
@@ -2956,6 +2976,14 @@ def gcc_observe(
 
         # 回填模拟交易
         _backfill_sim_trades(symbol, bars)
+
+        # S46: KNN经验outcome回填 (每轮用当前价格更新历史未填条目)
+        try:
+            _current_price = float(bars[-1].get("close") or bars[-1].get("c") or 0) if bars else 0.0
+            if _current_price > 0:
+                _backfill_outcome(symbol, _current_price)
+        except Exception as _bf_e:
+            logger.debug("[GCC-TRADE] knn backfill: %s", _bf_e)
 
         # ── 轮次去重: 检查当前round index是否已在round_decisions中 ──
         actual_round = _get_current_round(symbol=symbol)
