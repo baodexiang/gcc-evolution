@@ -2543,6 +2543,35 @@ def compute_direction_leaders() -> dict:
 # {symbol: {"dir": "BUY"/"SELL", "source": str, "lock_ts": float, "expire_ts": float}}
 _direction_lock: Dict[str, dict] = {}
 _LOCK_DURATION = 2 * 3600  # 2小时过期
+_DIRECTION_LOCK_FILE = _STATE_DIR / "gcc_direction_lock.json"
+
+
+def _persist_direction_lock() -> None:
+    """方向锁落盘。"""
+    try:
+        _atomic_write(_DIRECTION_LOCK_FILE,
+                      json.dumps(_direction_lock, ensure_ascii=False, indent=2))
+    except Exception as e:
+        logger.debug("[GCC-TM] persist_direction_lock: %s", e)
+
+
+def _restore_direction_lock() -> None:
+    """启动时恢复方向锁，自动清理过期条目。"""
+    global _direction_lock
+    if not _DIRECTION_LOCK_FILE.exists():
+        return
+    try:
+        data = json.loads(_DIRECTION_LOCK_FILE.read_text(encoding="utf-8"))
+        now = time.time()
+        _direction_lock = {k: v for k, v in data.items()
+                          if v.get("expire_ts", 0) > now}
+        if _direction_lock:
+            logger.info("[GCC-TM] restored %d direction locks from disk", len(_direction_lock))
+    except Exception as e:
+        logger.debug("[GCC-TM] restore_direction_lock: %s", e)
+
+
+_restore_direction_lock()
 
 # 缓存 leader 配置（启动时 / 每周更新时刷新）
 _direction_leaders: Dict[str, dict] = {}
@@ -2576,6 +2605,7 @@ def _set_direction_lock(symbol: str, direction: str, source: str) -> None:
         "lock_ts": now,
         "expire_ts": now + _LOCK_DURATION,
     }
+    _persist_direction_lock()
     logger.info(
         "[GCC-TM][DIRECTION_LOCK] %s locked %s by %s (expires 2h)",
         symbol, direction, source,
@@ -2646,6 +2676,46 @@ import threading as _threading
 # {symbol: [{"source": str, "action": "BUY"/"SELL", "confidence": float, "ts": str}, ...]}
 _signal_pool: Dict[str, list] = {}
 _signal_pool_lock = _threading.Lock()
+_SIGNAL_POOL_FILE = _STATE_DIR / "gcc_signal_pool.json"
+
+
+def _persist_signal_pool() -> None:
+    """信号池落盘（lock内调用）。"""
+    try:
+        _atomic_write(_SIGNAL_POOL_FILE,
+                      json.dumps(_signal_pool, ensure_ascii=False, indent=2))
+    except Exception as e:
+        logger.debug("[GCC-TM] persist_signal_pool: %s", e)
+
+
+def _restore_signal_pool() -> None:
+    """启动时恢复信号池，清理超过4小时的陈旧信号。"""
+    global _signal_pool
+    if not _SIGNAL_POOL_FILE.exists():
+        return
+    try:
+        data = json.loads(_SIGNAL_POOL_FILE.read_text(encoding="utf-8"))
+        now = datetime.now(_NY_TZ)
+        restored = 0
+        for sym, signals in data.items():
+            fresh = []
+            for s in signals:
+                try:
+                    sig_dt = datetime.strptime(s["ts"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=_NY_TZ)
+                    if (now - sig_dt).total_seconds() < 4 * 3600:
+                        fresh.append(s)
+                except Exception:
+                    pass
+            if fresh:
+                _signal_pool[sym] = fresh
+                restored += len(fresh)
+        if restored:
+            logger.info("[GCC-TM] restored %d signals from disk", restored)
+    except Exception as e:
+        logger.debug("[GCC-TM] restore_signal_pool: %s", e)
+
+
+_restore_signal_pool()
 
 
 def gcc_push_signal(symbol: str, source: str, action: str,
@@ -2683,6 +2753,7 @@ def gcc_push_signal(symbol: str, source: str, action: str,
             "confidence": confidence, "ts": ts,
             "lock_status": lock_result["reason"],
         })
+        _persist_signal_pool()
     logger.debug("[GCC-TM] push %s %s %s conf=%.2f", symbol, source, action, confidence)
 
 
@@ -2690,6 +2761,7 @@ def _drain_signals(symbol: str) -> list:
     """取出并清空某品种的信号池。"""
     with _signal_pool_lock:
         signals = _signal_pool.pop(symbol, [])
+        _persist_signal_pool()
     return signals
 
 
@@ -2848,6 +2920,27 @@ def gcc_observe(
             logger.debug("[GCC-TM] %s skip duplicate round %d (already recorded)",
                          symbol, actual_round)
             return
+
+        # ── 缺失轮次回填: 确保4H数据完整 ──
+        recorded_rounds = {r.get("round") for r in state.round_decisions}
+        _backfill_count = 0
+        for _missing_r in range(actual_round):
+            if _missing_r not in recorded_rounds:
+                state.round_decisions.append({
+                    "round": _missing_r, "action": "HOLD",
+                    "verdict": "BACKFILL", "executed": False,
+                    "signals": 0, "buy_votes": 0, "sell_votes": 0,
+                    "price": 0.0,
+                    "ts": datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+                    "note": "mid_candle_backfill",
+                })
+                _backfill_count += 1
+        if _backfill_count:
+            state.round_decisions.sort(key=lambda r: r.get("round", 0))
+            state.current_round = actual_round
+            logger.info("[GCC-TM] %s backfilled %d missed rounds (now round %d)",
+                        symbol, _backfill_count, actual_round)
+            _save_candle_state(state)
 
         # ── 轮次决策 ──
         result = mod.process_round(
