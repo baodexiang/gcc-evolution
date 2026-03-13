@@ -118,7 +118,7 @@ except ImportError:
 # -----------------------------------------------------------------------------
 class SystemConfig:
     """系统级配置"""
-    VERSION = "3.677"  # v3.677: 移动止盈补豁免FilterChain+SignalGate 3处 | v3.670: KEY-007-S7/S8 双KNN交叉验证+回填闭环+Phase2
+    VERSION = "3.678"  # v3.678: S2/S3/S4/P0/CycleSwitch全部观察模式，只保留GCC-TM通道执行 | v3.677: 移动止盈补豁免FilterChain+SignalGate 3处
     LOG_DIR = "logs"
     STATE_FILE = "state.json"
     ENABLE_DEBUG = False
@@ -3470,13 +3470,15 @@ def _run_cycle_switch_analysis(symbol: str, timeframe: int):
                 print(f"[P0-CycleSwitch] {symbol}: {trade_reason}")
                 print(f"[v3.510] {symbol} 仓位门控生效: {trade_reason}")
             else:
-                # 执行买入
-                print(f"[P0-CycleSwitch] {symbol}: 执行买入...")
+                # v3.678: CycleSwitch观察模式 — 不直接下单，只走GCC-TM
+                log_to_server(f"[v3.678][OBSERVE] CycleSwitch BUY: {symbol} @ {current_price:.4f} (观察模式,不下单)")
+                send_ok = False
                 try:
-                    if is_crypto:
-                        send_ok = send_3commas_signal("BUY", current_price, symbol)
-                    else:
-                        send_ok = send_signalstack_order("BUY", symbol)
+                    if False:  # v3.678: 原执行路径保留
+                        if is_crypto:
+                            send_ok = send_3commas_signal("BUY", current_price, symbol)
+                        else:
+                            send_ok = send_signalstack_order("BUY", symbol)
 
                     if send_ok is True:  # v3.560 P2-1: 严格检查，排除COOLDOWN
                         executed = True
@@ -3505,13 +3507,15 @@ def _run_cycle_switch_analysis(symbol: str, timeframe: int):
                 print(f"[P0-CycleSwitch] {symbol}: {trade_reason}")
                 print(f"[v3.510] {symbol} 仓位门控生效: {trade_reason}")
             else:
-                # 执行卖出
-                print(f"[P0-CycleSwitch] {symbol}: 执行卖出...")
+                # v3.678: CycleSwitch观察模式 — 不直接下单，只走GCC-TM
+                log_to_server(f"[v3.678][OBSERVE] CycleSwitch SELL: {symbol} @ {current_price:.4f} (观察模式,不下单)")
+                send_ok = False
                 try:
-                    if is_crypto:
-                        send_ok = send_3commas_signal("SELL", current_price, symbol)
-                    else:
-                        send_ok = send_signalstack_order("SELL", symbol)
+                    if False:  # v3.678: 原执行路径保留
+                        if is_crypto:
+                            send_ok = send_3commas_signal("SELL", current_price, symbol)
+                        else:
+                            send_ok = send_signalstack_order("SELL", symbol)
 
                     if send_ok is True:  # v3.560 P2-1: 严格检查，排除COOLDOWN
                         executed = True
@@ -47907,15 +47911,10 @@ def llm_decide():
         # ===== v3.411: 仓位检查结束，继续正常发单流程 =====
         # ===== v3.651: 外挂信号绕过L1参考模式 =====
         elif plugin_bypass_l2:
-            # v3.651: 外挂信号绕过L1参考模式，实际发送订单
-            if is_us_stock(symbol):
-                send_ok = send_signalstack_order(final_action, symbol)
-            else:
-                send_ok = send_3commas_signal(final_action, last_close, symbol)
-            if send_ok is True:  # v21.18: 严格检查，排除COOLDOWN字符串
-                executed_qty = unit_size
-            _ok_label = "成功" if send_ok is True else ("冷却" if send_ok == "COOLDOWN" else ("门控拦截" if send_ok is None else "失败"))
-            log_to_server(f"[v3.651] 外挂信号{_ok_label}: {symbol} {final_action} bias={plugin_exec_bias}")
+            # v3.678: S2观察模式 — 只走GCC-TM通道，外挂不直接下单
+            send_ok = False
+            executed_qty = 0.0
+            log_to_server(f"[v3.678][OBSERVE] S2外挂信号: {symbol} {final_action} bias={plugin_exec_bias} (观察模式,不下单)")
         # ===== v3.650: L1参考模式 - 不执行实际交易 =====
         # L1的BUY/SELL只作为参考,交易执行保留给: L2门卫(STRONG) + MACD背离 + P0-CycleSwitch
         else:
@@ -50038,11 +50037,9 @@ def handle_tv_l2_10m():
             # GCC-0194: N-Gate/HOLD_BAND已移除
             if macd_action == "BUY" and position_units < max_units:
                 triggered_action = "BUY"
-                # 发送交易信号
-                if is_us_stock(symbol):
-                    send_ok = send_signalstack_order("BUY", symbol)
-                else:
-                    send_ok = send_3commas_signal("BUY", current_close, symbol)
+                # v3.678: S3观察模式 — MACD不直接下单，只走GCC-TM
+                send_ok = False
+                log_to_server(f"[v3.678][OBSERVE] S3 MACD BUY: {symbol} @ {current_close:.4f} (观察模式,不下单)")
 
                 if send_ok is True:
                     old_position = position_units
@@ -50141,11 +50138,9 @@ def handle_tv_l2_10m():
 
             elif macd_action == "SELL" and position_units > 0:
                 triggered_action = "SELL"
-                # 发送交易信号
-                if is_us_stock(symbol):
-                    send_ok = send_signalstack_order("SELL", symbol)
-                else:
-                    send_ok = send_3commas_signal("SELL", current_close, symbol)
+                # v3.678: S3观察模式 — MACD不直接下单，只走GCC-TM
+                send_ok = False
+                log_to_server(f"[v3.678][OBSERVE] S3 MACD SELL: {symbol} @ {current_close:.4f} (观察模式,不下单)")
 
                 if send_ok is True:
                     old_position = position_units
@@ -50284,11 +50279,9 @@ def handle_tv_l2_10m():
                     trade_result = {"success": False, "reason": "position_full"}
                 else:
                     triggered_action = "BUY"
-                    # 发送交易信号
-                    if is_us_stock(symbol):
-                        send_ok = send_signalstack_order("BUY", symbol)
-                    else:
-                        send_ok = send_3commas_signal("BUY", current_close, symbol)
+                    # v3.678: S4观察模式 — L2 Gate不直接下单，只走GCC-TM
+                    send_ok = False
+                    log_to_server(f"[v3.678][OBSERVE] S4 Gate BUY: {symbol} @ {current_close:.4f} (观察模式,不下单)")
 
                     if send_ok is True:  # v3.560 P2-1
                         # 更新仓位 (与L2大周期一致的仓位管理)
@@ -50358,11 +50351,9 @@ L2门卫交易触发
                     trade_result = {"success": False, "reason": "no_position"}
                 else:
                     triggered_action = "SELL"
-                    # 发送交易信号
-                    if is_us_stock(symbol):
-                        send_ok = send_signalstack_order("SELL", symbol)
-                    else:
-                        send_ok = send_3commas_signal("SELL", current_close, symbol)
+                    # v3.678: S4观察模式 — L2 Gate不直接下单，只走GCC-TM
+                    send_ok = False
+                    log_to_server(f"[v3.678][OBSERVE] S4 Gate SELL: {symbol} @ {current_close:.4f} (观察模式,不下单)")
 
                     if send_ok is True:  # v3.560 P2-1
                         # 更新仓位 (与L2大周期一致的仓位管理)
@@ -51870,14 +51861,13 @@ def handle_p0_signal():
                             log_to_server(f"[SignalFilter] BUY过滤调用失败: {_sf_buy_e}")
 
                 if not reason:
-                    # 执行买入
-                    log_to_server(f"[P0] 执行买入: {symbol} pos={position_units}")
-                    try:
+                    # v3.678: P0观察模式 — 扫描引擎不直接下单，只走GCC-TM
+                    log_to_server(f"[v3.678][OBSERVE] P0 BUY: {symbol} @ {price:.4f} type={signal_type} (观察模式,不下单)")
+                    send_ok = False
+                    if False:  # v3.678: 原执行路径保留，观察期结束后恢复
                         if is_crypto:
-                            # 加密货币用3commas — v2.5: 传递signal_type供send函数内部豁免判断
                             send_ok = send_3commas_signal("BUY", price, symbol, signal_type=signal_type)
                         else:
-                            # 美股用signalstack — v2.5: 传递signal_type供send函数内部豁免判断
                             send_ok = send_signalstack_order("BUY", symbol, signal_type=signal_type)
 
                         if send_ok is True:  # v3.560 P2-1
@@ -52007,13 +51997,13 @@ def handle_p0_signal():
                             log_to_server(f"[SignalFilter] SELL过滤调用失败: {_sf_sell_e}")
 
                 if not reason:
-                    log_to_server(f"[P0] 执行卖出: {symbol} pos={position_units}")
-                    try:
+                    # v3.678: P0观察模式 — 扫描引擎不直接下单，只走GCC-TM
+                    log_to_server(f"[v3.678][OBSERVE] P0 SELL: {symbol} @ {price:.4f} type={signal_type} (观察模式,不下单)")
+                    send_ok = False
+                    if False:  # v3.678: 原执行路径保留，观察期结束后恢复
                         if is_crypto:
-                            # 加密货币用3commas — v2.5: 传递signal_type供send函数内部豁免判断
                             send_ok = send_3commas_signal("SELL", price, symbol, signal_type=signal_type)
                         else:
-                            # 美股用signalstack — v2.5: 传递signal_type供send函数内部豁免判断
                             send_ok = send_signalstack_order("SELL", symbol, signal_type=signal_type)
 
                         if send_ok is True:  # v3.560 P2-1
