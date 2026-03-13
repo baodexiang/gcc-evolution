@@ -42939,20 +42939,30 @@ def llm_decide():
         if _gcc_order:
             _gcc_act = _gcc_order.get("action", "HOLD")
             _gcc_price = float(_gcc_order.get("price_ref", 0))
-            # v3.663: 当前价优先用yfinance(与决策同源)，避免TV脏数据
-            _gcc_cur_price = _gcc_price  # fallback = 决策价
+            # v3.663: 当前价优先Schwab(美股)/Coinbase(加密)，避免TV/yfinance脏数据
+            _gcc_cur_price = 0.0
+            _gcc_price_src = ""
+            # 优先: Schwab(美股) / Coinbase(加密)
             try:
-                _gcc_yf_map = {"BTCUSDC": "BTC-USD", "ETHUSDC": "ETH-USD",
-                               "SOLUSDC": "SOL-USD", "ZECUSDC": "ZEC-USD"}
-                _yf_sym = _gcc_yf_map.get(symbol, symbol)
-                _yf_bars = YFinanceDataFetcher.get_ohlcv(_yf_sym, 30, 3)
-                if _yf_bars and len(_yf_bars) > 0:
-                    _gcc_cur_price = float(_yf_bars[-1].get("close", _yf_bars[-1].get("c", 0)))
-            except Exception as _yf_e:
-                log_to_server(f"[GCC-TM][EXECUTE] {symbol}: yfinance取价失败({_yf_e}), 用price_ref")
+                if is_crypto_symbol(symbol):
+                    _cb_map = {"BTCUSDC": "BTC", "ETHUSDC": "ETH",
+                               "SOLUSDC": "SOL", "ZECUSDC": "ZEC"}
+                    _cb_sym = _cb_map.get(symbol)
+                    if _cb_sym:
+                        from coinbase_sync_v6 import get_price as _cb_gp
+                        _gcc_cur_price = _cb_gp(_cb_sym)
+                        _gcc_price_src = "Coinbase"
+                else:
+                    from schwab_data_provider import get_provider as _schwab_gp2
+                    _sq = _schwab_gp2().get_quote(symbol)
+                    _gcc_cur_price = _sq.get("last", 0)
+                    _gcc_price_src = "Schwab"
+            except Exception as _api_e:
+                log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_price_src or 'API'}取价失败({_api_e})")
+            # fallback: price_ref(决策时价格)
             if _gcc_cur_price <= 0:
-                _cp_list = data.get("close_prices", [])
-                _gcc_cur_price = float(_cp_list[-1]) if _cp_list else _gcc_price
+                _gcc_cur_price = _gcc_price
+                _gcc_price_src = "price_ref"
             log_to_server(
                 f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} "
                 f"price_ref={_gcc_price:.2f} cur={_gcc_cur_price:.2f} "
