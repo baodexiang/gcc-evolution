@@ -639,21 +639,22 @@ def check_exit_rules() -> Optional[dict]:
             "contracts": close_qty,
         }
 
-    # 5. 追踪止损: 盈利达25%后激活, 从峰值回撤15%平仓(剩余全部)
+    # 5. 追踪止损: 部分止盈完成后 或 盈利达25%后激活
+    #    从峰值回撤15%平仓(剩余全部), 不要求current_value>entry_cost
     trailing_activate = entry_cost * (1 + TRAILING_ACTIVATE_PCT)
-    if peak_value >= trailing_activate and current_value > entry_cost:
+    if peak_value >= trailing_activate or partial_tp_done:
         pullback = peak_value - current_value
-        gain_from_entry = peak_value - entry_cost
-        pullback_pct = pullback / gain_from_entry if gain_from_entry > 0 else 0
-        if pullback_pct >= TRAILING_PULLBACK_PCT:
-            return {
-                "action": "TRAILING_STOP",
-                "reason": (f"追踪止损: 最高${peak_value:.2f} → 当前${current_value:.2f} "
-                           f"回撤{pullback_pct*100:.0f}% ≥ {TRAILING_PULLBACK_PCT*100:.0f}%"),
-                "current_value": current_value,
-                "pnl": round(pnl_total, 2),
-                "option": option,
-            }
+        if peak_value > 0 and pullback > 0:
+            pullback_pct = pullback / peak_value  # 从peak回撤百分比(基于peak)
+            if pullback_pct >= TRAILING_PULLBACK_PCT:
+                return {
+                    "action": "TRAILING_STOP",
+                    "reason": (f"追踪止损: 最高${peak_value:.2f} → 当前${current_value:.2f} "
+                               f"回撤{pullback_pct*100:.0f}% ≥ {TRAILING_PULLBACK_PCT*100:.0f}%"),
+                    "current_value": current_value,
+                    "pnl": round(pnl_total, 2),
+                    "option": option,
+                }
 
     return None
 

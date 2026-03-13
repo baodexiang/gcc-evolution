@@ -2863,10 +2863,20 @@ def gcc_confirm_consumed(symbol: str, success: bool = True) -> None:
                 symbol, order.get("action"), order.get("price_ref", 0),
             )
         else:
-            # 下单失败 → 清除processing标记, 允许下次重试
+            # 下单失败 → 计数+1, 超过3次标记consumed(防无限重试)
+            retry_count = order.get("retry_count", 0) + 1
+            order["retry_count"] = retry_count
             order["processing"] = False
-            _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
-            logger.warning("[GCC-TM][RETRY] %s 下单失败, 清除processing, 等待重试", symbol)
+            if retry_count >= 3:
+                order["consumed"] = True
+                order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+                order["expired"] = True
+                order["expire_reason"] = f"max_retries_{retry_count}"
+                _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
+                logger.warning("[GCC-TM][GIVE_UP] %s 连续%d次失败, 放弃", symbol, retry_count)
+            else:
+                _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
+                logger.warning("[GCC-TM][RETRY] %s 下单失败(%d/3), 等待重试", symbol, retry_count)
     except Exception as e:
         logger.warning("[GCC-TM][CONSUMED] %s write error: %s", symbol, e)
 
