@@ -5696,7 +5696,7 @@ def _knn_classify_failure(key, acc, avg_wr, n_samples, is_crypto):
 
 
 def _knn_smart_prune_v2(db, key, target_keep_ratio=0.7):
-    """TiM-inspired: forget老旧无信息样本"""
+    """TiM-inspired: Phase1 forget老旧无信息样本 + Phase2 merge相似特征向量"""
     import numpy as np
     data = db.get_history(key)
     if data is None:
@@ -5709,12 +5709,42 @@ def _knn_smart_prune_v2(db, key, target_keep_ratio=0.7):
     if n < 100:
         return 0
 
+    # Phase 1: forget old low-information samples
     keep_mask = np.ones(n, dtype=bool)
     oldest_third = n // 3
     for i in range(oldest_third):
         if abs(rets[i]) < 0.005:
             keep_mask[i] = False
 
+    # Phase 2 (S09): merge near-duplicate feature vectors
+    # Cosine distance < 0.15 ≈ similarity > 0.989 → 信息冗余
+    remaining_idx = np.where(keep_mask)[0]
+    if len(remaining_idx) >= 50 and feat.shape[1] > 0:
+        sub_feat = feat[remaining_idx]
+        norms = np.linalg.norm(sub_feat, axis=1, keepdims=True)
+        norms = np.where(norms < 1e-8, 1.0, norms)
+        normed = sub_feat / norms
+
+        n_sub = len(remaining_idx)
+        sub_merged = np.zeros(n_sub, dtype=bool)
+
+        for i in range(n_sub):
+            if sub_merged[i]:
+                continue
+            dists = np.linalg.norm(normed[i:i+1] - normed[i+1:], axis=1)
+            near = np.where((dists < 0.15) & (~sub_merged[i+1:]))[0]
+            if len(near) == 0:
+                continue
+            near_abs = near + i + 1
+            group_orig = remaining_idx[np.concatenate([[i], near_abs])]
+            # Average features and returns into the representative sample
+            feat[remaining_idx[i]] = feat[group_orig].mean(axis=0)
+            rets[remaining_idx[i]] = rets[group_orig].mean()
+            for j in near_abs:
+                sub_merged[j] = True
+                keep_mask[remaining_idx[j]] = False
+
+    # Phase 3: trim to target if still over
     kept = keep_mask.sum()
     target = int(n * target_keep_ratio)
     if kept > target:
