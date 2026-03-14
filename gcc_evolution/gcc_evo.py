@@ -6738,7 +6738,10 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
                 total_issues = 0
                 total_fixed = 0
                 for rng in ranges:
-                    issues = data.get(rng, {}).get("issues", [])
+                    rng_data = data.get(rng, {})
+                    if not isinstance(rng_data, dict):
+                        continue
+                    issues = rng_data.get("issues", [])
                     total_issues += len([i for i in issues if i.get("type") != "POSITIVE" and not i.get("fixed") and not i.get("acked")])
                     total_fixed += len([i for i in issues if i.get("fixed")])
                 click.echo(f"  ✓ Step 5/5: Dashboard — {ranges}, 问题{total_issues}, 已修复{total_fixed}")
