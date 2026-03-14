@@ -2125,23 +2125,65 @@ def _generate_experience_cards(fifo_trades: dict, block_validation: dict,
     return cards
 
 
+def _load_culled_registry(card_type: str) -> list:
+    """加载淘汰黑名单,用于相似性过滤。"""
+    reg_path = ROOT / "state" / "culled_cards_registry.json"
+    if not reg_path.exists():
+        return []
+    try:
+        reg = json.loads(reg_path.read_text(encoding="utf-8"))
+        return reg.get(card_type, [])
+    except Exception:
+        return []
+
+
+def _exp_card_matches_culled(card, culled_entries: list) -> bool:
+    """经验卡: 提取source(外挂名), 与已淘汰卡的source比对。
+    同source被淘汰过 → 直接跳过, 不再实验。"""
+    # 从 key_insight 提取 source: "VF: 胜率60%..." → "VF"
+    insight = card.key_insight or ""
+    card_source = insight.split(":")[0].strip().lower() if ":" in insight else ""
+    if not card_source:
+        # fallback: 从 tags 提取
+        for t in (card.tags or []):
+            if t not in ("key009", "fifo", "signal_accuracy", "strategy_perf", "block_validation"):
+                card_source = t.lower()
+                break
+    if not card_source:
+        return False
+    for entry in culled_entries:
+        culled_title = entry.get("title", "")
+        culled_source = culled_title.split(":")[0].strip().lower() if ":" in culled_title else ""
+        if culled_source and card_source == culled_source:
+            return True
+    return False
+
+
 def _save_cards_to_store(cards: list) -> int:
-    """写入 gcc-evo GlobalMemory (自动去重+质量门控)。"""
+    """写入 gcc-evo GlobalMemory (自动去重+质量门控+淘汰黑名单过滤)。
+    已淘汰的source(外挂)直接跳过,不再实验。"""
     if not cards:
         return 0
     try:
         _, _, GlobalMemory, _ = _gcc_evo_imports()
     except ImportError:
         return 0
+    culled_entries = _load_culled_registry("experience")
     saved = 0
+    skipped_culled = 0
     try:
         gm = GlobalMemory()
         for card in cards:
+            if culled_entries and _exp_card_matches_culled(card, culled_entries):
+                skipped_culled += 1
+                continue
             passed, _ = gm.store_with_gate(card)
             if passed:
                 saved += 1
     except Exception as e:
         print(f"[KEY009] 经验卡写入失败: {e}")
+    if skipped_culled:
+        print(f"[KEY009] 经验卡跳过{skipped_culled}张(source已淘汰,不再实验)")
     return saved
 
 
@@ -3231,6 +3273,8 @@ def main():
     parser.add_argument("--autofix", action="store_true", help="本地端: 检测autofix任务并调用Claude Code修复")
     parser.add_argument("--rule-status", nargs=2, metavar=("RULE_ID", "STATUS"),
                         help="L5: 转换规则状态, e.g. --rule-status KEY-009-R001 ACTIVE")
+    parser.add_argument("--skip-cards", action="store_true",
+                        help="跳过经验卡写入(非周期轮次)")
     args = parser.parse_args()
 
     if args.rule_status:
@@ -3311,11 +3355,14 @@ def main():
             fifo = week_data.get("fifo_trades", {})
             bv = week_data.get("block_validation", {})
             sr = week_data.get("strategy_ranking", [])
-            # 经验卡回写
-            cards = _generate_experience_cards(fifo, bv, sr, h_1w)
-            saved = _save_cards_to_store(cards)
-            if saved:
-                print(f"[KEY009] 经验卡写入 {saved}/{len(cards)} 张")
+            # 经验卡回写 (半月周期门控: --skip-cards 时跳过)
+            if getattr(args, "skip_cards", False):
+                print(f"[KEY009] 经验卡跳过 (非半月周期)")
+            else:
+                cards = _generate_experience_cards(fifo, bv, sr, h_1w)
+                saved = _save_cards_to_store(cards)
+                if saved:
+                    print(f"[KEY009] 经验卡写入 {saved}/{len(cards)} 张")
             # 结构化规则
             rules = _extract_rules(sr, bv)
             _save_rules(rules)

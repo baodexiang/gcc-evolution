@@ -105,6 +105,8 @@ if card_dir.exists():
             cid = d.get("id") or jf.stem
             if cid in seen_ids:
                 continue
+            if d.get("culled"):
+                continue  # 已淘汰的知识卡不显示
             seen_ids.add(cid)
             # Extract category from parent directory name
             cat = jf.parent.name if jf.parent != card_dir else ""

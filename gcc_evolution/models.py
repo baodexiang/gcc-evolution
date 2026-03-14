@@ -37,6 +37,7 @@ class CardStatus(str, Enum):
     VALIDATED = "validated"
     ARCHIVED = "archived"
     DEPRECATED = "deprecated"
+    CULLED = "culled"        # 周期淘汰(底部10%), 不再重新加入
 
 
 class StepResult(str, Enum):
