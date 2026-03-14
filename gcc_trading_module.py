@@ -1707,10 +1707,28 @@ class BeyondEuclidVerifier:
             self.algebra.verify(best_node, current_price),
         ]
 
-        consensus_count = sum(1 for r in results if r.ok)
+        # S33: 弃权视角不计入分母（动态 consensus）
+        active_results = [r for r in results if not r.abstain]
+        consensus_count = sum(1 for r in active_results if r.ok)
+        active_count = len(active_results)
 
-        # S33: ≥2/3 → EXECUTE，否则 SKIP
-        verdict = "EXECUTE" if consensus_count >= 2 else "SKIP"
+        if active_count == 0:
+            # 全部弃权 → SKIP
+            verdict = "SKIP"
+        elif active_count == 1:
+            # 单视角：必须 ok 才放行
+            verdict = "EXECUTE" if consensus_count >= 1 else "SKIP"
+        elif active_count == 2:
+            # 双视角：必须 2/2（严格模式）
+            verdict = "EXECUTE" if consensus_count >= 2 else "SKIP"
+        else:
+            # 三视角：2/3 通过（原逻辑）
+            verdict = "EXECUTE" if consensus_count >= 2 else "SKIP"
+
+        logger.debug(
+            "[GCC-TM][BEV] active=%d/%d consensus=%d verdict=%s",
+            active_count, len(results), consensus_count, verdict
+        )
 
         return consensus_count, results, verdict
 
