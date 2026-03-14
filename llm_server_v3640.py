@@ -26299,7 +26299,7 @@ def send_trend_change_email_v3510(symbol: str, old_trend: str, new_trend: str, r
         "SIDE": "双向允许"
     }
 
-    subject = f"📊 [x4转折] {symbol} {old_trend} → {new_trend} ({x4_method})"
+    subject = f"📊 [x4转折] {symbol} {old_trend} → {new_trend}"
     body = f"""
 ========================================
 📊 x4大周期趋势转折
@@ -26308,20 +26308,19 @@ def send_trend_change_email_v3510(symbol: str, old_trend: str, new_trend: str, r
 时间: {ny_time} (纽约时间)
 品种: {symbol}
 
-x4大周期:
-  旧趋势: {old_trend} → 新趋势: {new_trend}
-  采用算法: {x4_method} (GCC-0194: 固定道氏)
-  道氏判定: {trend_x4_dow}
+x4大周期 (EMA三线排列 7/14/20):
+  {old_trend} → {new_trend}
 
-当前周期(参考):
-  趋势: {current_trend} (缠论K线合并)
-  Vision覆盖: 待下次推送评估
+当前周期:
+  缠论基线: {current_trend}
+  Vision: >80%置信度时覆盖缠论基线
 
 影响:
   扫描引擎: x4={new_trend} → {direction_map.get(new_trend, '未知')}
+  GCC-TM门控: Vision + 上K汇总 + Wyckoff 三方投票
 
 ========================================
-来源: L1趋势监控 v3.640
+来源: L1趋势监控 v3.670
 ========================================
 """
     send_email_notification(subject, body)
