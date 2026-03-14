@@ -3451,6 +3451,37 @@ def main():
             except Exception:
                 pass
 
+        # ── 注入 GCC-SCALP 剥头皮数据 ──
+        _scalp_state_path = STATE_DIR / "gcc_scalp_state.json"
+        _scalp_trades_path = STATE_DIR / "gcc_scalp_trades.jsonl"
+        _scalp_data = {"state": {}, "trades": [], "summary": {}}
+        if _scalp_state_path.exists():
+            try:
+                _scalp_data["state"] = json.loads(_scalp_state_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        if _scalp_trades_path.exists():
+            try:
+                _trades = []
+                for _line in _scalp_trades_path.read_text(encoding="utf-8").strip().split("\n"):
+                    if _line.strip():
+                        _trades.append(json.loads(_line))
+                _scalp_data["trades"] = _trades[-50:]  # 最近50笔
+                # 汇总
+                _total = len(_trades)
+                _wins = sum(1 for t in _trades if t.get("net_pnl_usd", 0) > 0)
+                _total_pnl = sum(t.get("net_pnl_usd", 0) for t in _trades)
+                _scalp_data["summary"] = {
+                    "total": _total,
+                    "wins": _wins,
+                    "losses": _total - _wins,
+                    "win_rate": round(_wins / _total * 100, 1) if _total else 0,
+                    "total_pnl_usd": round(_total_pnl, 2),
+                }
+            except Exception:
+                pass
+        multi["scalp"] = _scalp_data
+
         _write_key009_cache(multi)
 
         # ── 生成嵌入数据的 dashboard HTML (可直接 file:// 打开) ──

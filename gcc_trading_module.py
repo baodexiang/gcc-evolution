@@ -3825,6 +3825,17 @@ def gcc_scalp_observe(
 
     # ── 持仓中: 检查出场条件 ──
     if state["in_trade"]:
+        # 现货安全: direction=SELL是损坏状态(现货不能做空),强制重置
+        if state.get("direction") == "SELL":
+            logger.error("[GCC-SCALP] %s 损坏状态: direction=SELL on spot. 强制重置", symbol)
+            state = {
+                "in_trade": False, "direction": None,
+                "entry_price": 0.0, "entry_ts": None,
+                "bars_held": 0, "cooldown": 0,
+                "tp_price": 0.0, "sl_price": 0.0, "quantity": 0.0,
+            }
+            _save_scalp_state(state)
+            return None
         state["bars_held"] += 1
         should_exit = False
         exit_reason = ""
@@ -3854,7 +3865,7 @@ def gcc_scalp_observe(
                 raw_pnl_pct = (current_price - entry_p) / entry_p
             else:
                 raw_pnl_pct = (entry_p - current_price) / entry_p
-            fee_pct = 0.0009  # maker来回0.09%
+            fee_pct = 0.006  # taker市价单来回~0.60%
             net_pnl_pct = raw_pnl_pct - fee_pct
             net_pnl_usd = net_pnl_pct * _SCALP_MAX_POSITION_USD
 
@@ -4015,6 +4026,16 @@ def _scalp_write_pending(symbol: str, action: str, price: float,
     }
     pending_path = _STATE_DIR / f"gcc_pending_order_{symbol}.json"
     try:
+        # 防止覆盖未消费的订单
+        if pending_path.exists():
+            try:
+                _existing = json.loads(pending_path.read_text(encoding="utf-8"))
+                if not _existing.get("consumed", True):
+                    logger.warning("[GCC-SCALP] pending_order未消费, 跳过写入: %s %s (existing: %s %s)",
+                                   action, symbol, _existing.get("action"), _existing.get("ts"))
+                    return
+            except Exception:
+                pass  # 文件损坏则覆盖
         pending_path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(pending_path,
                       json.dumps(order, ensure_ascii=False, indent=2))

@@ -43065,7 +43065,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
         except Exception as _ss_e:
             log_to_server(f"[GCC-TM][ERROR] {symbol} SignalStack: {_ss_e}")
     elif _gcc_order.get("source") == "gcc_scalp":
-        # GCC-0256 S5: OP剥头皮 → Coinbase API限价单 (maker费率)
+        # GCC-0256 S5: OP剥头皮 → Coinbase API市价单 (taker费率)
         # 现货只能先买后卖, SELL必须是平仓(有持仓才能卖)
         try:
             from coinbase_sync_v6 import place_order as _cb_place
@@ -43075,23 +43075,21 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             if _scalp_qty <= 0:
                 _scalp_qty = _scalp_max / _gcc_cur_price if _gcc_cur_price > 0 else 0
             if _gcc_act == "BUY":
-                # 限价买入: 用quote_size(USDC金额), 限价=当前价
+                # 市价买入: 用quote_size(USDC金额), 确保立即成交
                 _scalp_res = _cb_place(_scalp_product, "BUY",
-                                       quote_size=min(_scalp_max, _scalp_qty * _gcc_cur_price),
-                                       limit_price=_gcc_cur_price)
+                                       quote_size=min(_scalp_max, _scalp_qty * _gcc_cur_price))
             elif _gcc_act == "SELL":
-                # 现货卖出保护: 检查是否有持仓(scalp state标记为平仓才允许)
+                # 现货卖出保护: SELL只允许平仓(reason必须含scalp_exit)
                 _scalp_reason = _gcc_order.get("reason", "")
-                if "scalp_exit" not in _scalp_reason and "scalp_entry" in _scalp_reason:
-                    # 开空仓(非平仓) — 现货禁止
-                    log_to_server(f"[GCC-SCALP][BLOCKED] {symbol} SELL开空被拦截 — 现货不支持做空 reason={_scalp_reason}")
+                if "scalp_exit" not in _scalp_reason:
+                    # 非平仓SELL一律拦截 — 现货不能做空
+                    log_to_server(f"[GCC-SCALP][BLOCKED] {symbol} SELL拦截 — reason未确认平仓: {_scalp_reason}")
                     send_ok = False
-                    _scalp_res = {"success": False, "error": "现货不能做空"}
+                    _scalp_res = {"success": False, "error": "现货SELL必须是scalp_exit平仓"}
                 else:
-                    # 平仓卖出: 用base_size(币数量), 限价=当前价
+                    # 平仓卖出: 用base_size(币数量), 市价确保立即成交
                     _scalp_res = _cb_place(_scalp_product, "SELL",
-                                           base_size=_scalp_qty,
-                                           limit_price=_gcc_cur_price)
+                                           base_size=_scalp_qty)
             else:
                 _scalp_res = {"success": False, "error": f"未知方向: {_gcc_act}"}
             send_ok = _scalp_res.get("success", False)
@@ -43131,6 +43129,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
         except Exception as _3c_e:
             log_to_server(f"[GCC-TM][ERROR] {symbol} 3Commas: {_3c_e}")
     _gcc_confirm(symbol, success=send_ok)
+    _is_scalp = _gcc_order.get("source") == "gcc_scalp"
     if send_ok:
         log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单成功")
         # GCC-0257 S5: 交易记录入KEY-009
@@ -43155,7 +43154,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                 "cycle_id": _gcc_state.get("cycle_id", ""),
                 "trade_mode": "live",
                 "pos_in_channel": 0.5,
-                "source": "GCC-TM",
+                "source": "GCC-SCALP" if _is_scalp else "GCC-TM",
                 "market_regime": _gcc_state.get("market_regime", "UNKNOWN"),
                 "adx_value": 0.0,
                 "trend_state": _gcc_state.get("current_trend", "SIDE"),
@@ -43164,19 +43163,21 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             _append_trade_record(_gcc_trade_rec)
         except Exception as _gcc_rec_e:
             log_to_server(f"[GCC-TM] {symbol} trade_record写入失败: {_gcc_rec_e}")
-        try:
-            send_email_notification(
-                f"[GCC-TM] {symbol} {_gcc_act}",
-                f"GCC-TM 统一裁决执行\n"
-                f"品种: {symbol}\n"
-                f"方向: {_gcc_act}\n"
-                f"参考价: {_gcc_price:.2f}\n"
-                f"当前价: {_gcc_cur_price:.2f} ({_gcc_price_src})\n"
-                f"来源: gcc_trading_module\n"
-                f"时间: {_gcc_order.get('ts', '')}"
-            )
-        except Exception as _em_err:
-            log_to_server(f"[GCC-TM][EXECUTE] {symbol}: 邮件发送失败 - {_em_err}")
+        # 邮件: gcc_scalp已在上方发过[剥头皮]邮件, 不再重复
+        if not _is_scalp:
+            try:
+                send_email_notification(
+                    f"[GCC-TM] {symbol} {_gcc_act}",
+                    f"GCC-TM 统一裁决执行\n"
+                    f"品种: {symbol}\n"
+                    f"方向: {_gcc_act}\n"
+                    f"参考价: {_gcc_price:.2f}\n"
+                    f"当前价: {_gcc_cur_price:.2f} ({_gcc_price_src})\n"
+                    f"来源: gcc_trading_module\n"
+                    f"时间: {_gcc_order.get('ts', '')}"
+                )
+            except Exception as _em_err:
+                log_to_server(f"[GCC-TM][EXECUTE] {symbol}: 邮件发送失败 - {_em_err}")
     else:
         log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单失败,保留pending_order重试")
     return send_ok
@@ -43224,7 +43225,9 @@ def llm_decide():
     print(f"[DEBUG] {symbol}: === START llm_decide ===", flush=True)
 
     # ── B3: GCC-TM 执行 — 消费 pending_order（美股+加密货币）──
-    if _HAS_GCC_TM and (is_us_stock(symbol) or is_crypto_symbol(symbol)):
+    # OPUSDC: 独立剥头皮路径, 只由消费线程处理, llm_decide不消费
+    _SCALP_ONLY_SYMBOLS = {"OPUSDC"}
+    if _HAS_GCC_TM and symbol not in _SCALP_ONLY_SYMBOLS and (is_us_stock(symbol) or is_crypto_symbol(symbol)):
         _gcc_tm_execute_pending(symbol)
 
     trade_mode = str(data.get("trade_mode", "live")).lower().strip()
