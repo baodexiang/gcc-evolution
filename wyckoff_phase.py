@@ -1,10 +1,14 @@
 """
 wyckoff_phase.py  —  B通道: 数学驱动的Wyckoff Phase检测
-GCC-0261 S4: 与A通道(Vision LLM)组成双通道门控
+GCC-0261 S4: 唯一Wyckoff判断源(Vision不做Wyckoff)
 
-输入: OHLCV bars (list[dict], 需50+根)
+输入: OHLCV bars (list[dict], 美股≈450根/加密≈180根4H)
 输出: {"phase": "A-E/X", "structure": "ACCUMULATION/DISTRIBUTION/MARKUP/MARKDOWN/UNKNOWN",
         "confidence": 0.0-1.0, "details": {...}}
+
+数据来源:
+  美股: yfinance 3mo + Schwab 30m交叉验证
+  加密: Coinbase 1H分页(>300根) + yfinance交叉验证
 
 Phase判断逻辑:
   1. 检测是否处于交易区间 (support/resistance水平线)
@@ -20,8 +24,8 @@ from typing import Dict, List, Optional, Tuple
 
 
 # ─── 参数 ───
-MIN_BARS = 30                  # 最少需要的K线数
-RANGE_LOOKBACK = 40            # 检测区间用的回看窗口
+MIN_BARS = 50                  # 最少需要的K线数 (180/450根传入, 50根最低门槛)
+RANGE_LOOKBACK = 120           # 检测区间用的回看窗口 (120根=20天4H, 覆盖完整吸筹/派发区间)
 VOLUME_CLIMAX_MULT = 2.0       # 量 > 均量*mult = 放量高潮
 VOLUME_LOW_MULT = 0.7          # 量 < 均量*mult = 缩量
 SPRING_PIERCE_ATR = 0.3        # Spring穿透深度 < ATR*mult
@@ -373,59 +377,8 @@ def detect_phase(bars: List[dict]) -> Dict:
             "details": {"range": tr, "reason": "in range, no spring/breakout/climax"}}
 
 
-def reconcile_ab(a_phase: str, a_structure: str,
-                 b_result: Dict) -> Tuple[str, str, str]:
-    """双通道A+B结果调和。
-
-    Args:
-        a_phase: A通道Phase (from Vision LLM)
-        a_structure: A通道structure
-        b_result: B通道 detect_phase() 完整返回
-
-    Returns:
-        (final_bias, final_phase, source):
-          final_bias: "BUY"|"SELL"|"HOLD"
-          final_phase: "A"-"E"|"X"
-          source: "A"|"B"|"AB" (来源标记)
-    """
-    b_phase = b_result.get("phase", "X")
-    b_structure = b_result.get("structure", "UNKNOWN")
-    b_conf = b_result.get("confidence", 0.0)
-
-    # 如果一方是X(无法判断), 用另一方
-    if a_phase == "X" and b_phase == "X":
-        return "HOLD", "X", "AB"
-    if a_phase == "X":
-        return _phase_to_bias(b_phase, b_structure), b_phase, "B"
-    if b_phase == "X":
-        return _phase_to_bias(a_phase, a_structure), a_phase, "A"
-
-    # 两方都有判断 → 取共识或保守
-    if a_phase == b_phase:
-        # 完全一致 → 高置信
-        structure = a_structure if a_structure != "UNKNOWN" else b_structure
-        return _phase_to_bias(a_phase, structure), a_phase, "AB"
-
-    # 不一致 → 取更保守的(Phase序号更小 = 更早 = 更保守)
-    phase_order = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4}
-    a_ord = phase_order.get(a_phase, -1)
-    b_ord = phase_order.get(b_phase, -1)
-
-    # 特殊: 一方说C(入场), 另一方说B(等待) → 保守取B
-    # 特殊: 一方说D/E(趋势), 另一方说B(等待) → 如果B通道置信高, 取B
-    if b_conf >= 0.6 and b_ord < a_ord:
-        structure = b_structure if b_structure != "UNKNOWN" else a_structure
-        return _phase_to_bias(b_phase, structure), b_phase, "B"
-    elif a_ord <= b_ord:
-        structure = a_structure if a_structure != "UNKNOWN" else b_structure
-        return _phase_to_bias(a_phase, structure), a_phase, "A"
-    else:
-        structure = b_structure if b_structure != "UNKNOWN" else a_structure
-        return _phase_to_bias(b_phase, structure), b_phase, "B"
-
-
 def _phase_to_bias(phase: str, structure: str) -> str:
-    """Phase + structure → 门控方向。与A通道 _read_wyckoff_phase 规则一致。"""
+    """Phase + structure → 门控方向。B通道数学计算结果转投票方向。"""
     if phase in ("A", "B", "X"):
         return "HOLD"
     # C/D/E → 跟随structure

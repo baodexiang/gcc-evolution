@@ -3597,7 +3597,8 @@ def check_fractal_filter(bars: list, action: str) -> tuple:
 
 
 # ── Coinbase Candles (加密货币第一数据源) ──────────────────────
-def _coinbase_fetch_candles(symbol: str, granularity: int = 3600, limit: int = 30):
+def _coinbase_fetch_candles(symbol: str, granularity: int = 3600, limit: int = 30,
+                            end_timestamp: int = 0):
     """
     从 Coinbase Advanced API 获取K线数据（加密货币第一渠道）
     失败时调用方应 fall through 到 yfinance。
@@ -3606,6 +3607,7 @@ def _coinbase_fetch_candles(symbol: str, granularity: int = 3600, limit: int = 3
         symbol: 品种代码 (BTC-USD / BTCUSDC 均可)
         granularity: 秒数 (3600=1H, 7200=2H, 21600=6H)
         limit: K线数量 (max 300)
+        end_timestamp: 自定义结束时间戳(0=当前时间), 用于分页获取
     Returns:
         list[dict] | None  —  [{open,high,low,close,volume,timestamp}, ...]  时间正序
     """
@@ -3636,7 +3638,7 @@ def _coinbase_fetch_candles(symbol: str, granularity: int = 3600, limit: int = 3
     }
     gran_str = _GRAN_MAP.get(granularity, "ONE_HOUR")
 
-    end_ts = int(_time.time())
+    end_ts = end_timestamp if end_timestamp > 0 else int(_time.time())
     start_ts = end_ts - granularity * limit
 
     path = f"/api/v3/brokerage/products/{product_id}/candles"
@@ -3674,6 +3676,134 @@ def _coinbase_fetch_candles(symbol: str, granularity: int = 3600, limit: int = 3
     except Exception as e:
         logger.warning(f"[COINBASE] {symbol} 失败: {e}")
         return None
+
+
+def _coinbase_fetch_paginated(symbol: str, granularity: int = 3600, total_bars: int = 720) -> list:
+    """GCC-0261: Coinbase分页获取(突破300根限制), 用于Wyckoff长周期数据。
+
+    Args:
+        symbol: 品种代码
+        granularity: 秒数 (3600=1H)
+        total_bars: 总需求根数 (>300时自动分页)
+    Returns:
+        list[dict] 时间正序, 或空列表
+    """
+    import time as _time
+    all_bars = []
+    end_ts = int(_time.time())
+    max_pages = (total_bars // 300) + 1
+
+    for _ in range(max_pages):
+        if len(all_bars) >= total_bars:
+            break
+        batch_limit = min(300, total_bars - len(all_bars))
+        batch = _coinbase_fetch_candles(symbol, granularity=granularity, limit=batch_limit,
+                                        end_timestamp=end_ts)
+        if not batch:
+            break
+        all_bars = batch + all_bars  # prepend older bars (batch is time-ascending)
+        # 下一页: end_ts = 最旧bar的timestamp之前
+        try:
+            oldest_ts_str = batch[0].get("timestamp", "")
+            if oldest_ts_str:
+                oldest_ts = int(float(oldest_ts_str))
+                end_ts = oldest_ts - 1
+            else:
+                break
+        except (ValueError, TypeError):
+            break
+
+    if all_bars:
+        logger.info("[COINBASE] %s 分页获取 %d 根K线 (gran=%ds, pages=%d)",
+                    symbol, len(all_bars), granularity, min(max_pages, (len(all_bars) // 300) + 1))
+    return all_bars[-total_bars:] if len(all_bars) > total_bars else all_bars
+
+
+def _schwab_verify_4h(symbol: str, lookback_bars: int) -> list:
+    """GCC-0261: Schwab 30m数据 → resample 4H, 用于美股Wyckoff数据验证。
+
+    Returns:
+        list[dict] 4H bars 时间正序, 或空列表
+    """
+    try:
+        from schwab_data_provider import get_provider
+        provider = get_provider()
+        # 4H = 8根30m, 加40%余量
+        bars_30m = int(lookback_bars * 8 * 1.4)
+        df = provider.get_kline(symbol, interval="30m", bars=bars_30m)
+        if df is None or df.empty or len(df) < 16:
+            return []
+        # 每8根30m合并为1根4H
+        bars_4h = []
+        df_vals = df.reset_index()
+        n = len(df_vals)
+        for i in range(0, n - 7, 8):
+            chunk = df_vals.iloc[i:i+8]
+            bars_4h.append({
+                "open": float(chunk["open"].iloc[0]),
+                "high": float(chunk["high"].max()),
+                "low": float(chunk["low"].min()),
+                "close": float(chunk["close"].iloc[-1]),
+                "volume": float(chunk["volume"].sum()),
+                "timestamp": str(chunk.iloc[0].get("datetime", "")),
+            })
+        if bars_4h:
+            logger.info("[SCHWAB] %s 4H验证: %d根 (从%d根30m重采样)", symbol, len(bars_4h), n)
+        return bars_4h[-lookback_bars:] if len(bars_4h) > lookback_bars else bars_4h
+    except ImportError:
+        return []
+    except Exception as e:
+        logger.debug("[SCHWAB] %s 4H验证失败: %s", symbol, e)
+        return []
+
+
+def _verify_and_get_4h(symbol: str, yf_bars: list, lookback_bars: int) -> list:
+    """GCC-0261: 用Schwab(美股)/Coinbase(加密)复查yfinance 4H数据完整性。
+
+    策略: 优质源数据更完整时替换yfinance, 否则用yfinance。
+    """
+    yf_count = len(yf_bars) if yf_bars else 0
+
+    if is_crypto_symbol(symbol):
+        # Coinbase分页获取 1H → resample 4H
+        needed_1h = lookback_bars * 4 + 4
+        cb_1h = _coinbase_fetch_paginated(symbol, granularity=3600, total_bars=needed_1h)
+        if cb_1h and len(cb_1h) >= 8:
+            vf_bars = []
+            for i in range(0, len(cb_1h) - 3, 4):
+                chunk = cb_1h[i:i+4]
+                vf_bars.append({
+                    "open": chunk[0]["open"],
+                    "high": max(c["high"] for c in chunk),
+                    "low": min(c["low"] for c in chunk),
+                    "close": chunk[-1]["close"],
+                    "volume": sum(c["volume"] for c in chunk),
+                    "timestamp": chunk[0]["timestamp"],
+                })
+            vf_count = len(vf_bars)
+        else:
+            vf_bars, vf_count = [], 0
+    else:
+        # Schwab 30m → 4H
+        vf_bars = _schwab_verify_4h(symbol, lookback_bars)
+        vf_count = len(vf_bars)
+
+    # 比较: 更完整的数据源胜出
+    if vf_count > yf_count * 1.1:  # 验证源多10%以上才替换
+        logger.info("[VERIFY] %s 4H: yfinance=%d < verified=%d, 使用验证源", symbol, yf_count, vf_count)
+        return vf_bars[-lookback_bars:] if vf_count > lookback_bars else vf_bars
+    elif vf_count > 0 and yf_count > 0:
+        # 数量相当, 检查最新价格一致性
+        yf_last = yf_bars[-1].get("close", 0) if yf_bars else 0
+        vf_last = vf_bars[-1].get("close", 0) if vf_bars else 0
+        if vf_last > 0 and yf_last > 0:
+            pct_diff = abs(yf_last - vf_last) / vf_last
+            if pct_diff > 0.02:  # >2%偏差
+                logger.warning("[VERIFY] %s 4H价格偏差: yf=%.2f vs vf=%.2f (%.1f%%)",
+                              symbol, yf_last, vf_last, pct_diff * 100)
+        logger.info("[VERIFY] %s 4H: yfinance=%d, verified=%d, 数据一致", symbol, yf_count, vf_count)
+
+    return yf_bars if yf_bars else vf_bars
 
 
 def _safe_ohlcv_row(row, idx=None):
@@ -4340,7 +4470,9 @@ class YFinanceDataFetcher:
                         "volume": sum(c["volume"] for c in chunk),
                         "timestamp": chunk[0]["timestamp"],
                     })
-                if len(bars_4h) >= min(lookback_bars, 5):
+                # GCC-0261: 要求至少返回lookback的一半, 否则降级yfinance获取更多
+                _min_accept = max(lookback_bars // 2, 5)
+                if len(bars_4h) >= _min_accept:
                     result = bars_4h[-lookback_bars:] if len(bars_4h) > lookback_bars else bars_4h
                     YFinanceDataFetcher._set_ohlcv_cache(symbol, "4h", lookback_bars, result)
                     return result
@@ -10216,7 +10348,9 @@ class PriceScanEngine:
                     try:
                         from gcc_trading_module import gcc_observe as _gcc_observe_round
                         from gcc_trading_module import _GCC_TM_EXECUTE_SYMBOLS as _GCC_EXEC
-                        _gcc_bars = _phase_bars or YFinanceDataFetcher.get_ohlcv(symbol, _tf_min, 25)
+                        _gcc_lookback = 180  # GCC-0261: 加密Wyckoff需1个月4H≈180根
+                        _gcc_bars_raw = _phase_bars or YFinanceDataFetcher.get_ohlcv(symbol, _tf_min, _gcc_lookback)
+                        _gcc_bars = _verify_and_get_4h(main_symbol, _gcc_bars_raw, _gcc_lookback)
                         if _gcc_bars and len(_gcc_bars) >= 5:
                             _gcc_observe_round(
                                 main_symbol, _gcc_bars, "HOLD",
@@ -10347,7 +10481,9 @@ class PriceScanEngine:
                     try:
                         from gcc_trading_module import gcc_observe as _gcc_observe_round
                         from gcc_trading_module import _GCC_TM_EXECUTE_SYMBOLS as _GCC_EXEC
-                        _gcc_bars_s = _phase_bars_s or YFinanceDataFetcher.get_ohlcv(symbol, _tf_min_s, 25)
+                        _gcc_lookback_s = 450  # GCC-0261: 美股Wyckoff需3个月4H≈450根
+                        _gcc_bars_s_raw = _phase_bars_s or YFinanceDataFetcher.get_ohlcv(symbol, _tf_min_s, _gcc_lookback_s)
+                        _gcc_bars_s = _verify_and_get_4h(symbol, _gcc_bars_s_raw, _gcc_lookback_s)
                         if _gcc_bars_s and len(_gcc_bars_s) >= 5:
                             _gcc_observe_round(
                                 symbol, _gcc_bars_s, "HOLD",

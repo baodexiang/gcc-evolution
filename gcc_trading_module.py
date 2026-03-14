@@ -320,37 +320,21 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
     prev = _load_prev_summary(symbol)
     prev_dir = prev.get("direction", "HOLD")
 
-    # GCC-0261 S4: Wyckoff Phase门控 — 双通道(A=Vision LLM + B=数学模块)
-    a_bias, a_phase = _read_wyckoff_phase(symbol)  # A通道: pattern_latest.json
-    # B通道: 数学驱动Phase检测
-    b_result = {"phase": "X", "structure": "UNKNOWN", "confidence": 0.0}
-    if bars and len(bars) >= 30:
+    # GCC-0261 S4: Wyckoff Phase门控 — B通道数学计算(Vision不判断Wyckoff)
+    wyckoff_bias, wyckoff_phase = "HOLD", "X"
+    if bars and len(bars) >= 50:
         try:
-            from wyckoff_phase import detect_phase as _wp_detect, reconcile_ab as _wp_reconcile
+            from wyckoff_phase import detect_phase as _wp_detect, _phase_to_bias as _wp_bias
             b_result = _wp_detect(bars)
-            # 双通道调和
-            a_struct = "UNKNOWN"
-            _pfile = _STATE_DIR / "vision" / "pattern_latest.json"
-            if _pfile.exists():
-                try:
-                    _pdata = json.loads(_pfile.read_text(encoding="utf-8"))
-                    a_struct = str(_pdata.get(symbol, {}).get("overall_structure", "UNKNOWN")).upper()
-                except Exception:
-                    pass
-            wyckoff_bias, wyckoff_phase, _wp_src = _wp_reconcile(a_phase, a_struct, b_result)
-            logger.info("[GCC-TM] %s Wyckoff双通道: A=Ph%s/%s B=Ph%s/%s(%.0f%%) → %s(Ph%s)[src=%s]",
-                        symbol, a_phase, a_bias,
-                        b_result.get("phase", "X"), b_result.get("structure", "?"),
-                        b_result.get("confidence", 0) * 100,
-                        wyckoff_bias, wyckoff_phase, _wp_src)
+            wyckoff_phase = b_result.get("phase", "X")
+            wyckoff_bias = _wp_bias(wyckoff_phase, b_result.get("structure", "UNKNOWN"))
+            logger.info("[GCC-TM] %s Wyckoff B通道: Ph%s/%s(%.0f%%) → %s",
+                        symbol, wyckoff_phase, b_result.get("structure", "?"),
+                        b_result.get("confidence", 0) * 100, wyckoff_bias)
         except ImportError:
-            wyckoff_bias, wyckoff_phase = a_bias, a_phase
-            logger.debug("[GCC-TM] %s wyckoff_phase module not found, A-only", symbol)
+            logger.debug("[GCC-TM] %s wyckoff_phase module not found", symbol)
         except Exception as _wp_e:
-            wyckoff_bias, wyckoff_phase = a_bias, a_phase
-            logger.warning("[GCC-TM] %s Wyckoff B通道异常: %s, fallback A-only", symbol, _wp_e)
-    else:
-        wyckoff_bias, wyckoff_phase = a_bias, a_phase
+            logger.warning("[GCC-TM] %s Wyckoff B通道异常: %s", symbol, _wp_e)
 
     # KEY-010: 三方投票 — Vision(趋势) + prev_summary(上K汇总) + Wyckoff(阶段)
     # BV已拆出到信号池, 门控: 趋势+惯性+阶段
@@ -509,46 +493,7 @@ def _read_vision(symbol: str) -> Tuple[str, float]:
         return "HOLD", 0.5
 
 
-# ══════════════════════════════════════════════════════════════
-# S06b  _read_wyckoff_phase(symbol) → (gate_bias, phase)
-# 读 state/vision/pattern_latest.json 的 wyckoff_phase 字段
-# GCC-0261 S4: Wyckoff Phase门控 — A/B=HOLD, C/D/E=方向跟随
-# ══════════════════════════════════════════════════════════════
-def _read_wyckoff_phase(symbol: str) -> Tuple[str, str]:
-    """从 pattern_latest.json 读取 Wyckoff Phase (A通道: Vision LLM判断)。
-    返回 (gate_bias, phase):
-      gate_bias: "BUY"|"SELL"|"HOLD" — 用于门控投票
-      phase: "A"|"B"|"C"|"D"|"E"|"X" — 原始Phase
-    规则:
-      Phase A/B/X → HOLD (等待，不入场)
-      Phase C → 跟随 overall_structure 方向 (ACCUMULATION→BUY, DISTRIBUTION→SELL)
-      Phase D/E → 跟随 overall_structure 方向
-    """
-    pfile = _STATE_DIR / "vision" / "pattern_latest.json"
-    if not pfile.exists():
-        return "HOLD", "X"
-    try:
-        all_data = json.loads(pfile.read_text(encoding="utf-8"))
-        entry = all_data.get(symbol, {})
-        if not entry:
-            return "HOLD", "X"
-        phase = str(entry.get("wyckoff_phase", "X")).upper()
-        structure = str(entry.get("overall_structure", "UNKNOWN")).upper()
-        if phase not in ("A", "B", "C", "D", "E", "X"):
-            phase = "X"
-        # A/B/X → 等待
-        if phase in ("A", "B", "X"):
-            return "HOLD", phase
-        # C/D/E → 跟随structure方向
-        if structure in ("ACCUMULATION", "MARKUP"):
-            return "BUY", phase
-        elif structure in ("DISTRIBUTION", "MARKDOWN"):
-            return "SELL", phase
-        else:
-            return "HOLD", phase
-    except Exception as e:
-        logger.debug("[GCC-TRADE] _read_wyckoff_phase %s: %s", symbol, e)
-        return "HOLD", "X"
+# S06b: _read_wyckoff_phase removed — Wyckoff由B通道数学模块独立计算(GCC-0261)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2990,6 +2935,26 @@ def gcc_observe(
                 _backfill_outcome(symbol, _current_price)
         except Exception as _bf_e:
             logger.debug("[GCC-TRADE] knn backfill: %s", _bf_e)
+
+        # GCC-0261 S5: P&F止盈目标检查 — 价格接近T1/T2时推SELL到信号池
+        try:
+            from wyckoff_pnf import check_and_push as _pnf_check, update_targets as _pnf_update
+            _pnf_price = float(bars[-1].get("close") or bars[-1].get("c") or 0) if bars else 0.0
+            if _pnf_price > 0 and bars and len(bars) >= 50:
+                from wyckoff_phase import _extract_arrays, _calc_atr
+                _pnf_h, _pnf_l, _pnf_c, _, _ = _extract_arrays(bars)
+                _pnf_atr = _calc_atr(_pnf_h, _pnf_l, _pnf_c)
+                # 新K线时更新目标 (Phase C/D才会写入)
+                if state is not None and state.current_round == 0:
+                    _pnf_update(symbol, bars)
+                # 每轮检查价格vs目标
+                _pnf_pushed = _pnf_check(symbol, _pnf_price, _pnf_atr)
+                if _pnf_pushed:
+                    logger.info("[GCC-TM] %s P&F: %d个止盈信号推入池", symbol, _pnf_pushed)
+        except ImportError:
+            pass
+        except Exception as _pnf_e:
+            logger.debug("[GCC-TM] %s P&F check: %s", symbol, _pnf_e)
 
         # ── 自修复: 清除旧格式空BACKFILL条目(price=0, 无真实决策), 让下方逻辑重跑 ──
         # 必须在already_done检查之前，否则当前轮已存在时直接return，永远不清旧条目
