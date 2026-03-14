@@ -979,7 +979,7 @@ def _read_knowledge_cards(symbol: str, vision_bias: str = "", regime: str = "") 
                 "rank_source": "skill",
             })
 
-    # ── 第2优先: 卡片探索 (慢, 低权重, 补到3条) ──
+    # ── 第2优先: 因果排名卡 + 随机探索未验证卡 ──
     if len(top3) < 3:
         try:
             if _KB_BRIDGE is None or _should_reload_kb_index():
@@ -990,7 +990,7 @@ def _read_knowledge_cards(symbol: str, vision_bias: str = "", regime: str = "") 
                 _KB_CACHE.clear()
                 logger.info("[GCC-TM][KB] 知识卡索引重载: %d张", _n)
 
-            # 已蒸馏的卡也要跳过
+            # 已蒸馏/已淘汰的卡跳过
             _distilled_file = _STATE_DIR / "card_distilled.json"
             _distilled = set()
             if _distilled_file.exists():
@@ -998,6 +998,14 @@ def _read_knowledge_cards(symbol: str, vision_bias: str = "", regime: str = "") 
                     _distilled = set(json.loads(_distilled_file.read_text(encoding="utf-8")))
                 except Exception:
                     pass
+            _dep_file = _STATE_DIR / "card_deprecated.json"
+            _deprecated = set()
+            if _dep_file.exists():
+                try:
+                    _deprecated = set(json.loads(_dep_file.read_text(encoding="utf-8")))
+                except Exception:
+                    pass
+            _skip = _distilled | _deprecated
 
             ctx = {}
             if vision_bias in ("BUY", "SELL"):
@@ -1009,31 +1017,48 @@ def _read_knowledge_cards(symbol: str, vision_bias: str = "", regime: str = "") 
                 card_type="RULE", context=ctx if ctx else None, min_samples=1
             )
 
+            def _card_to_entry(card):
+                cid = card.get("card_id", "")
+                direction = "NEUTRAL"
+                rules = card.get("rules", [])
+                if rules:
+                    rt = str(rules[0].get("then", "") if isinstance(rules[0], dict) else rules[0]).upper()
+                    if any(w in rt for w in ("买", "BUY", "做多", "LONG", "BULLISH")):
+                        direction = "BUY"
+                    elif any(w in rt for w in ("卖", "SELL", "做空", "SHORT", "BEARISH")):
+                        direction = "SELL"
+                return {
+                    "card_id": cid, "title": card.get("title", "")[:60],
+                    "direction": direction, "confidence": card.get("confidence", 0.5),
+                    "rank_source": card.get("rank_source", "static"),
+                }
+
             need = 3 - len(top3)
+
+            # Slot 2: 因果排名最高的已验证卡 (最多1张)
             for card in results:
                 if need <= 0:
                     break
                 cid = card.get("card_id", "")
-                if cid in _distilled:
-                    continue  # 已蒸馏, 跳过
+                if cid in _skip:
+                    continue
+                if card.get("rank_source") == "causal":
+                    top3.append(_card_to_entry(card))
+                    need -= 1
+                    break  # 最多1张因果卡
 
-                direction = "NEUTRAL"
-                rules = card.get("rules", [])
-                if rules:
-                    rule_text = str(rules[0].get("then", "") if isinstance(rules[0], dict) else rules[0]).upper()
-                    if any(w in rule_text for w in ("买", "BUY", "做多", "LONG", "BULLISH")):
-                        direction = "BUY"
-                    elif any(w in rule_text for w in ("卖", "SELL", "做空", "SHORT", "BEARISH")):
-                        direction = "SELL"
-
-                top3.append({
-                    "card_id": cid,
-                    "title": card.get("title", "")[:60],
-                    "direction": direction,
-                    "confidence": card.get("confidence", 0.5),
-                    "rank_source": card.get("rank_source", "static"),
-                })
-                need -= 1
+            # Slot 3: 随机未激活卡 (探索, 确保每张卡都有验证机会)
+            if need > 0:
+                import random
+                # 找出所有未被激活过的卡(rank_source=static且不在skip里)
+                unactivated = [c for c in results
+                               if c.get("rank_source") == "static"
+                               and c.get("card_id", "") not in _skip
+                               and c.get("card_id", "") not in {e["card_id"] for e in top3}]
+                if unactivated:
+                    picks = random.sample(unactivated, min(need, len(unactivated)))
+                    for card in picks:
+                        top3.append(_card_to_entry(card))
         except Exception as e:
             logger.debug("[GCC-TRADE] _read_knowledge_cards %s: %s", symbol, e)
 
