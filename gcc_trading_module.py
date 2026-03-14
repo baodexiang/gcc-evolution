@@ -384,6 +384,13 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
     else:
         effective = "HOLD"   # 对冲或全弃权
 
+    # GCC-0264 S1: SELL硬约束 — Vision高confidence看多时禁止SELL
+    # 经验卡数据: SELL 0/5全输, 根因是在Vision看多时逆势做空
+    if effective == "SELL" and vision_bias == "BUY" and vision_conf > 0.7:
+        effective = "HOLD"
+        logger.info("[GCC-TM] %s GCC-0264 SELL硬约束: vision=BUY(%.0f%%>70%%) → SELL→HOLD",
+                    symbol, vision_conf * 100)
+
     logger.info("[GCC-TM] %s 三方投票: vision=%s prev=%s wyckoff=%s(Ph%s) → effective=%s (BV→池: %s[%s])",
                 symbol, vision_bias, prev_dir, wyckoff_bias, wyckoff_phase, effective, bv_bias, bv_pattern)
 
@@ -938,11 +945,11 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
 
     scores = {}
 
-    # scan: 方向一致为正，相反为负 (v0.2: 0.25→0.30)
+    # GCC-0264 S3: scan权重0.30→0.20 (经验卡: scan越高反而越输 delta=-0.136)
     if scan_dir == "BUY":
-        scores["scan"] = +scan_conf * 0.30
+        scores["scan"] = +scan_conf * 0.20
     elif scan_dir == "SELL":
-        scores["scan"] = -scan_conf * 0.30
+        scores["scan"] = -scan_conf * 0.20
     else:
         scores["scan"] = 0.0
 
@@ -999,6 +1006,22 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
     nc_score = nc.get("score", 0)
     scores["nowcast"] = (nc_score / 5.0) * 0.20 if nc_score != 0 else 0.0
 
+    # GCC-0264 S2: 信号一致性分 (简化topo, 权重0.15)
+    # 经验卡: topo是最强预测因子 delta=+0.188
+    # 计算当前scores中正向信号占比 → 一致性越高分越高
+    _scored_vals = [v for k, v in scores.items() if v != 0 and k != "consistency"]
+    if _scored_vals:
+        _pos = sum(1 for v in _scored_vals if v > 0)
+        _consistency = _pos / len(_scored_vals)  # 0~1
+        scores["consistency"] = (_consistency - 0.5) * 0.30  # 全一致→+0.15, 全分歧→-0.15
+    else:
+        scores["consistency"] = 0.0
+
+    # GCC-0264 S4: ZECUSDC品种折扣 (经验卡: ZEC 41%胜率, topo对ZEC无效)
+    if symbol == "ZECUSDC":
+        for k in scores:
+            scores[k] *= 0.7  # 30%折扣
+
     return scores
 
 
@@ -1013,11 +1036,11 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
 
     scores = {}
 
-    # scan: SELL方向一致为正 (v0.2: 0.25→0.30)
+    # GCC-0264 S3: scan权重0.30→0.20 (经验卡: scan越高反而越输)
     if scan_dir == "SELL":
-        scores["scan"] = +scan_conf * 0.30
+        scores["scan"] = +scan_conf * 0.20
     elif scan_dir == "BUY":
-        scores["scan"] = -scan_conf * 0.30
+        scores["scan"] = -scan_conf * 0.20
     else:
         scores["scan"] = 0.0
 
@@ -1074,6 +1097,20 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
     nc_score = nc.get("score", 0)
     scores["nowcast"] = (-nc_score / 5.0) * 0.20 if nc_score != 0 else 0.0
 
+    # GCC-0264 S2: 信号一致性分 (简化topo, 权重0.15)
+    _scored_vals = [v for k, v in scores.items() if v != 0 and k != "consistency"]
+    if _scored_vals:
+        _pos = sum(1 for v in _scored_vals if v > 0)
+        _consistency = _pos / len(_scored_vals)
+        scores["consistency"] = (_consistency - 0.5) * 0.30
+    else:
+        scores["consistency"] = 0.0
+
+    # GCC-0264 S4: ZECUSDC品种折扣
+    if symbol == "ZECUSDC":
+        for k in scores:
+            scores[k] *= 0.7
+
     return scores
 
 
@@ -1084,7 +1121,8 @@ def _score_hold_candidate() -> dict:
     """HOLD 路径固定中性分 0.0，作为基线竞争者。v0.2: 移除vision。"""
     return {"scan": 0.0, "win_rate": 0.0, "volume": 0.0,
             "vwap": 0.0, "obi": 0.0, "cvd": 0.0,
-            "signal_pool": 0.0, "nowcast": 0.0, "value": 0.0}
+            "signal_pool": 0.0, "nowcast": 0.0, "value": 0.0,
+            "consistency": 0.0}
 
 
 # ══════════════════════════════════════════════════════════════
