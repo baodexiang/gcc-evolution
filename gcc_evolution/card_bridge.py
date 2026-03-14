@@ -487,6 +487,117 @@ class CardBridge:
             "details": deprecated_list,
         }
 
+    def distill_to_skills(self) -> dict:
+        """蒸馏: 正确率>60%且样本≥10的卡 → 提取为skill写入gcc_skills.json。
+
+        知识卡: 合并相似规则为一条skill
+        经验卡: 提取品种×方向的特征模式为skill
+
+        蒸馏后源卡标记distilled, 不再参与card层评分。
+        返回: {new_skills: int, distilled_cards: int, skills: [...]}
+        """
+        causal = self._load_causal_memory()
+        _skills_file = _STATE_DIR / "gcc_skills.json"
+        _distilled_file = _STATE_DIR / "card_distilled.json"
+
+        # 加载已有skill和已蒸馏列表
+        existing_skills = []
+        if _skills_file.exists():
+            try:
+                existing_skills = json.loads(_skills_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        existing_ids = {s.get("skill_id") for s in existing_skills}
+
+        distilled_set = set()
+        if _distilled_file.exists():
+            try:
+                distilled_set = set(json.loads(_distilled_file.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+
+        new_skills = []
+        newly_distilled = []
+
+        for cid, stats in causal.items():
+            if cid in distilled_set:
+                continue  # 已蒸馏过
+            if stats["total"] < 10:
+                continue  # 样本不足
+            rate = stats["correct"] / stats["total"]
+            if rate < 0.60:
+                continue  # 不够好
+
+            is_exp = cid.startswith("EXP_TM_")
+            skill_id = f"SK_{cid}"
+            if skill_id in existing_ids:
+                continue  # 已存在
+
+            if is_exp:
+                # 经验卡: EXP_TM_BTCUSDC_BUY → 品种方向模式
+                parts = cid.replace("EXP_TM_", "").rsplit("_", 1)
+                sym = parts[0] if len(parts) == 2 else cid
+                act = parts[1] if len(parts) == 2 else "BUY"
+                skill = {
+                    "skill_id": skill_id,
+                    "type": "experience",
+                    "name": f"{sym} {act} 实战验证模式",
+                    "direction": act,
+                    "symbols": [sym],
+                    "correct_rate": round(rate, 3),
+                    "samples": stats["total"],
+                    "source_cards": [cid],
+                    "created": datetime.now(_NY).isoformat(),
+                }
+            else:
+                # 知识卡: 从卡片内容提取规则
+                card = self._cards.get(cid, {})
+                rules = card.get("rules", [])
+                rule_text = ""
+                if rules:
+                    rule_text = str(rules[0].get("then", "") if isinstance(rules[0], dict) else rules[0])
+                # 方向推断
+                direction = "NEUTRAL"
+                rt = rule_text.upper()
+                if any(w in rt for w in ("买", "BUY", "做多", "LONG", "BULLISH")):
+                    direction = "BUY"
+                elif any(w in rt for w in ("卖", "SELL", "做空", "SHORT", "BEARISH")):
+                    direction = "SELL"
+
+                skill = {
+                    "skill_id": skill_id,
+                    "type": "knowledge",
+                    "name": card.get("title", cid)[:80],
+                    "direction": direction,
+                    "rule": rule_text[:200],
+                    "correct_rate": round(rate, 3),
+                    "samples": stats["total"],
+                    "source_cards": [cid],
+                    "created": datetime.now(_NY).isoformat(),
+                }
+
+            new_skills.append(skill)
+            newly_distilled.append(cid)
+
+        # 写入
+        if new_skills:
+            all_skills = existing_skills + new_skills
+            _STATE_DIR.mkdir(parents=True, exist_ok=True)
+            _skills_file.write_text(
+                json.dumps(all_skills, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            distilled_set.update(newly_distilled)
+            _distilled_file.write_text(
+                json.dumps(sorted(distilled_set), ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            _log(f"[DISTILL→SKILL] 新增{len(new_skills)}条skill, 蒸馏{len(newly_distilled)}张卡")
+
+        return {
+            "new_skills": len(new_skills),
+            "distilled_cards": len(newly_distilled),
+            "skills": new_skills,
+        }
+
     @staticmethod
     def is_deprecated(card_id: str) -> bool:
         """检查卡是否被淘汰"""

@@ -919,8 +919,29 @@ def _should_reload_kb_index() -> bool:
     return last_load_ny.date() < now_ny.date()
 
 
+_SKILLS_CACHE: list = []
+_SKILLS_CACHE_TS: float = 0.0
+
+def _load_skills() -> list:
+    """读取gcc_skills.json (蒸馏后的skill)。每4h刷新。"""
+    global _SKILLS_CACHE, _SKILLS_CACHE_TS
+    import time as _t_sk
+    if _t_sk.time() - _SKILLS_CACHE_TS < _EXP_SYNC_TTL and _SKILLS_CACHE:
+        return _SKILLS_CACHE
+    _sk_file = _STATE_DIR / "gcc_skills.json"
+    if _sk_file.exists():
+        try:
+            _SKILLS_CACHE = json.loads(_sk_file.read_text(encoding="utf-8"))
+            _SKILLS_CACHE_TS = _t_sk.time()
+        except Exception:
+            _SKILLS_CACHE = []
+    else:
+        _SKILLS_CACHE = []
+    return _SKILLS_CACHE
+
+
 def _read_knowledge_cards(symbol: str, vision_bias: str = "", regime: str = "") -> list:
-    """读取与当前品种+趋势+regime匹配的top-3知识卡规则。
+    """先读skill(蒸馏精华), skill不够3条再补卡(探索新卡)。
     返回: [{"card_id": str, "title": str, "direction": "BUY"|"SELL"|"NEUTRAL",
             "confidence": float, "rank_source": str}, ...]
     """
@@ -934,54 +955,91 @@ def _read_knowledge_cards(symbol: str, vision_bias: str = "", regime: str = "") 
     if _t_kb.time() - _KB_CACHE_TS < _KB_CACHE_TTL and cache_key in _KB_CACHE:
         return _KB_CACHE[cache_key]
 
-    try:
-        # 知识卡索引: 首次加载 或 每天纽约8AM后重载
-        if _KB_BRIDGE is None or _should_reload_kb_index():
-            from gcc_evolution.card_bridge import CardBridge
-            _KB_BRIDGE = CardBridge()
-            _n = _KB_BRIDGE.load_index()
-            _KB_INDEX_TS = _t_kb.time()
-            _KB_CACHE.clear()
-            logger.info("[GCC-TM][KB] 知识卡索引重载: %d张", _n)
+    top3 = []
 
-        # 构建情境查询
-        ctx = {}
-        if vision_bias in ("BUY", "SELL"):
-            ctx["trend"] = "UP" if vision_bias == "BUY" else "DOWN"
-        if regime:
-            ctx["regime"] = regime
-
-        results = _KB_BRIDGE.query_contextual(
-            card_type="RULE", context=ctx if ctx else None, min_samples=1
-        )
-
-        # 提取top-3, 判断方向
-        top3 = []
-        for card in results[:3]:
-            # 从rules推断方向
-            direction = "NEUTRAL"
-            rules = card.get("rules", [])
-            if rules:
-                rule_text = str(rules[0].get("then", "") if isinstance(rules[0], dict) else rules[0]).upper()
-                if any(w in rule_text for w in ("买", "BUY", "做多", "LONG", "BULLISH")):
-                    direction = "BUY"
-                elif any(w in rule_text for w in ("卖", "SELL", "做空", "SHORT", "BEARISH")):
-                    direction = "SELL"
-
+    # ── 第1优先: 已蒸馏的skill (快, 高权重) ──
+    skills = _load_skills()
+    if skills:
+        # 过滤: 品种匹配或通用skill
+        matched = []
+        for sk in skills:
+            sk_syms = sk.get("symbols", [])
+            # 经验卡skill按品种匹配, 知识卡skill通用
+            if sk_syms and symbol not in sk_syms:
+                continue
+            matched.append(sk)
+        # 按正确率排序
+        matched.sort(key=lambda s: s.get("correct_rate", 0), reverse=True)
+        for sk in matched[:3]:
             top3.append({
-                "card_id": card.get("card_id", ""),
-                "title": card.get("title", "")[:60],
-                "direction": direction,
-                "confidence": card.get("confidence", 0.5),
-                "rank_source": card.get("rank_source", "static"),
+                "card_id": sk.get("skill_id", ""),
+                "title": sk.get("name", "")[:60],
+                "direction": sk.get("direction", "NEUTRAL"),
+                "confidence": sk.get("correct_rate", 0.5),
+                "rank_source": "skill",
             })
 
-        _KB_CACHE[cache_key] = top3
-        _KB_CACHE_TS = _t_kb.time()
-        return top3
-    except Exception as e:
-        logger.debug("[GCC-TRADE] _read_knowledge_cards %s: %s", symbol, e)
-        return []
+    # ── 第2优先: 卡片探索 (慢, 低权重, 补到3条) ──
+    if len(top3) < 3:
+        try:
+            if _KB_BRIDGE is None or _should_reload_kb_index():
+                from gcc_evolution.card_bridge import CardBridge
+                _KB_BRIDGE = CardBridge()
+                _n = _KB_BRIDGE.load_index()
+                _KB_INDEX_TS = _t_kb.time()
+                _KB_CACHE.clear()
+                logger.info("[GCC-TM][KB] 知识卡索引重载: %d张", _n)
+
+            # 已蒸馏的卡也要跳过
+            _distilled_file = _STATE_DIR / "card_distilled.json"
+            _distilled = set()
+            if _distilled_file.exists():
+                try:
+                    _distilled = set(json.loads(_distilled_file.read_text(encoding="utf-8")))
+                except Exception:
+                    pass
+
+            ctx = {}
+            if vision_bias in ("BUY", "SELL"):
+                ctx["trend"] = "UP" if vision_bias == "BUY" else "DOWN"
+            if regime:
+                ctx["regime"] = regime
+
+            results = _KB_BRIDGE.query_contextual(
+                card_type="RULE", context=ctx if ctx else None, min_samples=1
+            )
+
+            need = 3 - len(top3)
+            for card in results:
+                if need <= 0:
+                    break
+                cid = card.get("card_id", "")
+                if cid in _distilled:
+                    continue  # 已蒸馏, 跳过
+
+                direction = "NEUTRAL"
+                rules = card.get("rules", [])
+                if rules:
+                    rule_text = str(rules[0].get("then", "") if isinstance(rules[0], dict) else rules[0]).upper()
+                    if any(w in rule_text for w in ("买", "BUY", "做多", "LONG", "BULLISH")):
+                        direction = "BUY"
+                    elif any(w in rule_text for w in ("卖", "SELL", "做空", "SHORT", "BEARISH")):
+                        direction = "SELL"
+
+                top3.append({
+                    "card_id": cid,
+                    "title": card.get("title", "")[:60],
+                    "direction": direction,
+                    "confidence": card.get("confidence", 0.5),
+                    "rank_source": card.get("rank_source", "static"),
+                })
+                need -= 1
+        except Exception as e:
+            logger.debug("[GCC-TRADE] _read_knowledge_cards %s: %s", symbol, e)
+
+    _KB_CACHE[cache_key] = top3
+    _KB_CACHE_TS = _t_kb.time()
+    return top3
 
 
 # ══════════════════════════════════════════════════════════════

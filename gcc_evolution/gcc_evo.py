@@ -6769,8 +6769,12 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
                 _pcb.load_index()
                 _prune_result = _pcb.prune_deprecated()
                 _prune_marker.write_text(str(_prune_time.time()))
-                click.echo(f"  ✓ Step 6: 卡片淘汰 — 淘汰{_prune_result['deprecated']}张"
+                click.echo(f"  ✓ Step 6a: 卡片淘汰 — 淘汰{_prune_result['deprecated']}张"
                            f" (检查{_prune_result['total_checked']}张)")
+                # Step 6b: 蒸馏好卡→skill
+                _distill_result = _pcb.distill_to_skills()
+                click.echo(f"  ✓ Step 6b: 蒸馏→skill — 新增{_distill_result['new_skills']}条skill"
+                           f" (蒸馏{_distill_result['distilled_cards']}张卡)")
                 results["prune"] = True
             else:
                 click.echo(f"  ○ Step 6: 卡片淘汰 — {'[dry-run]' if dry_run else '未到周期'}")

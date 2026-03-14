@@ -1,0 +1,47 @@
+[
+  {
+    "skill_id": "SK_EXP_TM_ETHUSDC_BUY",
+    "type": "experience",
+    "name": "ETHUSDC BUY 实战验证模式",
+    "direction": "BUY",
+    "symbols": [
+      "ETHUSDC"
+    ],
+    "correct_rate": 0.944,
+    "samples": 18,
+    "source_cards": [
+      "EXP_TM_ETHUSDC_BUY"
+    ],
+    "created": "2026-03-14T17:27:55.480800-04:00"
+  },
+  {
+    "skill_id": "SK_EXP_TM_SOLUSDC_BUY",
+    "type": "experience",
+    "name": "SOLUSDC BUY 实战验证模式",
+    "direction": "BUY",
+    "symbols": [
+      "SOLUSDC"
+    ],
+    "correct_rate": 0.8,
+    "samples": 15,
+    "source_cards": [
+      "EXP_TM_SOLUSDC_BUY"
+    ],
+    "created": "2026-03-14T17:27:55.480800-04:00"
+  },
+  {
+    "skill_id": "SK_EXP_TM_BTCUSDC_BUY",
+    "type": "experience",
+    "name": "BTCUSDC BUY 实战验证模式",
+    "direction": "BUY",
+    "symbols": [
+      "BTCUSDC"
+    ],
+    "correct_rate": 0.947,
+    "samples": 19,
+    "source_cards": [
+      "EXP_TM_BTCUSDC_BUY"
+    ],
+    "created": "2026-03-14T17:27:55.480800-04:00"
+  }
+]
