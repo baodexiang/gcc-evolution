@@ -3381,6 +3381,18 @@ def gcc_observe(
                 _candle_state_path(symbol).unlink(missing_ok=True)
             except Exception:
                 pass
+            # 失败模式 TTL 递增 + 过期清理
+            try:
+                fp_data = _load_failed_patterns()
+                if symbol in fp_data:
+                    fp_data[symbol] = [
+                        {**p, "candle_count": p.get("candle_count", 0) + 1}
+                        for p in fp_data[symbol]
+                        if p.get("candle_count", 0) + 1 < _FAILED_PATTERN_TTL
+                    ]
+                    _save_failed_patterns(fp_data)
+            except Exception as _fp_e:
+                logger.debug("[GCC-TM] failed_pattern TTL update: %s", _fp_e)
         else:
             _save_candle_state(state)
 
