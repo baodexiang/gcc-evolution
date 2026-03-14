@@ -1070,10 +1070,18 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
     nc_score = nc.get("score", 0)
     scores["nowcast"] = (nc_score / 5.0) * 0.20 if nc_score != 0 else 0.0
 
+    # GCC-0265 S3: 知识卡方向偏置 (权重0.10)
+    _cards = context.get("cards", [])
+    if _cards:
+        _card_buy = sum(1 for c in _cards if c.get("direction") == "BUY")
+        _card_sell = sum(1 for c in _cards if c.get("direction") == "SELL")
+        _card_total = _card_buy + _card_sell
+        scores["cards"] = ((_card_buy - _card_sell) / _card_total) * 0.10 if _card_total > 0 else 0.0
+    else:
+        scores["cards"] = 0.0
+
     # GCC-0264 S2: 信号一致性分 (简化topo, 权重0.15)
-    # 经验卡: topo是最强预测因子 delta=+0.188
-    # 计算当前scores中正向信号占比 → 一致性越高分越高
-    _scored_vals = [v for k, v in scores.items() if v != 0 and k != "consistency"]
+    _scored_vals = [v for k, v in scores.items() if v != 0 and k not in ("consistency", "cards")]
     if _scored_vals:
         _pos = sum(1 for v in _scored_vals if v > 0)
         _consistency = _pos / len(_scored_vals)  # 0~1
@@ -1161,8 +1169,18 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
     nc_score = nc.get("score", 0)
     scores["nowcast"] = (-nc_score / 5.0) * 0.20 if nc_score != 0 else 0.0
 
+    # GCC-0265 S3: 知识卡方向偏置 (权重0.10, SELL路径取反)
+    _cards = context.get("cards", [])
+    if _cards:
+        _card_buy = sum(1 for c in _cards if c.get("direction") == "BUY")
+        _card_sell = sum(1 for c in _cards if c.get("direction") == "SELL")
+        _card_total = _card_buy + _card_sell
+        scores["cards"] = ((_card_sell - _card_buy) / _card_total) * 0.10 if _card_total > 0 else 0.0
+    else:
+        scores["cards"] = 0.0
+
     # GCC-0264 S2: 信号一致性分 (简化topo, 权重0.15)
-    _scored_vals = [v for k, v in scores.items() if v != 0 and k != "consistency"]
+    _scored_vals = [v for k, v in scores.items() if v != 0 and k not in ("consistency", "cards")]
     if _scored_vals:
         _pos = sum(1 for v in _scored_vals if v > 0)
         _consistency = _pos / len(_scored_vals)
@@ -1186,7 +1204,7 @@ def _score_hold_candidate() -> dict:
     return {"scan": 0.0, "win_rate": 0.0, "volume": 0.0,
             "vwap": 0.0, "obi": 0.0, "cvd": 0.0,
             "signal_pool": 0.0, "nowcast": 0.0, "value": 0.0,
-            "consistency": 0.0}
+            "cards": 0.0, "consistency": 0.0}
 
 
 # ══════════════════════════════════════════════════════════════
