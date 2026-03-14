@@ -43066,6 +43066,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             log_to_server(f"[GCC-TM][ERROR] {symbol} SignalStack: {_ss_e}")
     elif _gcc_order.get("source") == "gcc_scalp":
         # GCC-0256 S5: OP剥头皮 → Coinbase API限价单 (maker费率)
+        # 现货只能先买后卖, SELL必须是平仓(有持仓才能卖)
         try:
             from coinbase_sync_v6 import place_order as _cb_place
             _scalp_product = {"OPUSDC": "OP-USDC"}.get(symbol, f"{symbol[:symbol.index('USD')]}-USDC" if "USD" in symbol else symbol)
@@ -43078,11 +43079,21 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                 _scalp_res = _cb_place(_scalp_product, "BUY",
                                        quote_size=min(_scalp_max, _scalp_qty * _gcc_cur_price),
                                        limit_price=_gcc_cur_price)
+            elif _gcc_act == "SELL":
+                # 现货卖出保护: 检查是否有持仓(scalp state标记为平仓才允许)
+                _scalp_reason = _gcc_order.get("reason", "")
+                if "scalp_exit" not in _scalp_reason and "scalp_entry" in _scalp_reason:
+                    # 开空仓(非平仓) — 现货禁止
+                    log_to_server(f"[GCC-SCALP][BLOCKED] {symbol} SELL开空被拦截 — 现货不支持做空 reason={_scalp_reason}")
+                    send_ok = False
+                    _scalp_res = {"success": False, "error": "现货不能做空"}
+                else:
+                    # 平仓卖出: 用base_size(币数量), 限价=当前价
+                    _scalp_res = _cb_place(_scalp_product, "SELL",
+                                           base_size=_scalp_qty,
+                                           limit_price=_gcc_cur_price)
             else:
-                # 限价卖出: 用base_size(OP数量), 限价=当前价
-                _scalp_res = _cb_place(_scalp_product, "SELL",
-                                       base_size=_scalp_qty,
-                                       limit_price=_gcc_cur_price)
+                _scalp_res = {"success": False, "error": f"未知方向: {_gcc_act}"}
             send_ok = _scalp_res.get("success", False)
             log_to_server(
                 f"[GCC-SCALP][EXECUTE] {symbol} {_gcc_act}: "
@@ -54208,6 +54219,11 @@ if __name__ == "__main__":
             _gcc_c_time.sleep(60)  # 启动延迟60秒，等主程序就绪
             _GCC_CONSUMER_INTERVAL = 30  # 每30秒检查一次
             _ALL_SYMBOLS = list(_GCC_TM_EXECUTE_SYMBOLS) if _HAS_GCC_TM else []
+            # 剥头皮品种: 独立路径(不走GCC-TM EXECUTE),但pending_order需要消费
+            _SCALP_EXTRA = ["OPUSDC"]
+            for _se in _SCALP_EXTRA:
+                if _se not in _ALL_SYMBOLS:
+                    _ALL_SYMBOLS.append(_se)
             _last_cleanup_date = ""  # 每天只清理一次
             log_to_server(f"[GCC-TM][CONSUMER] 后台消费线程启动, 监控 {len(_ALL_SYMBOLS)} 个品种")
             while True:

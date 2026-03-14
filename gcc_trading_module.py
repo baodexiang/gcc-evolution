@@ -3928,7 +3928,10 @@ def gcc_scalp_observe(
     if rsi < _SCALP_RSI_OVERSOLD:
         signal = "BUY"
     elif rsi > _SCALP_RSI_OVERBOUGHT:
-        signal = "SELL"
+        # Coinbase现货不支持做空 — SELL只能平仓,不能开空
+        # 无持仓时RSI超买 → 跳过(不做空)
+        logger.debug("[GCC-SCALP] %s RSI=%.1f overbought but 现货不能做空, 跳过", symbol, rsi)
+        signal = None
 
     if signal is None:
         return None
