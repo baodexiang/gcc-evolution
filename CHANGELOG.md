@@ -4,6 +4,20 @@
 
 ---
 
+## [5.410] - 2026-03-14
+
+### Added
+
+- GCC-0250 S09: TiM merge-near-samples — `_knn_smart_prune_v2()` 新增 Phase2 cosine 聚类合并相似特征向量
+- GCC-0250 S03: StockMem 因果三元组检索激活 — retriever._score() causal_boost
+- GCC-0262: Brooks Vision 增强 — 标注图 v2.0 + Prompt V2 + 解析适配
+
+### Changed
+
+- 版本号统一升级到 `5.410`
+- 重新生成源码压缩包 `gcc_evolution_v5410.zip`
+- 删除旧压缩包 v5401/v5405
+
 ## [5.405] - 2026-03-12
 
 ### Changed

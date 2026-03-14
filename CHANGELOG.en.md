@@ -4,6 +4,20 @@ All public release notes for the opensource package are recorded here. The proje
 
 ---
 
+## [5.410] - 2026-03-14
+
+### Added
+
+- GCC-0250 S09: TiM merge-near-samples — `_knn_smart_prune_v2()` Phase2 cosine clustering to merge near-duplicate feature vectors
+- GCC-0250 S03: StockMem causal triplet retrieval — retriever._score() causal_boost for same-key failure pattern matching
+- GCC-0262: Brooks Vision enhancement — annotated chart v2.0 + 5-step Brooks prompt V2 + V2 field parsing
+
+### Changed
+
+- unified version bump to `5.410`
+- regenerated source archive as `gcc_evolution_v5410.zip`
+- removed old archives v5401/v5405
+
 ## [5.405] - 2026-03-12
 
 ### Changed
