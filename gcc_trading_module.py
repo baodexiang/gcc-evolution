@@ -2424,10 +2424,8 @@ _GCC_TM_EXECUTE_SYMBOLS: frozenset = frozenset({
     # 美股全量 EXECUTE
     "TSLA", "CRWV", "NBIS", "ONDS", "OPEN", "HIMS",
     "AMD", "COIN", "RKLB", "RDDT", "NVDA", "PLTR",
-    # 加密
+    # 加密 (OPUSDC不在此列 — 走独立剥头皮路径gcc_scalp_observe, 避免pending_order冲突)
     "BTCUSDC", "ETHUSDC", "ZECUSDC", "SOLUSDC",
-    # GCC-0256 S5: OP剥头皮
-    "OPUSDC",
 })  # B4: 逐品种开启，随时可关
 
 
