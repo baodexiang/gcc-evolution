@@ -172,6 +172,11 @@ def _load_candle_state(symbol: str) -> Optional[CandleState]:
             if state.round_decisions:
                 _aggregate_candle_summary(state)
                 logger.info("[GCC-TM] %s expired candle aggregated before discard", symbol)
+            # 清除持久信号 (防止跨K线泄漏)
+            with _signal_pool_lock:
+                if symbol in _signal_pool:
+                    _signal_pool.pop(symbol, None)
+                    _persist_signal_pool()
             try:
                 p.unlink(missing_ok=True)
             except Exception:
@@ -306,9 +311,10 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
                 if _bv_sig in ("BUY", "SELL"):
                     bv_bias = _bv_sig
                     bv_pattern = _bv_pat
-                    # 推入信号池 (权重=1票, 4H TTL内持续参与投票)
+                    # 推入信号池 (持久信号, 持续参与整根4H K线的8轮投票)
                     gcc_push_signal(symbol, "BrooksVision_4H", _bv_sig,
-                                    min(0.95, max(0.3, _bv_conf / 100.0)))
+                                    min(0.95, max(0.3, _bv_conf / 100.0)),
+                                    persistent=True)
                     break
         logger.info("[GCC-TM] %s BrooksVision→信号池: %s [%s]", symbol, bv_bias, bv_pattern)
     except ImportError:
@@ -2690,8 +2696,13 @@ _restore_signal_pool()
 
 
 def gcc_push_signal(symbol: str, source: str, action: str,
-                    confidence: float = 0.5) -> None:
+                    confidence: float = 0.5,
+                    persistent: bool = False) -> None:
     """外挂产生BUY/SELL时调用，收集到信号池。
+
+    Args:
+        persistent: True=持久信号，持续参与整根4H K线的8轮投票（如BrooksVision_4H）
+                    False=一次性信号，被_drain_signals取出后清除（如15min外挂）
 
     加密品种会检查方向锁：反向信号 Phase1 记 log 但仍入池，Phase2 拦截不入池。
     """
@@ -2723,17 +2734,25 @@ def gcc_push_signal(symbol: str, source: str, action: str,
             "source": source, "action": action,
             "confidence": confidence, "ts": ts,
             "lock_status": lock_result["reason"],
+            "persistent": persistent,
         })
         _persist_signal_pool()
-    logger.debug("[GCC-TM] push %s %s %s conf=%.2f", symbol, source, action, confidence)
+    logger.debug("[GCC-TM] push %s %s %s conf=%.2f persistent=%s",
+                 symbol, source, action, confidence, persistent)
 
 
 def _drain_signals(symbol: str) -> list:
-    """取出并清空某品种的信号池。"""
+    """取出信号池。一次性信号被清除，持久信号保留供后续轮次使用。"""
     with _signal_pool_lock:
-        signals = _signal_pool.pop(symbol, [])
+        all_signals = _signal_pool.get(symbol, [])
+        # 返回全部信号（一次性+持久）供本轮投票
+        result = list(all_signals)
+        # 只保留持久信号，清除一次性信号
+        _signal_pool[symbol] = [s for s in all_signals if s.get("persistent")]
+        if not _signal_pool[symbol]:
+            _signal_pool.pop(symbol, None)
         _persist_signal_pool()
-    return signals
+    return result
 
 
 # ══════════════════════════════════════════════════════════════
@@ -3191,6 +3210,11 @@ def gcc_observe(
                 "[GCC-TM] %s candle complete: summary=%s traded=%s",
                 symbol, summary.get("direction"), state.traded,
             )
+            # 清除持久信号 (K线结束, 持久信号不应跨K线)
+            with _signal_pool_lock:
+                if symbol in _signal_pool:
+                    _signal_pool.pop(symbol, None)
+                    _persist_signal_pool()
             # 清除K线状态文件(下次调用时_init_candle_state会创建新的)
             try:
                 _candle_state_path(symbol).unlink(missing_ok=True)
