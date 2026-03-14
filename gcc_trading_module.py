@@ -101,6 +101,8 @@ class CandleState:
     bv_pattern: str = "NONE"      # v0.3: BrooksVision识别的形态名
     wyckoff_phase: str = "X"      # v0.4: Wyckoff Phase A-E/X (GCC-0261)
     wyckoff_bias: str = "HOLD"    # v0.4: Wyckoff门控投票方向
+    value_composite: float = 0.0  # v0.5: KEY-003价值分析综合分 (-10~+10)
+    value_modifier: float = 1.0   # v0.5: 仓位系数 (position_modifier from value analysis)
     current_round: int = 0        # 当前已完成轮次 (0-8)
     traded: bool = False          # 是否已交易
     trade_round: int = -1         # 交易发生在第几轮 (-1=未交易)
@@ -124,6 +126,8 @@ class CandleState:
             "bv_pattern": self.bv_pattern,
             "wyckoff_phase": self.wyckoff_phase,
             "wyckoff_bias": self.wyckoff_bias,
+            "value_composite": self.value_composite,
+            "value_modifier": self.value_modifier,
             "prev_summary": self.prev_summary,
             "effective_direction": self.effective_direction,
             "current_round": self.current_round,
@@ -161,6 +165,8 @@ def _load_candle_state(symbol: str) -> Optional[CandleState]:
             bv_pattern=d.get("bv_pattern", "NONE"),          # v0.3: 重启恢复BV形态
             wyckoff_phase=d.get("wyckoff_phase", "X"),       # v0.4: Wyckoff Phase
             wyckoff_bias=d.get("wyckoff_bias", "HOLD"),      # v0.4: Wyckoff投票
+            value_composite=d.get("value_composite", 0.0),   # v0.5: KEY-003价值分析
+            value_modifier=d.get("value_modifier", 1.0),     # v0.5: 仓位系数
             current_round=d.get("current_round", 0),
             traded=d.get("traded", False),
             trade_round=d.get("trade_round", -1),
@@ -342,6 +348,23 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
         except Exception as _wp_e:
             logger.warning("[GCC-TM] %s Wyckoff B通道异常: %s", symbol, _wp_e)
 
+    # KEY-003: 价值分析综合分 (每日更新，4H读一次)
+    value_composite, value_modifier = 0.0, 1.0
+    try:
+        import json as _json_va
+        _va_path = _STATE_DIR / "value_analysis_latest.json"
+        if _va_path.exists():
+            _va_data = _json_va.loads(_va_path.read_text(encoding="utf-8"))
+            for _va_r in _va_data.get("results", []):
+                if _va_r.get("ticker") == symbol:
+                    value_composite = float(_va_r.get("composite_score", 0))
+                    value_modifier = float(_va_r.get("position_modifier", 1.0))
+                    break
+            logger.info("[GCC-TM] %s 价值分析: composite=%.2f modifier=%.1f",
+                        symbol, value_composite, value_modifier)
+    except Exception as _va_e:
+        logger.debug("[GCC-TM] %s 价值分析读取异常: %s", symbol, _va_e)
+
     # KEY-010: 三方投票 — Vision(趋势) + prev_summary(上K汇总) + Wyckoff(阶段)
     # BV已拆出到信号池, 门控: 趋势+惯性+阶段
     # 多数票(≥2)→执行, 无多数但有方向→跟随多数, 全弃权→HOLD
@@ -375,6 +398,8 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
         bv_pattern=bv_pattern,
         wyckoff_phase=wyckoff_phase,
         wyckoff_bias=wyckoff_bias,
+        value_composite=value_composite,
+        value_modifier=value_modifier,
     )
 
     # 如果程序重启, 当前已经不在round 0, 标记起点
@@ -914,6 +939,10 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
     else:
         scores["signal_pool"] = 0.0
 
+    # KEY-003: 价值分析 — composite>0支持BUY, <0抑制BUY (权重0.15)
+    _va_score = context.get("value_composite", 0.0)
+    scores["value"] = max(-0.15, min(0.15, _va_score * 0.015))  # ±10→±0.15
+
     return scores
 
 
@@ -978,6 +1007,10 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
         scores["signal_pool"] = (sell_ratio - 0.5) * 0.45  # 全SELL→+0.225, 全BUY→-0.225
     else:
         scores["signal_pool"] = 0.0
+
+    # KEY-003: 价值分析 — composite<0支持SELL(高估值卖出), >0抑制SELL(低估值持有)
+    _va_score = context.get("value_composite", 0.0)
+    scores["value"] = max(-0.15, min(0.15, -_va_score * 0.015))  # 注意取反: 高分抑制卖出
 
     return scores
 
@@ -1717,6 +1750,9 @@ class GCCTradingModule:
         if signal_pool_data:
             ctx.signal_pool = signal_pool_data
         context = self._context_to_score_dict(ctx)
+        # KEY-003: 注入价值分析分数到评分context
+        if candle_state:
+            context["value_composite"] = candle_state.value_composite
 
         # L3-S02: hold_only 模式 — 直接 HOLD，只记日志
         if self.phase == PHASE_HOLD_ONLY:
