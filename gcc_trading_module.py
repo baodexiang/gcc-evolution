@@ -1687,7 +1687,6 @@ class GCCTradingModule:
 
         self._verifier = BeyondEuclidVerifier()
         self._decision_log  = self.log_dir / "gcc_trading_decisions.jsonl"
-        self._accuracy_file = self.log_dir / "gcc_trading_accuracy.json"
         self._pending_file  = self.state_dir / f"gcc_pending_order_{symbol}.json"
 
         logger.info("[GCC-TRADE] init symbol=%s phase=%s", symbol, phase)
@@ -1696,7 +1695,6 @@ class GCCTradingModule:
     def process(
         self,
         bars: list,
-        main_decision: Optional[str] = None,
         signal_pool_data: Optional[dict] = None,
         candle_state: Optional[CandleState] = None,
     ) -> dict:
@@ -1704,7 +1702,6 @@ class GCCTradingModule:
         主流程入口。
         v0.2: 增加candle_state参数，传递Vision门控状态到树搜索。
         bars: OHLCV list，最新在末尾，至少含 volume/close 字段。
-        main_decision: 主程序决策，用于一致率统计。
         signal_pool_data: 30分钟信号池统计 {buy:N, sell:N, total:N, ...}
         candle_state: 当前K线轮次状态 (None=向后兼容旧行为)
         """
@@ -1731,8 +1728,6 @@ class GCCTradingModule:
                 "rejected_nodes": [], "context": ctx.as_dict(),
             }
             self._write_decision_log(result)
-            if main_decision is not None:
-                self._compare_with_main("HOLD", main_decision, ts)
             return result
 
         # L2: 树搜索（收集 rejected_nodes）— v0.2传入candle_state做Vision门控
@@ -1808,10 +1803,6 @@ class GCCTradingModule:
         # S41: pending_order 由 gcc_observe() 轮次逻辑统一控制
         # (v0.2: 避免process()和gcc_observe()双写)
 
-        # L3-S04: 与主程序对比（含 divergence + takeover_ready）
-        if main_decision is not None:
-            self._compare_with_main(final_action, main_decision, ts)
-
         # v0.2: 附加Vision门控信息
         if candle_state is not None:
             result["vision_gate"] = {
@@ -1835,7 +1826,6 @@ class GCCTradingModule:
         bars: list,
         signals: list,
         candle_state: CandleState,
-        main_decision: Optional[str] = None,
         observe_only: bool = False,
     ) -> dict:
         """
@@ -1866,7 +1856,7 @@ class GCCTradingModule:
 
         # 调用核心process (传入candle_state做Vision门控)
         result = self.process(
-            bars, main_decision=main_decision,
+            bars,
             signal_pool_data=signal_pool_data,
             candle_state=candle_state,
         )
@@ -2132,82 +2122,6 @@ class GCCTradingModule:
         except Exception as e:
             logger.warning("[GCC-TRADE] write_pending_order: %s", e)
 
-    # ── L3-S04: 与主程序决策对比 + divergence + takeover_ready ──
-    def _compare_with_main(
-        self, gcc_action: str, main_action: str, ts: str
-    ) -> None:
-        """
-        记录 GCC 模块与主程序决策一致率到 accuracy.json。
-        L3-S04: 增加 divergence_rate + takeover_ready 判定。
-        takeover_ready 条件: 样本 ≥ 30 且 GCC 准确率 > 主程序准确率 (divergence 中 GCC 胜出比例 > 55%)
-        """
-        match = gcc_action == main_action
-        try:
-            acc: dict = {}
-            if self._accuracy_file.exists():
-                acc = json.loads(self._accuracy_file.read_text(encoding="utf-8"))
-
-            sym_acc = acc.setdefault(self.symbol, {
-                "total": 0, "match": 0, "rate": 0.0,
-                "divergence_count": 0, "gcc_win_on_diverge": 0,
-            })
-            sym_acc["total"] += 1
-            if match:
-                sym_acc["match"] += 1
-            else:
-                # 分歧计数（GCC 与主程序不同的次数）
-                sym_acc["divergence_count"] = sym_acc.get("divergence_count", 0) + 1
-
-            total = sym_acc["total"]
-            sym_acc["rate"] = round(sym_acc["match"] / total, 4)
-            diverge_count = sym_acc.get("divergence_count", 0)
-            sym_acc["divergence_rate"] = round(diverge_count / total, 4) if total else 0.0
-
-            # takeover_ready: 样本充足 + GCC 在分歧中胜出比例 > 55%
-            gcc_wins = sym_acc.get("gcc_win_on_diverge", 0)
-            sym_acc["takeover_ready"] = (
-                total >= 30
-                and diverge_count >= 10
-                and (gcc_wins / diverge_count > 0.55 if diverge_count else False)
-            )
-
-            sym_acc["last_ts"] = ts
-            sym_acc["last_gcc"] = gcc_action
-            sym_acc["last_main"] = main_action
-
-            _atomic_write(self._accuracy_file,
-                          json.dumps(acc, ensure_ascii=False, indent=2))
-        except Exception as e:
-            logger.warning("[GCC-TRADE] compare_with_main: %s", e)
-
-    def record_divergence_outcome(
-        self, symbol: str, gcc_was_right: bool
-    ) -> None:
-        """
-        回填分歧结果：GCC 和主程序决策不同时，谁的方向最终正确。
-        由 _backfill_outcome 在8根K线后调用。
-        """
-        try:
-            acc: dict = {}
-            if self._accuracy_file.exists():
-                acc = json.loads(self._accuracy_file.read_text(encoding="utf-8"))
-            sym_acc = acc.get(symbol, {})
-            if gcc_was_right:
-                sym_acc["gcc_win_on_diverge"] = sym_acc.get("gcc_win_on_diverge", 0) + 1
-            # 重算 takeover_ready
-            total = sym_acc.get("total", 0)
-            diverge_count = sym_acc.get("divergence_count", 0)
-            gcc_wins = sym_acc.get("gcc_win_on_diverge", 0)
-            sym_acc["takeover_ready"] = (
-                total >= 30
-                and diverge_count >= 10
-                and (gcc_wins / diverge_count > 0.55 if diverge_count else False)
-            )
-            acc[symbol] = sym_acc
-            _atomic_write(self._accuracy_file,
-                          json.dumps(acc, ensure_ascii=False, indent=2))
-        except Exception as e:
-            logger.warning("[GCC-TRADE] record_divergence_outcome: %s", e)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2915,7 +2829,6 @@ def _backfill_sim_trades(symbol: str, bars: list) -> None:
 def gcc_observe(
     symbol: str,
     bars: list,
-    main_decision: str,
     observe_only: bool = False,
 ) -> None:
     """
@@ -3001,7 +2914,6 @@ def gcc_observe(
                 try:
                     _bf_result = mod.process_round(
                         bars, signals, state,
-                        main_decision=main_decision,
                         observe_only=True,  # 回填轮不执行交易
                     )
                     _bf_action = _bf_result.get("final_action", "HOLD")
@@ -3051,7 +2963,6 @@ def gcc_observe(
         # ── 轮次决策 ──
         result = mod.process_round(
             bars, signals, state,
-            main_decision=main_decision,
             observe_only=observe_only,
         )
 
@@ -3137,7 +3048,6 @@ def gcc_observe(
             "symbol": symbol,
             "phase": mod.phase,
             "gcc_action": gcc_action,
-            "main_action": main_decision,
             "verdict": gcc_verdict,
             "reason": f"v0.2 round={state.current_round - 1}/{_ROUNDS_PER_CANDLE} "
                        f"dir={state.effective_direction} traded={state.traded}",
@@ -3145,7 +3055,6 @@ def gcc_observe(
             "sell_signals": sell_votes,
             "signals_count": len(signals),
             "price": current_price,
-            "match": gcc_action == main_decision,
             "observe_only": bool(observe_only),
             "round": state.current_round - 1,
             "vision_gate": {
@@ -3330,7 +3239,7 @@ if __name__ == "__main__":
 
     # observe 模式
     mod_obs = GCCTradingModule("BTCUSDC", phase=PHASE_OBSERVE)
-    r_obs = mod_obs.process(test_bars, main_decision="HOLD")
+    r_obs = mod_obs.process(test_bars)
     print(f"S37 observe: action={r_obs['final_action']} verdict={r_obs['verdict']} consensus={r_obs['consensus']}/3")
     print(f"  best_node: {r_obs['best_node']}")
     print(f"  log_file exists: {mod_obs._decision_log.exists()}")
@@ -3340,17 +3249,10 @@ if __name__ == "__main__":
     # 预先喂历史给 Algebra 以获得有效胜率
     for i in range(5):
         mod_exe._verifier.algebra.record_outcome(100.0 + i, "BUY", True)
-    r_exe = mod_exe.process(test_bars, main_decision="BUY")
+    r_exe = mod_exe.process(test_bars)
     print(f"S41 execute: action={r_exe['final_action']} verdict={r_exe['verdict']}")
     if r_exe["verdict"] == "EXECUTE":
         print(f"  pending_order exists: {mod_exe._pending_file.exists()}")
-
-    # S42 一致率
-    print(f"S42 accuracy file exists: {mod_obs._accuracy_file.exists()}")
-    if mod_obs._accuracy_file.exists():
-        import json as _j
-        acc = _j.loads(mod_obs._accuracy_file.read_text())
-        print(f"  BTCUSDC accuracy: {acc.get('BTCUSDC', {})}")
 
     print(f"\n=== S43-S50 KNN经验层 + gcc_observe 自测 ===")
     import math as _m2
@@ -3360,7 +3262,7 @@ if __name__ == "__main__":
     print(f"S44 feature_names: {KNNExperience.feature_names()}")
 
     # S47-S49: gcc_observe 接入测试
-    gcc_observe("BTCUSDC", bars50, main_decision="BUY")
+    gcc_observe("BTCUSDC", bars50)
 
     # v3.670: KNN统一由gcc-evo L4管理（plugin_knn_history.npz），验证algebra加载
     mod_knn = _get_gcc_module("BTCUSDC")

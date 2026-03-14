@@ -10353,7 +10353,7 @@ class PriceScanEngine:
                         _gcc_bars = _verify_and_get_4h(main_symbol, _gcc_bars_raw, _gcc_lookback)
                         if _gcc_bars and len(_gcc_bars) >= 5:
                             _gcc_observe_round(
-                                main_symbol, _gcc_bars, "HOLD",
+                                main_symbol, _gcc_bars,
                                 observe_only=main_symbol not in _GCC_EXEC,
                             )
                             logger.info(f"[GCC-TM][ROUND] {main_symbol} crypto round triggered")
@@ -10486,7 +10486,7 @@ class PriceScanEngine:
                         _gcc_bars_s = _verify_and_get_4h(symbol, _gcc_bars_s_raw, _gcc_lookback_s)
                         if _gcc_bars_s and len(_gcc_bars_s) >= 5:
                             _gcc_observe_round(
-                                symbol, _gcc_bars_s, "HOLD",
+                                symbol, _gcc_bars_s,
                                 observe_only=symbol not in _GCC_EXEC,
                             )
                             logger.info(f"[GCC-TM][ROUND] {symbol} stock round triggered")
