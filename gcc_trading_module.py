@@ -1084,7 +1084,7 @@ def _score_hold_candidate() -> dict:
     """HOLD 路径固定中性分 0.0，作为基线竞争者。v0.2: 移除vision。"""
     return {"scan": 0.0, "win_rate": 0.0, "volume": 0.0,
             "vwap": 0.0, "obi": 0.0, "cvd": 0.0,
-            "signal_pool": 0.0, "nowcast": 0.0}
+            "signal_pool": 0.0, "nowcast": 0.0, "value": 0.0}
 
 
 # ══════════════════════════════════════════════════════════════
