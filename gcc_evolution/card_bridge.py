@@ -187,9 +187,19 @@ class CardBridge:
               rank_source="causal" 表示有因果数据排序
               rank_source="static" 表示回退到静态confidence
         """
-        # 1. 先用 query() 获取候选卡
+        # 1. 先用 query() 获取候选卡, 跳过deprecated
         candidates = self.query(module=module, card_type=card_type,
                                 min_confidence=0.0)  # 不用confidence过滤,让因果数据说话
+        # 加载deprecated列表, 过滤掉已淘汰的卡
+        _dep_file = _STATE_DIR / "card_deprecated.json"
+        _deprecated = set()
+        if _dep_file.exists():
+            try:
+                _deprecated = set(json.loads(_dep_file.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+        if _deprecated:
+            candidates = [c for c in candidates if c["card_id"] not in _deprecated]
         if not candidates:
             return []
 
@@ -425,6 +435,69 @@ class CardBridge:
         _log(f"[DISTILL] 总卡={len(report)}, 有效激活={", ".join(str(v['activations']) for v in report.values() if v['activations']>0)[:60] or '0条'}, "
              f"validated={validated} flagged={flagged} inactive={inactive}")
         return report
+
+    def prune_deprecated(self) -> dict:
+        """定期淘汰: 将低正确率的卡标记为deprecated, query_contextual会跳过。
+
+        淘汰规则:
+          知识卡: 正确率<30% 且样本≥5 → deprecated
+          经验卡: 正确率<20% 且样本≥5 → deprecated
+
+        返回: {deprecated: int, total_checked: int, details: [...]}
+        """
+        causal = self._load_causal_memory()
+        deprecated_list = []
+
+        # 读取已有的deprecated列表
+        _dep_file = _STATE_DIR / "card_deprecated.json"
+        existing = set()
+        if _dep_file.exists():
+            try:
+                existing = set(json.loads(_dep_file.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+
+        for cid, stats in causal.items():
+            if stats["total"] < 5:
+                continue
+            rate = stats["correct"] / stats["total"]
+            is_exp = cid.startswith("EXP_TM_")
+            threshold = 0.20 if is_exp else 0.30
+
+            if rate < threshold:
+                existing.add(cid)
+                deprecated_list.append({
+                    "card_id": cid,
+                    "type": "experience" if is_exp else "knowledge",
+                    "correct_rate": round(rate, 3),
+                    "samples": stats["total"],
+                })
+
+        # 写入deprecated列表
+        _STATE_DIR.mkdir(parents=True, exist_ok=True)
+        _dep_file.write_text(
+            json.dumps(sorted(existing), ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+        _log(f"[PRUNE] 淘汰{len(deprecated_list)}张卡 (总检查{len(causal)})")
+        return {
+            "deprecated": len(deprecated_list),
+            "total_checked": len(causal),
+            "details": deprecated_list,
+        }
+
+    @staticmethod
+    def is_deprecated(card_id: str) -> bool:
+        """检查卡是否被淘汰"""
+        _dep_file = _STATE_DIR / "card_deprecated.json"
+        if not _dep_file.exists():
+            return False
+        try:
+            deprecated = json.loads(_dep_file.read_text(encoding="utf-8"))
+            return card_id in deprecated
+        except Exception:
+            return False
 
     def _write_card(self, card):
         """回写卡片JSON (更新confidence/quality)"""

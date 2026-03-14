@@ -6750,6 +6750,35 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
             click.echo(f"  ✗ Step 5/5: Dashboard — 无export文件")
             results["dashboard"] = False
 
+        # Step 6: 卡片淘汰 (知识卡30天/经验卡2周)
+        try:
+            _prune_marker = project_root / "state" / ".card_prune_last"
+            _prune_interval = 14 * 86400  # 2周最短间隔
+            _should_prune = True
+            import time as _prune_time
+            if _prune_marker.exists():
+                try:
+                    _last_prune = float(_prune_marker.read_text().strip())
+                    if _prune_time.time() - _last_prune < _prune_interval:
+                        _should_prune = False
+                except Exception:
+                    pass
+            if _should_prune and not dry_run:
+                from gcc_evolution.card_bridge import CardBridge as _PruneCB
+                _pcb = _PruneCB()
+                _pcb.load_index()
+                _prune_result = _pcb.prune_deprecated()
+                _prune_marker.write_text(str(_prune_time.time()))
+                click.echo(f"  ✓ Step 6: 卡片淘汰 — 淘汰{_prune_result['deprecated']}张"
+                           f" (检查{_prune_result['total_checked']}张)")
+                results["prune"] = True
+            else:
+                click.echo(f"  ○ Step 6: 卡片淘汰 — {'[dry-run]' if dry_run else '未到周期'}")
+                results["prune"] = True
+        except Exception as _prune_e:
+            click.echo(f"  ✗ Step 6: 卡片淘汰 — {_prune_e}")
+            results["prune"] = False
+
         # Summary
         ok_count = sum(1 for v in results.values() if v)
         total = len(results)
