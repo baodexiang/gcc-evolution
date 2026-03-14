@@ -1614,18 +1614,19 @@ class AlgebraVerifier:
     def verify(self, node: TreeNode, current_price: float = 0.0) -> VerifierResult:
         """S29: 等变加权胜率验证。"""
         if not self._history or current_price <= 0:
-            # 无历史数据时 fallback
             return VerifierResult(
-                perspective="algebra", ok=True, score=0.5,
-                reasoning="no history, fallback ok=True"
+                perspective="algebra", ok=False, score=0.5,
+                abstain=True,
+                reasoning="abstain: no history"
             )
 
         ref = self._ref_price or current_price
         same_action = [h for h in self._history if h["action"] == node.action]
         if len(same_action) < 3:
             return VerifierResult(
-                perspective="algebra", ok=True, score=0.5,
-                reasoning=f"insufficient history ({len(same_action)}<3), fallback"
+                perspective="algebra", ok=False, score=0.5,
+                abstain=True,
+                reasoning=f"abstain: insufficient history ({len(same_action)}<3)"
             )
 
         # 双曲距离加权胜率
@@ -1640,8 +1641,9 @@ class AlgebraVerifier:
                 weighted_win += weight
 
         if weighted_total <= 0:
-            return VerifierResult(perspective="algebra", ok=True, score=0.5,
-                                  reasoning="zero weight, fallback")
+            return VerifierResult(perspective="algebra", ok=False, score=0.5,
+                                  abstain=True,
+                                  reasoning="abstain: zero weight")
 
         win_rate = weighted_win / weighted_total
         ok = win_rate >= 0.5
