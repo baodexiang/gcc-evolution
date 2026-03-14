@@ -3482,6 +3482,67 @@ def main():
                 pass
         multi["scalp"] = _scalp_data
 
+        # ── 注入 GCC-TM K线实时状态 (candle_state/candle_summary) ──
+        import glob as _audit_glob
+        _candle_states = {}
+        for _cs_p in _audit_glob.glob(str(STATE_DIR / "gcc_candle_state_*.json")):
+            try:
+                _cs_name = os.path.basename(_cs_p)
+                if "-" in _cs_name.replace("gcc_candle_state_", ""):
+                    continue  # skip MSI/BaoPCS copies
+                _cs_d = json.loads(open(_cs_p, encoding="utf-8").read())
+                _cs_sym = _cs_d.get("symbol", "")
+                if _cs_sym:
+                    _candle_states[_cs_sym] = _cs_d
+            except Exception:
+                pass
+        _candle_summaries = {}
+        for _csm_p in _audit_glob.glob(str(STATE_DIR / "gcc_candle_summary_*.json")):
+            try:
+                _csm_name = os.path.basename(_csm_p)
+                if "-" in _csm_name.replace("gcc_candle_summary_", ""):
+                    continue
+                _csm_d = json.loads(open(_csm_p, encoding="utf-8").read())
+                _csm_sym = _csm_name.replace("gcc_candle_summary_", "").replace(".json", "")
+                if _csm_sym:
+                    _candle_summaries[_csm_sym] = _csm_d
+            except Exception:
+                pass
+        # 轮次决策: gcc_round_decisions.jsonl
+        _round_decs = []
+        _rd_path = STATE_DIR / "gcc_round_decisions.jsonl"
+        try:
+            if _rd_path.exists():
+                for _rdl in _rd_path.read_text(encoding="utf-8").splitlines()[-200:]:
+                    if _rdl.strip():
+                        _round_decs.append(json.loads(_rdl))
+                _round_decs = list(reversed(_round_decs))
+        except Exception:
+            pass
+        # 信号池: gcc_signal_pool.json
+        _sig_pool = {}
+        _sp_path = STATE_DIR / "gcc_signal_pool.json"
+        try:
+            if _sp_path.exists():
+                _sig_pool = json.loads(_sp_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        # 方向锁: gcc_direction_lock.json
+        _dir_locks = {}
+        _dl_path = STATE_DIR / "gcc_direction_lock.json"
+        try:
+            if _dl_path.exists():
+                _dir_locks = json.loads(_dl_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        # 注入到24h范围(dashboard主面板读24h)
+        if "24h" in multi:
+            multi["24h"]["candle_states"] = _candle_states
+            multi["24h"]["candle_summaries"] = _candle_summaries
+            multi["24h"]["round_decisions"] = _round_decs
+            multi["24h"]["signal_pool"] = _sig_pool
+            multi["24h"]["direction_locks"] = _dir_locks
+
         _write_key009_cache(multi)
 
         # ── 生成嵌入数据的 dashboard HTML (可直接 file:// 打开) ──

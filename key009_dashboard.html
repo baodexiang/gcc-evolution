@@ -1364,11 +1364,18 @@ function loadGccTm() {
             </div>`;
         }).join('');
     };
-    fetch('/key009/gcctm').then(r => {
+    // 优先从实时API获取, 失败时从MULTI_DATA["24h"]回退(静态导出)
+    const _gcctmPromise = fetch('/key009/gcctm').then(r => {
         const ct = r.headers.get('content-type') || '';
-        if (!ct.includes('json')) throw new Error('API未就绪(需重启服务器加载/key009/gcctm路由)');
+        if (!ct.includes('json')) throw new Error('API未就绪');
         return r.json();
-    }).then(d => {
+    }).catch(() => {
+        // 静态导出模式: 从MULTI_DATA["24h"]读candle_states等
+        if (MULTI_DATA && MULTI_DATA['24h']) return MULTI_DATA['24h'];
+        return null;
+    });
+    _gcctmPromise.then(d => {
+        if (!d) return;
         const signalPool = d.signal_pool || {};
         const directionLocks = d.direction_locks || {};
         // 只保留1天内的数据
@@ -1490,7 +1497,7 @@ function loadGccTm() {
         });
         // ── 剥头皮面板 (插入在加密货币与美股之间) ──
         const _buildScalpPanel = () => {
-            const sc = MULTI_DATA.scalp || {};
+            const sc = d.scalp || (MULTI_DATA && MULTI_DATA.scalp) || {};
             const st = sc.state || {};
             const trades = sc.trades || [];
             const sum = sc.summary || {};
@@ -1659,8 +1666,9 @@ function loadGccTm() {
                     </div>
                 </div>`;
             }).join('');
-            // 如果所有品种都是加密货币(没触发crypto→stock边界), 追加scalp面板
-            if (_prevCat === 0) {
+            // 如果没触发crypto→stock边界(全是加密或全是股票), 追加scalp面板
+            const _scalpInserted = panelsEl.innerHTML.includes('GCC-SCALP');
+            if (!_scalpInserted) {
                 panelsEl.innerHTML += _buildScalpPanel();
             }
         }

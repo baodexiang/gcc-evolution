@@ -51447,6 +51447,25 @@ def key009_gcctm():
         scalp_pnl = _scalp_pnl_fn()
     except Exception:
         pass
+    # 剥头皮完整数据(state + trades + summary)供dashboard面板
+    scalp_full = {"state": {}, "trades": [], "summary": {}}
+    try:
+        _scalp_st_path = ROOT / "state" / "gcc_scalp_state.json"
+        _scalp_tr_path = ROOT / "state" / "gcc_scalp_trades.jsonl"
+        if _scalp_st_path.exists():
+            scalp_full["state"] = json.loads(_scalp_st_path.read_text(encoding="utf-8"))
+        if _scalp_tr_path.exists():
+            _str_lines = [json.loads(l) for l in _scalp_tr_path.read_text(encoding="utf-8").strip().split("\n") if l.strip()]
+            scalp_full["trades"] = _str_lines[-50:]
+            _stotal = len(_str_lines)
+            _swins = sum(1 for t in _str_lines if t.get("net_pnl_usd", 0) > 0)
+            scalp_full["summary"] = {
+                "total": _stotal, "wins": _swins, "losses": _stotal - _swins,
+                "win_rate": round(_swins / _stotal * 100, 1) if _stotal else 0,
+                "total_pnl_usd": round(sum(t.get("net_pnl_usd", 0) for t in _str_lines), 2),
+            }
+    except Exception:
+        pass
 
     return app.response_class(
         json.dumps(
@@ -51464,6 +51483,7 @@ def key009_gcctm():
                 "observe_signals": list(reversed(observe_signals)),
                 "error_classify": error_classify,
                 "scalp_pnl": scalp_pnl,
+                "scalp": scalp_full,
             },
             ensure_ascii=False,
         ),
