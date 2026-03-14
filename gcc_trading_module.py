@@ -34,15 +34,12 @@ _STATE_DIR       = Path("state")
 _GCC_DIR         = Path(".GCC")
 
 _VISION_SNAP_DIR = _STATE_DIR / "vision_cache" / "snapshots"
-_N_GATE_FILE     = _STATE_DIR / "n_gate_active.json"
 _N_STRUCT_FILE   = _STATE_DIR / "n_structure_state.json"
-_FILTER_FILE     = _STATE_DIR / "filter_chain_state.json"
 _SIGNAL_LOG      = _STATE_DIR / "audit" / "signal_log.jsonl"
 _GCC_MODE_FILE   = _GCC_DIR / "signal_filter" / "mode_state.json"
 _PLUGIN_KNN_ACC  = _STATE_DIR / "plugin_knn_accuracy.json"
 _KNN_ACC_MAP     = _STATE_DIR / "knn_accuracy_map.json"
 _LOG_FILE        = _STATE_DIR / "gcc_trading_decisions.jsonl"
-_GOVERNANCE_FILE = _STATE_DIR / "plugin_governance_actions.json"
 _REGIME_FILE     = _STATE_DIR / "regime_validation.json"
 _CONTEXT_SNAP_DIR = _STATE_DIR / "gcc_decision_context"
 _MAIN_STATE_FILE  = Path("logs") / "state.json"
@@ -507,45 +504,6 @@ def _read_scan_signal(symbol: str) -> Tuple[str, float]:
     return "NONE", 0.0
 
 
-# ══════════════════════════════════════════════════════════════
-# S08  _read_n_gate(symbol, direction) → "BLOCK" | "OBSERVE" | "INACTIVE"
-# 读 state/n_gate_active.json → {symbol_BUY: {block, reason}}
-# ══════════════════════════════════════════════════════════════
-def _read_n_gate(symbol: str, direction: str) -> str:
-    """读取 N字门控状态。v0.3: 禁用N字门控, 始终返回INACTIVE。"""
-    # N字门控在GCC-TM中不需要, Vision三方门控已替代方向过滤
-    return "INACTIVE"
-
-
-# ══════════════════════════════════════════════════════════════
-# S09  _read_filter_chain(symbol, direction) → dict
-# 读 state/filter_chain_state.json
-# 返回: {passed, vision, volume_score, micro_go, blocked_by}
-# ══════════════════════════════════════════════════════════════
-def _read_filter_chain(symbol: str, direction: str) -> dict:
-    """读取三道过滤链结果。"""
-    default = {"passed": None, "vision": None, "volume_score": 0.5,
-                "micro_go": None, "blocked_by": "",
-                "vp_position": "UNKNOWN", "rvol": 1.0}
-    if not _FILTER_FILE.exists():
-        return default
-    try:
-        d = json.loads(_FILTER_FILE.read_text(encoding="utf-8"))
-        entry = d.get(symbol, {}).get(direction.upper(), {})
-        if not entry:
-            return default
-        return {
-            "passed":       entry.get("passed"),
-            "vision":       entry.get("vision"),           # "PASS"/"HOLD"/None
-            "volume_score": float(entry.get("volume_score") or 0.5),
-            "micro_go":     entry.get("micro_go"),
-            "blocked_by":   entry.get("blocked_by") or "",
-            "vp_position":  entry.get("vp_position", "UNKNOWN"),
-            "rvol":         float(entry.get("rvol") or 1.0),
-        }
-    except Exception as e:
-        logger.debug("[GCC-TRADE] _read_filter_chain %s %s: %s", symbol, direction, e)
-        return default
 
 
 # ══════════════════════════════════════════════════════════════
@@ -589,28 +547,6 @@ def _read_win_rate(symbol: str, direction: str = "") -> float:
         logger.debug("[GCC-TRADE] _read_win_rate %s: %s", symbol, e)
         return 0.5
 
-
-# ══════════════════════════════════════════════════════════════
-# S11  _read_volume(bars) → vol_ratio
-# 计算当前成交量相对近 20 根均量的倍数
-# bars: list of {"volume": float, ...}，最新在末尾
-# ══════════════════════════════════════════════════════════════
-def _read_volume(bars: list) -> float:
-    """计算量比 (current_vol / avg_vol_20)。"""
-    if not bars or len(bars) < 2:
-        return 1.0
-    try:
-        vols = [float(b.get("volume") or 0) for b in bars if b.get("volume")]
-        if len(vols) < 2:
-            return 1.0
-        current = vols[-1]
-        lookback = vols[-21:-1] if len(vols) >= 21 else vols[:-1]
-        avg = sum(lookback) / len(lookback) if lookback else 1.0
-        if avg <= 0:
-            return 1.0
-        return round(current / avg, 4)
-    except Exception:
-        return 1.0
 
 
 # ══════════════════════════════════════════════════════════════
@@ -676,25 +612,9 @@ def _read_position(symbol: str) -> tuple:
 
 
 # ══════════════════════════════════════════════════════════════
-# L1-S02  _read_plugin_governor / _read_regime / _read_risk_budget
-# 补充输入槽位：外挂治理状态、市场体制、风险预算
+# L1-S02  _read_regime
+# 补充输入槽位：市场体制
 # ══════════════════════════════════════════════════════════════
-def _read_plugin_governor(symbol: str) -> dict:
-    """读 plugin_governance_actions.json → 该品种外挂治理状态。"""
-    if not _GOVERNANCE_FILE.exists():
-        return {"status": "UNKNOWN", "disabled_plugins": []}
-    try:
-        gov = json.loads(_GOVERNANCE_FILE.read_text(encoding="utf-8"))
-        by_asset = gov.get("by_asset", {})
-        asset_gov = by_asset.get(symbol, {})
-        disabled = [k for k, v in asset_gov.items()
-                    if isinstance(v, dict) and v.get("action") == "DISABLE"]
-        return {"status": "ACTIVE" if not disabled else "RESTRICTED",
-                "disabled_plugins": disabled}
-    except Exception as e:
-        logger.debug("[GCC-TRADE] _read_plugin_governor %s: %s", symbol, e)
-        return {"status": "UNKNOWN", "disabled_plugins": []}
-
 
 def _read_regime(symbol: str) -> dict:
     """读 regime_validation.json → 最新市场体制 (TRENDING/RANGING/VOLATILE)。"""
@@ -714,14 +634,6 @@ def _read_regime(symbol: str) -> dict:
         logger.debug("[GCC-TRADE] _read_regime %s: %s", symbol, e)
         return {"regime": "UNKNOWN", "direction": "NONE"}
 
-
-def _read_risk_budget() -> dict:
-    """风险预算槽位 — 当前固定值，后续接入账户层实时数据。"""
-    return {
-        "max_position_pct": 0.10,    # 单品种最大仓位占比
-        "daily_loss_limit_pct": 0.02, # 日止损线 -2%
-        "available": True,            # 是否可用（触发熔断后 False）
-    }
 
 
 # ══════════════════════════════════════════════════════════════
@@ -816,17 +728,10 @@ class DecisionContext:
     # 原有输入 (L1-S01)
     vision: tuple         # (bias, confidence)
     scan: tuple           # (direction, confidence)
-    filter_buy: dict
-    filter_sell: dict
     win_rate_buy: float
     win_rate_sell: float
-    vol_ratio: float
-    n_gate_buy: str
-    n_gate_sell: str
     # 新增输入 (L1-S02)
     regime: dict = field(default_factory=dict)
-    governor: dict = field(default_factory=dict)
-    risk_budget: dict = field(default_factory=dict)
     # 信号方向过滤 + 仓位管理
     signal_direction: dict = field(default_factory=dict)
     position: tuple = (0, 5)  # (position_units, max_units)
@@ -839,12 +744,8 @@ class DecisionContext:
         return {
             "symbol": self.symbol, "ts": self.ts,
             "vision": list(self.vision), "scan": list(self.scan),
-            "filter_buy": self.filter_buy, "filter_sell": self.filter_sell,
             "win_rate_buy": self.win_rate_buy, "win_rate_sell": self.win_rate_sell,
-            "vol_ratio": round(self.vol_ratio, 4),
-            "n_gate_buy": self.n_gate_buy, "n_gate_sell": self.n_gate_sell,
-            "regime": self.regime, "governor": self.governor,
-            "risk_budget": self.risk_budget,
+            "regime": self.regime,
             "signal_direction": self.signal_direction,
             "position": list(self.position),
             "signal_pool": self.signal_pool,
@@ -917,14 +818,12 @@ class TreeNode:
 #   win_rate  0.15  — 历史胜率偏置
 #   volume    0.10  — 量比确认
 #   signal_pool 0.45 — 外挂共识 (入场信心)
-#   vwap/obi/cvd/vp/rvol — 量价确认
+#   vwap/obi/cvd — 量价确认
 # ══════════════════════════════════════════════════════════════
 def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
     """v0.2: 为 BUY 候选路径打分 (Vision已提升为门控，不参与打分)。"""
     scan_dir,    scan_conf   = context.get("scan",   ("NONE", 0.0))
-    filter_res               = context.get("filter_buy", {})
     win_rate                 = context.get("win_rate_buy", 0.5)
-    vol_ratio                = context.get("vol_ratio", 1.0)
 
     scores = {}
 
@@ -935,14 +834,6 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
         scores["scan"] = -scan_conf * 0.30
     else:
         scores["scan"] = 0.0
-
-    # filter chain: passed=+0.25, failed=-0.25 (v0.2: 0.20→0.25)
-    if filter_res.get("passed") is True:
-        scores["filter"] = +0.25
-    elif filter_res.get("passed") is False:
-        scores["filter"] = -0.25
-    else:
-        scores["filter"] = 0.0
 
     # win_rate 偏置 (v0.2: 0.24→0.30, 即 0.5→0, 1.0→+0.15)
     scores["win_rate"] = (win_rate - 0.5) * 0.30
@@ -987,24 +878,6 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
     else:
         scores["signal_pool"] = 0.0
 
-    # GCC-0255 S7: Volume Profile — 价格位于VAH上方支持BUY(突破), VAL下方反对
-    vp_pos = filter_res.get("vp_position", "UNKNOWN")
-    if vp_pos == "ABOVE_VAH":
-        scores["volume_profile"] = +0.06   # 突破价值区上沿 → 多头强势
-    elif vp_pos == "BELOW_VAL":
-        scores["volume_profile"] = -0.04   # 跌破价值区下沿 → BUY风险
-    else:
-        scores["volume_profile"] = 0.0     # IN_VALUE / UNKNOWN
-
-    # GCC-0255 S7: RVOL — 放量确认(>1.5x)支持, 缩量(<0.5x)反对
-    of_rvol = filter_res.get("rvol", 1.0)
-    if of_rvol >= 1.5:
-        scores["rvol_score"] = +0.04
-    elif of_rvol <= 0.5:
-        scores["rvol_score"] = -0.03
-    else:
-        scores["rvol_score"] = 0.0
-
     return scores
 
 
@@ -1015,9 +888,7 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
 def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
     """v0.2: 为 SELL 候选路径打分 (Vision已提升为门控，不参与打分)。"""
     scan_dir,    scan_conf   = context.get("scan",   ("NONE", 0.0))
-    filter_res               = context.get("filter_sell", {})
     win_rate                 = context.get("win_rate_sell", 0.5)
-    vol_ratio                = context.get("vol_ratio", 1.0)
 
     scores = {}
 
@@ -1028,14 +899,6 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
         scores["scan"] = -scan_conf * 0.30
     else:
         scores["scan"] = 0.0
-
-    # filter chain (v0.2: 0.20→0.25)
-    if filter_res.get("passed") is True:
-        scores["filter"] = +0.25
-    elif filter_res.get("passed") is False:
-        scores["filter"] = -0.25
-    else:
-        scores["filter"] = 0.0
 
     # win_rate (v0.2: 0.24→0.30)
     scores["win_rate"] = (win_rate - 0.5) * 0.30
@@ -1080,24 +943,6 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
     else:
         scores["signal_pool"] = 0.0
 
-    # GCC-0255 S7: Volume Profile — BELOW_VAL支持SELL(跌破), ABOVE_VAH反对
-    vp_pos = filter_res.get("vp_position", "UNKNOWN")
-    if vp_pos == "BELOW_VAL":
-        scores["volume_profile"] = +0.06   # 跌破价值区下沿 → 空头强势
-    elif vp_pos == "ABOVE_VAH":
-        scores["volume_profile"] = -0.04   # 突破价值区上沿 → SELL风险
-    else:
-        scores["volume_profile"] = 0.0
-
-    # GCC-0255 S7: RVOL — 放量确认(>1.5x)支持, 缩量(<0.5x)反对
-    of_rvol = filter_res.get("rvol", 1.0)
-    if of_rvol >= 1.5:
-        scores["rvol_score"] = +0.04
-    elif of_rvol <= 0.5:
-        scores["rvol_score"] = -0.03
-    else:
-        scores["rvol_score"] = 0.0
-
     return scores
 
 
@@ -1106,10 +951,9 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
 # ══════════════════════════════════════════════════════════════
 def _score_hold_candidate() -> dict:
     """HOLD 路径固定中性分 0.0，作为基线竞争者。v0.2: 移除vision。"""
-    return {"scan": 0.0, "filter": 0.0,
-            "win_rate": 0.0, "volume": 0.0, "vwap": 0.0,
-            "obi": 0.0, "cvd": 0.0, "signal_pool": 0.0,
-            "volume_profile": 0.0, "rvol_score": 0.0}
+    return {"scan": 0.0, "win_rate": 0.0, "volume": 0.0,
+            "vwap": 0.0, "obi": 0.0, "cvd": 0.0,
+            "signal_pool": 0.0}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1211,14 +1055,14 @@ _PRUNE_RATIO = 0.8    # 每轮剪枝比例 (论文~80%剪枝)
 # L2 子策略定义 — 每个方向3种策略，强调不同数据源
 _L2_STRATEGIES: Dict[str, List[dict]] = {
     "BUY": [
-        {"strategy": "momentum",  "emphasis": {"scan": 1.6, "volume": 1.4, "vision": 0.8, "signal_pool": 1.2}},
-        {"strategy": "value",     "emphasis": {"win_rate": 1.8, "filter": 1.5, "scan": 0.7, "signal_pool": 1.0}},
-        {"strategy": "breakout",  "emphasis": {"volume": 2.0, "vision": 1.3, "filter": 0.8, "signal_pool": 1.5}},
+        {"strategy": "momentum",  "emphasis": {"scan": 1.6, "volume": 1.4, "signal_pool": 1.2}},
+        {"strategy": "value",     "emphasis": {"win_rate": 1.8, "scan": 0.7, "signal_pool": 1.0}},
+        {"strategy": "breakout",  "emphasis": {"volume": 2.0, "signal_pool": 1.5}},
     ],
     "SELL": [
-        {"strategy": "momentum",  "emphasis": {"scan": 1.6, "volume": 1.4, "vision": 0.8, "signal_pool": 1.2}},
-        {"strategy": "reversal",  "emphasis": {"vision": 1.8, "win_rate": 1.3, "scan": 0.7, "signal_pool": 1.0}},
-        {"strategy": "weakness",  "emphasis": {"filter": 1.8, "win_rate": 1.5, "volume": 0.8, "signal_pool": 1.5}},
+        {"strategy": "momentum",  "emphasis": {"scan": 1.6, "volume": 1.4, "signal_pool": 1.2}},
+        {"strategy": "reversal",  "emphasis": {"win_rate": 1.8, "scan": 0.7, "signal_pool": 1.0}},
+        {"strategy": "weakness",  "emphasis": {"win_rate": 1.5, "volume": 0.8, "signal_pool": 1.5}},
     ],
     "HOLD": [
         {"strategy": "neutral",   "emphasis": {}},
@@ -1301,9 +1145,6 @@ def _numerical_feedback(node: TreeNode, verifier: "BeyondEuclidVerifier",
     return min(1.0, avg_score * 0.5 + consensus_bonus + 0.1)
 
 
-# 访问统计持久化 — 跨调用累积经验
-_VISIT_STATS_FILE = _STATE_DIR / "gcc_puct_visits.json"
-
 # 失败模式记忆 — arXiv:2603.04735 negative constraint
 _FAILED_PATTERN_FILE = _STATE_DIR / "gcc_puct_failed_patterns.json"
 _FAILED_PATTERN_MAX = 50   # 每个 symbol 最多记录50个失败模式
@@ -1314,11 +1155,7 @@ def _make_signal_fingerprint(context: dict) -> str:
     """生成信号指纹：提取关键信号状态组合作为唯一标识。"""
     scan_dir = context.get("scan", ("NONE", 0.0))[0] if isinstance(context.get("scan"), (list, tuple)) else "NONE"
     sig_label = context.get("signal_direction", {}).get("direction", "NO_ANSWER")
-    filter_buy = "Y" if context.get("filter_buy", {}).get("passed") else "N"
-    filter_sell = "Y" if context.get("filter_sell", {}).get("passed") else "N"
-    n_gate_buy = context.get("n_gate_buy", "INACTIVE")
-    n_gate_sell = context.get("n_gate_sell", "INACTIVE")
-    return f"{scan_dir}|{sig_label}|fb{filter_buy}|fs{filter_sell}|nb{n_gate_buy}|ns{n_gate_sell}"
+    return f"{scan_dir}|{sig_label}"
 
 
 def _load_failed_patterns() -> dict:
@@ -1369,42 +1206,9 @@ def _record_failed_pattern(symbol: str, action: str, fingerprint: str,
         patterns[symbol] = patterns[symbol][-_FAILED_PATTERN_MAX:]
 
 
-def _load_visit_stats() -> Dict[str, Dict[str, dict]]:
-    """加载 PUCT 访问统计 {symbol: {strategy_key: {visits, total_value}}}。"""
-    if not _VISIT_STATS_FILE.exists():
-        return {}
-    try:
-        return json.loads(_VISIT_STATS_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _save_visit_stats(stats: Dict[str, Dict[str, dict]]) -> None:
-    """保存 PUCT 访问统计。"""
-    try:
-        _VISIT_STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _VISIT_STATS_FILE.write_text(
-            json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    except Exception as e:
-        logger.debug("[GCC-TM] save_visit_stats: %s", e)
-
-
-def _apply_visit_history(node: TreeNode, stats: dict) -> None:
-    """将历史访问统计注入节点。"""
-    key = f"{node.action}_{node.strategy}" if node.strategy else node.action
-    hist = stats.get(key, {})
-    node.visit_count = hist.get("visits", 0)
-    node.total_value = hist.get("total_value", 0.0)
-
-
-def _update_visit_stats(stats: dict, node: TreeNode, value: float) -> None:
-    """更新节点的访问统计。"""
-    key = f"{node.action}_{node.strategy}" if node.strategy else node.action
-    if key not in stats:
-        stats[key] = {"visits": 0, "total_value": 0.0}
-    stats[key]["visits"] += 1
-    stats[key]["total_value"] += value
+## _load_visit_stats / _save_visit_stats / _apply_visit_history / _update_visit_stats
+## REMOVED: 累积统计导致历史Q值压倒当前信号 (agg=-0.41 但 q=+0.91)
+## PUCT 现在每次调用从零开始，只靠当前轮三视角反馈
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2068,17 +1872,10 @@ class GCCTradingModule:
             symbol=sym, ts=ts,
             vision=_read_vision(sym),
             scan=_read_scan_signal(sym),
-            filter_buy=_read_filter_chain(sym, "BUY"),
-            filter_sell=_read_filter_chain(sym, "SELL"),
             win_rate_buy=_read_win_rate(sym, "BUY"),
             win_rate_sell=_read_win_rate(sym, "SELL"),
-            vol_ratio=_read_volume(bars),
-            n_gate_buy=_read_n_gate(sym, "BUY"),
-            n_gate_sell=_read_n_gate(sym, "SELL"),
             # L1-S02 新增槽位
             regime=_read_regime(sym),
-            governor=_read_plugin_governor(sym),
-            risk_budget=_read_risk_budget(),
             signal_direction=_read_signal_direction_detail(),
             position=_read_position(sym),
             # Phase B1: Schwab VWAP + Phase B2: Coinbase OBI/CVD
@@ -2095,12 +1892,8 @@ class GCCTradingModule:
         """将 DecisionContext 转为向后兼容的 dict，供评分/剪枝函数使用。"""
         return {
             "vision": ctx.vision, "scan": ctx.scan,
-            "filter_buy": ctx.filter_buy, "filter_sell": ctx.filter_sell,
             "win_rate_buy": ctx.win_rate_buy, "win_rate_sell": ctx.win_rate_sell,
-            "vol_ratio": ctx.vol_ratio,
-            "n_gate_buy": ctx.n_gate_buy, "n_gate_sell": ctx.n_gate_sell,
-            "regime": ctx.regime, "governor": ctx.governor,
-            "risk_budget": ctx.risk_budget,
+            "regime": ctx.regime,
             "signal_direction": ctx.signal_direction,
             "position": ctx.position,
             "signal_pool": ctx.signal_pool,
@@ -2198,13 +1991,7 @@ class GCCTradingModule:
         if not all_l2:
             return _select_best_candidate(surviving_l1)
 
-        # ── Step 4: 加载历史访问统计 ──
-        visit_stats = _load_visit_stats()
-        sym_stats = visit_stats.get(sym, {})
-        for child in all_l2:
-            _apply_visit_history(child, sym_stats)
-
-        # ── Step 5: PUCT 迭代选择 + 数值反馈 ──
+        # ── Step 4: PUCT 迭代选择 + 数值反馈 (每次从零开始) ──
         # 计算 L2 先验概率 P(s,a) — 由 aggregate 归一化
         all_agg = [abs(c.aggregate) for c in all_l2]
         sum_agg = sum(all_agg) or 1.0
@@ -2235,7 +2022,6 @@ class GCCTradingModule:
             # 回传值 (backpropagation)
             selected.visit_count += 1
             selected.total_value += feedback_value
-            _update_visit_stats(sym_stats, selected, feedback_value)
 
             # 剪枝低价值分支 (论文: ~80% pruned)
             if iteration == 1 and len(all_l2) > 3:
@@ -2251,11 +2037,7 @@ class GCCTradingModule:
                         c.prune_reason = f"PUCT:low_q={c.q_value:.3f}"
                         self._last_rejected_nodes.append(c)
 
-        # ── Step 6: 保存访问统计 ──
-        visit_stats[sym] = sym_stats
-        _save_visit_stats(visit_stats)
-
-        # ── Step 7: 选择最终候选 — 最高Q值的存活L2节点 ──
+        # ── Step 5: 选择最终候选 — 最高Q值的存活L2节点 ──
         surviving_l2 = [c for c in all_l2 if not c.pruned]
         if not surviving_l2:
             return _select_best_candidate(surviving_l1)
@@ -2397,14 +2179,13 @@ class GCCTradingModule:
 
 # ══════════════════════════════════════════════════════════════
 # S43  KNNExperience dataclass
-# S44  特征向量 9 维: vision/scan/n_gate/filter_chain/
-#      win_rate/vol_ratio/topology/geometry/algebra
+# S44  特征向量 5 维: vision_conf/scan_conf/win_rate/topology/geometry
 # ══════════════════════════════════════════════════════════════
 @dataclass
 class KNNExperience:
     symbol:    str
     action:    str               # "BUY" | "SELL" | "HOLD"
-    features:  List[float]       # 9 维特征向量 (S44)
+    features:  List[float]       # 5 维特征向量 (S44)
     outcome:   Optional[bool]    # None=待回填, True=盈利, False=亏损
     ts:        str               # ISO 时间戳
     price:     float = 0.0       # 决策时价格
@@ -2423,41 +2204,27 @@ class KNNExperience:
 
     @staticmethod
     def feature_names() -> List[str]:
-        """S44: 9 维特征名称（顺序与 features 对应）。"""
+        """S44: 5 维特征名称（顺序与 features 对应）。"""
         return [
             "vision_conf",      # 0: Vision 置信度 [0,1]
             "scan_conf",        # 1: 扫描信号置信度 [0,1]
-            "n_gate_buy",       # 2: N-Gate BUY 状态 (0=INACTIVE,0.5=OBSERVE,1=BLOCK)
-            "filter_passed",    # 3: 过滤链通过 (0/1)
-            "filter_vol_score", # 4: 量价评分 [0,1]
-            "win_rate",         # 5: 历史胜率 [0,1]
-            "vol_ratio",        # 6: 量比 (clamp 0~3)
-            "topology_score",   # 7: Topology 验证得分 [0,1]
-            "geometry_score",   # 8: Geometry 验证得分 [0,1]
+            "win_rate",         # 2: 历史胜率 [0,1]
+            "topology_score",   # 3: Topology 验证得分 [0,1]
+            "geometry_score",   # 4: Geometry 验证得分 [0,1]
         ]
 
 
 def _build_knn_features(context, ver_results: List[VerifierResult]) -> List[float]:
-    """S44: 从 context + verifier_results 提取 9 维特征向量。"""
+    """S44: 从 context + verifier_results 提取 5 维特征向量。"""
     _g = getattr(context, "__getitem__", None)
     if _g or isinstance(context, dict):
         vision_bias, vision_conf = context.get("vision", ("HOLD", 0.5))
         _, scan_conf             = context.get("scan",   ("NONE", 0.0))
-        n_gate_buy               = context.get("n_gate_buy", "INACTIVE")
-        filter_buy               = context.get("filter_buy", {})
         win_rate                 = context.get("win_rate_buy", 0.5)
-        vol_ratio                = context.get("vol_ratio", 1.0)
     else:
         vision_bias, vision_conf = getattr(context, "vision", ("HOLD", 0.5))
         _, scan_conf             = getattr(context, "scan",   ("NONE", 0.0))
-        n_gate_buy               = getattr(context, "n_gate_buy", "INACTIVE")
-        filter_buy               = getattr(context, "filter_buy", {})
         win_rate                 = getattr(context, "win_rate_buy", 0.5)
-        vol_ratio                = getattr(context, "vol_ratio", 1.0)
-
-    n_gate_val = {"INACTIVE": 0.0, "OBSERVE": 0.5, "BLOCK": 1.0}.get(n_gate_buy, 0.0)
-    filter_passed = 1.0 if filter_buy.get("passed") else 0.0
-    filter_vol    = float(filter_buy.get("volume_score") or 0.5)
 
     # verifier results by perspective
     topo_score = next((r.score for r in ver_results if r.perspective == "topology"), 0.5)
@@ -2466,11 +2233,7 @@ def _build_knn_features(context, ver_results: List[VerifierResult]) -> List[floa
     return [
         round(float(vision_conf), 4),
         round(float(scan_conf), 4),
-        round(n_gate_val, 4),
-        round(filter_passed, 4),
-        round(min(float(filter_vol), 1.0), 4),
         round(float(win_rate), 4),
-        round(min(float(vol_ratio), 3.0), 4),
         round(float(topo_score), 4),
         round(float(geo_score), 4),
     ]
@@ -3424,25 +3187,16 @@ if __name__ == "__main__":
     print(f"=== gcc_trading_module 数据读取层自测 ({sym}) ===")
     print(f"S06 Vision:         {_read_vision(sym)}")
     print(f"S07 ScanSignal:     {_read_scan_signal(sym)}")
-    print(f"S08 N-Gate BUY:     {_read_n_gate(sym, 'BUY')}")
-    print(f"S08 N-Gate SELL:    {_read_n_gate(sym, 'SELL')}")
-    print(f"S09 FilterChain BUY:{_read_filter_chain(sym, 'BUY')}")
     print(f"S10 WinRate BUY:    {_read_win_rate(sym, 'BUY')}")
     bars_mock = [{"volume": 100 + i * 10} for i in range(22)]
-    print(f"S11 VolRatio:       {_read_volume(bars_mock)}")
     print(f"S12 GCC Mode:       {_read_signal_direction()}")
 
     print(f"\n=== S13-S22 树搜索层自测 ===")
     ctx = {
         "vision":          ("BUY", 0.82),
         "scan":            ("BUY", 0.6),
-        "filter_buy":      {"passed": True,  "blocked_by": ""},
-        "filter_sell":     {"passed": False, "blocked_by": "vision"},
         "win_rate_buy":    0.62,
         "win_rate_sell":   0.44,
-        "vol_ratio":       1.8,
-        "n_gate_buy":      "INACTIVE",
-        "n_gate_sell":     "INACTIVE",
     }
 
     # 打分
@@ -3467,17 +3221,6 @@ if __name__ == "__main__":
     # 选最优
     best = _select_best_candidate(nodes)
     print(f"S22 Best candidate: {best.action}  aggregate={best.aggregate:.4f}")
-
-    # P1 测试: crypto BUY + BLOCK
-    print(f"\n--- P1 剪枝测试 (N-Gate BLOCK) ---")
-    ctx2 = dict(ctx, n_gate_buy="BLOCK")
-    b2 = TreeNode("BUY", buy_scores, buy_node.aggregate)
-    s2 = TreeNode("SELL", sell_scores, sell_node.aggregate)
-    h2 = TreeNode("HOLD", hold_scores, 0.0)
-    _apply_pruning([b2, s2, h2], sym, ctx2)
-    best2 = _select_best_candidate([b2, s2, h2])
-    print(f"  BUY pruned={b2.pruned} ({b2.prune_reason})")
-    print(f"  Best: {best2.action}")
 
     print(f"\n=== S23-S34 三视角验证层自测 ===")
     verifier = BeyondEuclidVerifier()
