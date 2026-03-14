@@ -320,8 +320,37 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
     prev = _load_prev_summary(symbol)
     prev_dir = prev.get("direction", "HOLD")
 
-    # GCC-0261 S4: Wyckoff Phase门控 (A通道: Vision LLM判断)
-    wyckoff_bias, wyckoff_phase = _read_wyckoff_phase(symbol)
+    # GCC-0261 S4: Wyckoff Phase门控 — 双通道(A=Vision LLM + B=数学模块)
+    a_bias, a_phase = _read_wyckoff_phase(symbol)  # A通道: pattern_latest.json
+    # B通道: 数学驱动Phase检测
+    b_result = {"phase": "X", "structure": "UNKNOWN", "confidence": 0.0}
+    if bars and len(bars) >= 30:
+        try:
+            from wyckoff_phase import detect_phase as _wp_detect, reconcile_ab as _wp_reconcile
+            b_result = _wp_detect(bars)
+            # 双通道调和
+            a_struct = "UNKNOWN"
+            _pfile = _STATE_DIR / "vision" / "pattern_latest.json"
+            if _pfile.exists():
+                try:
+                    _pdata = json.loads(_pfile.read_text(encoding="utf-8"))
+                    a_struct = str(_pdata.get(symbol, {}).get("overall_structure", "UNKNOWN")).upper()
+                except Exception:
+                    pass
+            wyckoff_bias, wyckoff_phase, _wp_src = _wp_reconcile(a_phase, a_struct, b_result)
+            logger.info("[GCC-TM] %s Wyckoff双通道: A=Ph%s/%s B=Ph%s/%s(%.0f%%) → %s(Ph%s)[src=%s]",
+                        symbol, a_phase, a_bias,
+                        b_result.get("phase", "X"), b_result.get("structure", "?"),
+                        b_result.get("confidence", 0) * 100,
+                        wyckoff_bias, wyckoff_phase, _wp_src)
+        except ImportError:
+            wyckoff_bias, wyckoff_phase = a_bias, a_phase
+            logger.debug("[GCC-TM] %s wyckoff_phase module not found, A-only", symbol)
+        except Exception as _wp_e:
+            wyckoff_bias, wyckoff_phase = a_bias, a_phase
+            logger.warning("[GCC-TM] %s Wyckoff B通道异常: %s, fallback A-only", symbol, _wp_e)
+    else:
+        wyckoff_bias, wyckoff_phase = a_bias, a_phase
 
     # KEY-010: 三方投票 — Vision(趋势) + prev_summary(上K汇总) + Wyckoff(阶段)
     # BV已拆出到信号池, 门控: 趋势+惯性+阶段
