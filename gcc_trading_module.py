@@ -2018,6 +2018,23 @@ class GCCTradingModule:
             except Exception as _knn_w_e:
                 logger.warning("[GCC-TRADE] KNN experience write: %s", _knn_w_e)
 
+        # GCC-0265 S4: 知识卡激活回写 — 记录哪些卡参与了决策，闭环因果记忆
+        if final_action in ("BUY", "SELL"):
+            try:
+                _used_cards = ctx.extended.get("cards", [])
+                if _used_cards and _KB_BRIDGE is not None:
+                    for _uc in _used_cards:
+                        _KB_BRIDGE.record_activation(
+                            card_id=_uc.get("card_id", ""),
+                            rule_index=0,
+                            symbol=self.symbol,
+                            action=final_action,
+                            price=current_price,
+                            context={"source": "gcc_tm", "direction": _uc.get("direction", "NEUTRAL")},
+                        )
+            except Exception as _card_act_e:
+                logger.debug("[GCC-TRADE] card activation write: %s", _card_act_e)
+
         # S41: pending_order 由 gcc_observe() 轮次逻辑统一控制
         # (v0.2: 避免process()和gcc_observe()双写)
 
@@ -3081,6 +3098,30 @@ def gcc_observe(
             # 初始化新K线 (Vision定方向 + 对比上一K线汇总)
             state = _init_candle_state(symbol, bars=bars)
             _save_candle_state(state)
+
+        # ── 交易验证: 检查上一轮traded标记是否真的执行成功 ──
+        if state.traded:
+            _po_file = _STATE_DIR / f"gcc_pending_order_{symbol}.json"
+            if _po_file.exists():
+                try:
+                    _po = json.loads(_po_file.read_text(encoding="utf-8"))
+                    if _po.get("expired"):
+                        # pending被清理/超时/重试失败 → 实际未执行，回滚traded
+                        logger.warning(
+                            "[GCC-TM][VERIFY] %s traded=True但pending expired(%s) → 回滚traded=False",
+                            symbol, _po.get("expire_reason", "unknown"),
+                        )
+                        state.traded = False
+                        state.trade_round = -1
+                        _save_candle_state(state)
+                    elif not _po.get("consumed"):
+                        # pending还没被消费 → 可能消费线程还没跑到，不回滚但记录
+                        logger.info(
+                            "[GCC-TM][VERIFY] %s traded=True但pending未consumed(等待执行)",
+                            symbol,
+                        )
+                except Exception as _vf_e:
+                    logger.debug("[GCC-TM][VERIFY] %s check: %s", symbol, _vf_e)
 
         # 回填模拟交易
         _backfill_sim_trades(symbol, bars)
