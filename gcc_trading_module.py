@@ -99,6 +99,8 @@ class CandleState:
     effective_direction: str      # 实际执行方向 (矛盾时=HOLD)
     bv_direction: str = "HOLD"    # v0.3: BrooksVision形态方向 (BUY/SELL/HOLD)
     bv_pattern: str = "NONE"      # v0.3: BrooksVision识别的形态名
+    wyckoff_phase: str = "X"      # v0.4: Wyckoff Phase A-E/X (GCC-0261)
+    wyckoff_bias: str = "HOLD"    # v0.4: Wyckoff门控投票方向
     current_round: int = 0        # 当前已完成轮次 (0-8)
     traded: bool = False          # 是否已交易
     trade_round: int = -1         # 交易发生在第几轮 (-1=未交易)
@@ -120,6 +122,8 @@ class CandleState:
             "vision_confidence": self.vision_confidence,
             "bv_direction": self.bv_direction,
             "bv_pattern": self.bv_pattern,
+            "wyckoff_phase": self.wyckoff_phase,
+            "wyckoff_bias": self.wyckoff_bias,
             "prev_summary": self.prev_summary,
             "effective_direction": self.effective_direction,
             "current_round": self.current_round,
@@ -155,6 +159,8 @@ def _load_candle_state(symbol: str) -> Optional[CandleState]:
             effective_direction=d["effective_direction"],
             bv_direction=d.get("bv_direction", "HOLD"),     # v0.3: 重启恢复BV方向
             bv_pattern=d.get("bv_pattern", "NONE"),          # v0.3: 重启恢复BV形态
+            wyckoff_phase=d.get("wyckoff_phase", "X"),       # v0.4: Wyckoff Phase
+            wyckoff_bias=d.get("wyckoff_bias", "HOLD"),      # v0.4: Wyckoff投票
             current_round=d.get("current_round", 0),
             traded=d.get("traded", False),
             trade_round=d.get("trade_round", -1),
@@ -314,11 +320,14 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
     prev = _load_prev_summary(symbol)
     prev_dir = prev.get("direction", "HOLD")
 
-    # KEY-010: 两方投票 — Vision(趋势) + prev_summary(上K汇总)
-    # BV已拆出到信号池, 门控只保留趋势判断和惯性
-    # 两票同方向→执行, 1:1对冲→HOLD, 唯一有方向→跟随
+    # GCC-0261 S4: Wyckoff Phase门控 (A通道: Vision LLM判断)
+    wyckoff_bias, wyckoff_phase = _read_wyckoff_phase(symbol)
+
+    # KEY-010: 三方投票 — Vision(趋势) + prev_summary(上K汇总) + Wyckoff(阶段)
+    # BV已拆出到信号池, 门控: 趋势+惯性+阶段
+    # 多数票(≥2)→执行, 无多数但有方向→跟随多数, 全弃权→HOLD
     votes = {"BUY": 0, "SELL": 0}
-    for _v in [vision_bias, prev_dir]:
+    for _v in [vision_bias, prev_dir, wyckoff_bias]:
         if _v in votes:
             votes[_v] += 1
 
@@ -327,14 +336,14 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
     elif votes["SELL"] >= 2:
         effective = "SELL"
     elif votes["BUY"] == 1 and votes["SELL"] == 0:
-        effective = "BUY"    # 唯一有方向的
+        effective = "BUY"    # 唯一有方向的(其余弃权)
     elif votes["SELL"] == 1 and votes["BUY"] == 0:
-        effective = "SELL"   # 唯一有方向的
+        effective = "SELL"   # 唯一有方向的(其余弃权)
     else:
-        effective = "HOLD"   # 1:1对冲或全弃权
+        effective = "HOLD"   # 对冲或全弃权
 
-    logger.info("[GCC-TM] %s 两方投票: vision=%s prev=%s → effective=%s (BV→池: %s[%s])",
-                symbol, vision_bias, prev_dir, effective, bv_bias, bv_pattern)
+    logger.info("[GCC-TM] %s 三方投票: vision=%s prev=%s wyckoff=%s(Ph%s) → effective=%s (BV→池: %s[%s])",
+                symbol, vision_bias, prev_dir, wyckoff_bias, wyckoff_phase, effective, bv_bias, bv_pattern)
 
     state = CandleState(
         symbol=symbol,
@@ -345,6 +354,8 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
         effective_direction=effective,
         bv_direction=bv_bias,
         bv_pattern=bv_pattern,
+        wyckoff_phase=wyckoff_phase,
+        wyckoff_bias=wyckoff_bias,
     )
 
     # 如果程序重启, 当前已经不在round 0, 标记起点
@@ -356,8 +367,8 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
                     symbol, actual_round)
 
     logger.info(
-        "[GCC-TM] %s new candle: vision=%s(%.0f%%) prev=%s effective=%s round=%d",
-        symbol, vision_bias, vision_conf * 100, prev_dir, effective, state.current_round,
+        "[GCC-TM] %s new candle: vision=%s(%.0f%%) prev=%s wyckoff=%s(Ph%s) effective=%s round=%d",
+        symbol, vision_bias, vision_conf * 100, prev_dir, wyckoff_bias, wyckoff_phase, effective, state.current_round,
     )
     return state
 
@@ -467,6 +478,48 @@ def _read_vision(symbol: str) -> Tuple[str, float]:
     except Exception as e:
         logger.debug("[GCC-TRADE] _read_vision %s: %s", symbol, e)
         return "HOLD", 0.5
+
+
+# ══════════════════════════════════════════════════════════════
+# S06b  _read_wyckoff_phase(symbol) → (gate_bias, phase)
+# 读 state/vision/pattern_latest.json 的 wyckoff_phase 字段
+# GCC-0261 S4: Wyckoff Phase门控 — A/B=HOLD, C/D/E=方向跟随
+# ══════════════════════════════════════════════════════════════
+def _read_wyckoff_phase(symbol: str) -> Tuple[str, str]:
+    """从 pattern_latest.json 读取 Wyckoff Phase (A通道: Vision LLM判断)。
+    返回 (gate_bias, phase):
+      gate_bias: "BUY"|"SELL"|"HOLD" — 用于门控投票
+      phase: "A"|"B"|"C"|"D"|"E"|"X" — 原始Phase
+    规则:
+      Phase A/B/X → HOLD (等待，不入场)
+      Phase C → 跟随 overall_structure 方向 (ACCUMULATION→BUY, DISTRIBUTION→SELL)
+      Phase D/E → 跟随 overall_structure 方向
+    """
+    pfile = _STATE_DIR / "vision" / "pattern_latest.json"
+    if not pfile.exists():
+        return "HOLD", "X"
+    try:
+        all_data = json.loads(pfile.read_text(encoding="utf-8"))
+        entry = all_data.get(symbol, {})
+        if not entry:
+            return "HOLD", "X"
+        phase = str(entry.get("wyckoff_phase", "X")).upper()
+        structure = str(entry.get("overall_structure", "UNKNOWN")).upper()
+        if phase not in ("A", "B", "C", "D", "E", "X"):
+            phase = "X"
+        # A/B/X → 等待
+        if phase in ("A", "B", "X"):
+            return "HOLD", phase
+        # C/D/E → 跟随structure方向
+        if structure in ("ACCUMULATION", "MARKUP"):
+            return "BUY", phase
+        elif structure in ("DISTRIBUTION", "MARKDOWN"):
+            return "SELL", phase
+        else:
+            return "HOLD", phase
+    except Exception as e:
+        logger.debug("[GCC-TRADE] _read_wyckoff_phase %s: %s", symbol, e)
+        return "HOLD", "X"
 
 
 # ══════════════════════════════════════════════════════════════

@@ -284,7 +284,7 @@ VISION_PROMPT = PROMPT_CURRENT
 # ============================================================================
 
 def build_prompt_pattern_gpt(label: str = "4-hour") -> str:
-    """v3.3: GPT-5.2形态识别提示词 — 新增L1整体结构分析"""
+    """v3.4: GPT-5.2形态识别提示词 — 新增Wyckoff Phase判断(GCC-0261 S4)"""
     return f"""This {label} chart shows candle bodies with 50 bars:
 - GREEN rectangles = bullish candle bodies (close > open)
 - RED rectangles = bearish candle bodies (close < open)
@@ -297,6 +297,21 @@ FIRST, assess the overall market structure based on ALL 50 bars:
 - "DISTRIBUTION": High in range, volatility increasing, potential reversal (price near top, divergence)
 - "MARKDOWN": Clear downtrend (LH/LL pattern dominant, price below EMA20)
 - "UNKNOWN": Cannot clearly identify structure
+
+SECOND, determine the Wyckoff Phase (A through E) based on price action and volume:
+- "A": Stopping the prior trend — selling/buying climax with extreme volume, first automatic reaction
+- "B": Building the cause — wide sideways range, repeated tests of support/resistance, longest phase
+- "C": Test/Spring — false breakdown below support (or false breakout above resistance) on LOW volume, then quick reversal. This is the KEY entry signal
+- "D": Trend confirmation — price breaks out of the range with increasing volume, higher lows (or lower highs for distribution)
+- "E": Trend execution — sustained trend move, shallow pullbacks, momentum carrying price away from range
+- "X": Cannot determine phase (use when structure is UNKNOWN)
+
+Phase rules:
+- If structure is ACCUMULATION → phases describe bottoming process (Spring = bullish entry)
+- If structure is DISTRIBUTION → phases describe topping process (Upthrust = bearish entry)
+- If structure is MARKUP → typically Phase D or E
+- If structure is MARKDOWN → typically Phase D or E (of distribution)
+- Phase C is the MOST IMPORTANT to identify correctly — look for: price briefly pierces support/resistance, volume is LOW during the pierce, then strong reversal candles
 
 THEN, assess current price POSITION within the full 50-bar range:
 - "HIGH": Price is in upper 30% of the bar range
@@ -329,7 +344,7 @@ EMA20 reference:
 - Price breaks below EMA20 with pattern = stronger SELL signal
 
 Respond ONLY JSON:
-{{"overall_structure": "ACCUMULATION|MARKUP|DISTRIBUTION|MARKDOWN|UNKNOWN", "position": "HIGH|MID|LOW", "pattern": "DOUBLE_BOTTOM|DOUBLE_TOP|HEAD_SHOULDERS_BOTTOM|HEAD_SHOULDERS_TOP|REVERSAL_123_BUY|REVERSAL_123_SELL|FALSE_BREAK_BUY|FALSE_BREAK_SELL|ASC_TRIANGLE|DESC_TRIANGLE|WEDGE_RISING|WEDGE_FALLING|NONE", "confidence": 0.8, "stage": "FORMING|BREAKOUT|NONE", "volume_confirmed": true, "reason": "brief explanation"}}
+{{"overall_structure": "ACCUMULATION|MARKUP|DISTRIBUTION|MARKDOWN|UNKNOWN", "wyckoff_phase": "A|B|C|D|E|X", "position": "HIGH|MID|LOW", "pattern": "DOUBLE_BOTTOM|DOUBLE_TOP|HEAD_SHOULDERS_BOTTOM|HEAD_SHOULDERS_TOP|REVERSAL_123_BUY|REVERSAL_123_SELL|FALSE_BREAK_BUY|FALSE_BREAK_SELL|ASC_TRIANGLE|DESC_TRIANGLE|WEDGE_RISING|WEDGE_FALLING|NONE", "confidence": 0.8, "stage": "FORMING|BREAKOUT|NONE", "volume_confirmed": true, "reason": "brief explanation"}}
 
 If no clear pattern, return pattern=NONE. Only report patterns with confidence >= 0.7.
 """
@@ -1221,12 +1236,16 @@ def _validate_pattern_result(raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     STRUCTURE_ALLOWED = {"ACCUMULATION", "MARKUP", "DISTRIBUTION", "MARKDOWN", "UNKNOWN"}
     POSITION_ALLOWED  = {"HIGH", "MID", "LOW"}
+    WYCKOFF_PHASE_ALLOWED = {"A", "B", "C", "D", "E", "X"}
     overall_structure = str(raw.get("overall_structure", "UNKNOWN")).upper()
     position          = str(raw.get("position", "MID")).upper()
+    wyckoff_phase     = str(raw.get("wyckoff_phase", "X")).upper()
     if overall_structure not in STRUCTURE_ALLOWED:
         overall_structure = "UNKNOWN"
     if position not in POSITION_ALLOWED:
         position = "MID"
+    if wyckoff_phase not in WYCKOFF_PHASE_ALLOWED:
+        wyckoff_phase = "X"
 
     return {
         "pattern": pattern,
@@ -1235,6 +1254,7 @@ def _validate_pattern_result(raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "volume_confirmed": bool(raw.get("volume_confirmed", False)),
         "reason": str(raw.get("reason", "")),
         "overall_structure": overall_structure,
+        "wyckoff_phase": wyckoff_phase,
         "position": position,
     }
 
@@ -1302,6 +1322,7 @@ def _parse_radar_to_pattern(radar_dict: dict) -> Optional[Dict[str, Any]]:
         "volume_confirmed": False,  # RADAR_PROMPT不输出此字段
         "reason": reason,
         "overall_structure": overall_structure,
+        "wyckoff_phase": "X",       # RADAR_PROMPT不输出Phase, 由B通道数学模块补充
         "position": position,
         "stoploss": stoploss,
         "brooks_pattern": brooks_pattern,
@@ -2372,6 +2393,7 @@ def analyze_patterns(symbol: str, cfg: dict) -> Optional[Dict]:
     volume_confirmed = normalized["volume_confirmed"]
     reason = normalized["reason"]
     overall_structure = normalized.get("overall_structure", "UNKNOWN")
+    wyckoff_phase = normalized.get("wyckoff_phase", "X")
     position = normalized.get("position", "MID")
 
     # GCC-0194: 新增字段
@@ -2380,7 +2402,7 @@ def analyze_patterns(symbol: str, cfg: dict) -> Optional[Dict]:
     stoploss = normalized.get("stoploss", 0.0)
 
     # 记录日志
-    log_msg = f"[Pattern] {symbol}: {pattern} dir={direction} conf={confidence:.2f} stage={stage} brooks={brooks_pattern} struct={overall_structure}/{position}"
+    log_msg = f"[Pattern] {symbol}: {pattern} dir={direction} conf={confidence:.2f} stage={stage} brooks={brooks_pattern} struct={overall_structure}/{position} wyckoff={wyckoff_phase}"
     print(f"[Vision v3.5] {log_msg}")
 
     # 写入vision_analysis.log
@@ -2399,6 +2421,7 @@ def analyze_patterns(symbol: str, cfg: dict) -> Optional[Dict]:
         "volume_confirmed": volume_confirmed,
         "reason": reason,
         "overall_structure": overall_structure,
+        "wyckoff_phase": wyckoff_phase,      # GCC-0261: Wyckoff Phase A-E/X
         "position": position,
         "direction": direction,              # GCC-0194: UP/DOWN/SIDE
         "stoploss": stoploss,                # GCC-0194: 止损价
