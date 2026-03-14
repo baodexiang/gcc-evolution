@@ -251,6 +251,9 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
 
     plugin_exec = {"sent": 0, "skip": 0, "block": 0, "buy": 0, "sell": 0}
 
+    # v3.650参考模式检测: 有L1参考日志说明不下单是设计如此
+    l1_reference_mode_count = 0
+
     governance_actions = defaultdict(int)
 
     # 扫描引擎外挂运行: {plugin: {scan: N, trigger: N, dispatch: N, executed: N, blocked: N}}
@@ -395,6 +398,10 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
                     plugin_exec["skip"] += 1
                 elif result in ("门控拦截", "失败"):
                     plugin_exec["block"] += 1
+
+            # ── v3.650参考模式检测 ──
+            if "[v3.650] L1参考" in line:
+                l1_reference_mode_count += 1
 
             # ── KEY-004治理 ──
             m = RE_GOVERNANCE.search(line)
@@ -751,13 +758,17 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
             issues.append({"task": "PLUGIN", "type": "RISK", "category": "signal",
                            "msg": f"KNN抑制率过高({knn_suppress_total}/{vf_total}={suppress_rate:.0%}), 外挂信号可能被过度过滤"})
 
-    # MACD风险: 触发多但执行少 → signal
-    if macd_stats["trigger"] > 5 and macd_stats["execute"] == 0:
-        issues.append({"task": "L2_MACD", "type": "RISK", "category": "signal",
-                       "msg": f"MACD触发{macd_stats['trigger']}次但0执行, 门控可能过严"})
-    if macd_stats["gate_block"] > macd_stats["execute"] and macd_stats["gate_block"] > 3:
-        issues.append({"task": "L2_MACD", "type": "RISK", "category": "signal",
-                       "msg": f"MACD被门控拦截{macd_stats['gate_block']}次>执行{macd_stats['execute']}次"})
+    # v3.650参考模式: L1不下单时"0执行"是设计如此，跳过这类RISK
+    _is_reference_mode = l1_reference_mode_count > 0
+
+    # MACD风险: 触发多但执行少 → signal (参考模式下跳过)
+    if not _is_reference_mode:
+        if macd_stats["trigger"] > 5 and macd_stats["execute"] == 0:
+            issues.append({"task": "L2_MACD", "type": "RISK", "category": "signal",
+                           "msg": f"MACD触发{macd_stats['trigger']}次但0执行, 门控可能过严"})
+        if macd_stats["gate_block"] > macd_stats["execute"] and macd_stats["gate_block"] > 3:
+            issues.append({"task": "L2_MACD", "type": "RISK", "category": "signal",
+                           "msg": f"MACD被门控拦截{macd_stats['gate_block']}次>执行{macd_stats['execute']}次"})
 
     # BV风险: 准确率过低 → signal
     bv_decisive = bv_stats["eval"]["CORRECT"] + bv_stats["eval"]["INCORRECT"]
@@ -832,14 +843,17 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
                            "msg": f"RH震荡过滤率{_rh_tangled_rate:.0%}, ER低于阈值{rh_stats['er_below']}/{rh_stats['scans']}次"})
 
     # 外挂风险: 某外挂触发率极低 → market(0触发=市场无趋势) / execution(发送0执行)
+    # 参考模式下跳过”0执行”类告警(不下单是设计如此)
     for pname, pdata in scan_plugins.items():
-        # 仅当“扫描高 + 完全无触发/无派发/无执行”才告警，避免误报(已有dispatch/executed仍被判0触发)
-        if pdata["scan"] > 50 and pdata["trigger"] == 0 and pdata["dispatch"] == 0 and pdata["executed"] == 0:
-            issues.append({"task": f"PLUGIN-{pname}", "type": "RISK", "category": "market",
-                           "msg": f"{pname} 扫描{pdata['scan']}次但0触发, 可能阈值过高"})
-        if pdata["dispatch"] > 5 and pdata["executed"] == 0:
-            issues.append({"task": f"PLUGIN-{pname}", "type": "RISK", "category": "execution",
-                           "msg": f"{pname} 发送{pdata['dispatch']}次但0执行, 全被门控拦截"})
+        # 仅当”扫描高 + 完全无触发/无派发/无执行”才告警，避免误报(已有dispatch/executed仍被判0触发)
+        if pdata[“scan”] > 50 and pdata[“trigger”] == 0 and pdata[“dispatch”] == 0 and pdata[“executed”] == 0:
+            if not _is_reference_mode:
+                issues.append({“task”: f”PLUGIN-{pname}”, “type”: “RISK”, “category”: “market”,
+                               “msg”: f”{pname} 扫描{pdata['scan']}次但0触发, 可能阈值过高”})
+        if pdata[“dispatch”] > 5 and pdata[“executed”] == 0:
+            if not _is_reference_mode:
+                issues.append({“task”: f”PLUGIN-{pname}”, “type”: “RISK”, “category”: “execution”,
+                               “msg”: f”{pname} 发送{pdata['dispatch']}次但0执行, 全被门控拦截”})
 
     # ── 日志覆盖率检查: 只在每天8am slot执行(check_coverage=True) ──
     if check_coverage:
@@ -2941,6 +2955,7 @@ def _build_result(now_str, hours, tasks, summary_metrics,
     return {
         "generated_at": now_str,
         "hours": hours,
+        "l1_reference_mode": _is_reference_mode,
         "total_events": sum(t["count"] for t in tasks.values()),
         "total_errors": sum(t["errors"] for t in tasks.values()),
         "tasks": tasks,
@@ -3095,6 +3110,11 @@ def format_text(data: dict) -> str:
     downgraded = [s for s, d in pp.items() if d.get("phase") == "DOWNGRADED"]
     if downgraded:
         lines.append(f"  ⚠ 降级中: {', '.join(downgraded)}")
+
+    # 参考模式提示
+    if data.get("l1_reference_mode"):
+        lines.extend(["", "── L1参考模式 ──",
+                       "  ℹ L1参考模式活跃, 0执行类告警已静默(不下单是设计如此)"])
 
     # 问题
     if data["issues"]:
