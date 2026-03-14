@@ -643,12 +643,146 @@ def fetch_crypto_profile_live(symbol: str) -> Dict[str, Any]:
     }
 
 
+def fetch_schwab_profile(ticker: str) -> Dict[str, Any]:
+    """从 Schwab instruments API 获取基本面数据 (FUNDAMENTAL projection)。
+    数据比 Yahoo 更全: PE/PB/PCF + ROE/ROA/margins + currentRatio/debtToEquity。
+    """
+    from schwab_data_provider import get_provider
+    provider = get_provider()
+    client = provider._get_client()
+    resp = client.get_instruments(ticker, client.Instrument.Projection.FUNDAMENTAL)
+    assert resp.status_code == 200, f"Schwab HTTP {resp.status_code}"
+    data = resp.json()
+    # get_instruments returns {"instruments": [{fundamental: {...}, ...}]}
+    inst = None
+    instruments = data.get("instruments", [])
+    if isinstance(instruments, list) and instruments:
+        inst = instruments[0]
+    if not inst:
+        # fallback: try direct key lookup
+        inst = data.get(ticker) or data.get(ticker.upper())
+    if not inst or "fundamental" not in inst:
+        raise ValueError(f"Schwab no fundamental data for {ticker}")
+    f = inst["fundamental"]
+
+    pe = _safe_float(f.get("peRatio"))
+    pb = _safe_float(f.get("pbRatio"))
+    pcf = _safe_float(f.get("pcfRatio"))
+    market_cap = _safe_float(f.get("marketCap"))
+
+    # EV/EBITDA: Schwab 无直接字段，用 pcfRatio 作 FCF yield 替代
+    # FCF yield ≈ 1/pcfRatio (Price/CashFlow 的倒数)
+    fcf_yield = (1.0 / pcf) if pcf and pcf > 0 else None
+
+    # Profitability
+    roe = _safe_float(f.get("returnOnEquity"))
+    roa = _safe_float(f.get("returnOnAssets"))
+    gross_margin = _safe_float(f.get("grossMarginTTM"))
+    net_margin = _safe_float(f.get("netProfitMarginTTM"))
+    op_margin = _safe_float(f.get("operatingMarginTTM"))
+
+    # Balance sheet
+    current_ratio = _safe_float(f.get("currentRatio"))
+    quick_ratio = _safe_float(f.get("quickRatio"))
+    debt_to_equity = _safe_float(f.get("totalDebtToEquity"))
+    lt_debt_to_equity = _safe_float(f.get("ltDebtToEquity"))
+
+    # Altman Z 近似: 用可用字段估算
+    # Z = 1.2*WC/TA + 1.4*RE/TA + 3.3*EBIT/TA + 0.6*MC/TL + 1.0*Sales/TA
+    # Schwab 没有完整资产负债表，用 currentRatio 和 debtToEquity 近似
+    altman_z = 2.2  # default
+    if current_ratio is not None and debt_to_equity is not None:
+        # 简化近似: current_ratio>2 + low debt → 健康
+        wc_proxy = max(0, (current_ratio - 1.0) * 0.5)  # WC/TA proxy
+        mc_tl_proxy = (100.0 / max(debt_to_equity, 1.0)) * 0.6 if debt_to_equity else 3.0
+        margin_proxy = (op_margin / 100.0 * 3.3) if op_margin else 0.0
+        altman_z = round(1.2 * wc_proxy + margin_proxy + mc_tl_proxy + 1.0, 2)
+        altman_z = max(0.5, min(altman_z, 8.0))
+
+    # Momentum: 用 Schwab K线获取日线价格
+    closes = []
+    try:
+        df = provider.get_kline(ticker, interval="1d", bars=150)
+        if df is not None and len(df) >= 30:
+            closes = df["close"].tolist()
+    except Exception:
+        pass
+    returns = _compute_returns(closes)
+
+    valuation_scores = {
+        "pe": _linear_low_better(pe, good=15.0, bad=45.0),
+        "pb": _linear_low_better(pb, good=2.0, bad=10.0),
+        "ev_ebitda": 0.0,  # Schwab 无 EV/EBITDA
+        "fcf_yield": _linear_high_better(fcf_yield, good=0.08, bad=0.0),
+    }
+    momentum_scores = {
+        "ret_1m": _linear_high_better(returns["ret_1m"], good=0.12, bad=-0.12),
+        "ret_3m": _linear_high_better(returns["ret_3m"], good=0.25, bad=-0.25),
+        "ret_6m": _linear_high_better(returns["ret_6m"], good=0.40, bad=-0.40),
+    }
+    profitability_scores = {
+        "roe": _linear_high_better(roe, good=15.0, bad=0.0) if roe else 0.0,
+        "roa": _linear_high_better(roa, good=8.0, bad=0.0) if roa else 0.0,
+        "gross_margin": _linear_high_better(gross_margin, good=40.0, bad=10.0) if gross_margin else 0.0,
+    }
+    balance_scores = {
+        "current_ratio": _linear_high_better(current_ratio, good=2.0, bad=0.8) if current_ratio else 0.0,
+        "quick_ratio": _linear_high_better(quick_ratio, good=1.5, bad=0.5) if quick_ratio else 0.0,
+        "debt_to_equity": _linear_low_better(debt_to_equity, good=30.0, bad=150.0) if debt_to_equity else 0.0,
+    }
+    cashflow_scores = {
+        "fcf_yield": _linear_high_better(fcf_yield, good=0.08, bad=0.0) if fcf_yield else 0.0,
+        "op_margin": _linear_high_better(op_margin, good=20.0, bad=0.0) if op_margin else 0.0,
+    }
+
+    missing_count = sum(1 for x in [pe, pb, fcf_yield, returns["ret_1m"],
+                                     returns["ret_3m"], returns["ret_6m"], roe] if x is None)
+    quality_key_missing = missing_count >= 4
+    confidence = 0.85 if missing_count <= 2 else (0.70 if missing_count <= 4 else 0.55)
+
+    return {
+        "source": "live.schwab",
+        "valuation_scores": valuation_scores,
+        "valuation_weights": {"pe": 0.35, "pb": 0.25, "ev_ebitda": 0.0, "fcf_yield": 0.40},
+        "momentum_scores": momentum_scores,
+        "momentum_weights": {"ret_1m": 0.30, "ret_3m": 0.35, "ret_6m": 0.35},
+        "profitability_scores": profitability_scores,
+        "profitability_weights": {"roe": 0.40, "roa": 0.30, "gross_margin": 0.30},
+        "balance_scores": balance_scores,
+        "balance_weights": {"current_ratio": 0.35, "quick_ratio": 0.30, "debt_to_equity": 0.35},
+        "cashflow_scores": cashflow_scores,
+        "cashflow_weights": {"fcf_yield": 0.50, "op_margin": 0.50},
+        "audit_opinion": "standard",
+        "altman_z": altman_z,
+        "quality_key_missing": quality_key_missing,
+        "confidence_score": confidence,
+        "missing_raw_fields": [k for k, v in {"pe": pe, "pb": pb, "fcf_yield": fcf_yield,
+                                               "roe": roe, "roa": roa}.items() if v is None],
+        "raw_metrics": {
+            "pe": pe, "pb": pb, "pcf_ratio": pcf, "fcf_yield": fcf_yield,
+            "roe": roe, "roa": roa, "gross_margin": gross_margin,
+            "net_margin": net_margin, "op_margin": op_margin,
+            "current_ratio": current_ratio, "quick_ratio": quick_ratio,
+            "debt_to_equity": debt_to_equity, "market_cap": market_cap,
+            "altman_z": altman_z, "beta": _safe_float(f.get("beta")),
+            "eps": _safe_float(f.get("epsTTM")),
+            "ret_1m": returns["ret_1m"], "ret_3m": returns["ret_3m"], "ret_6m": returns["ret_6m"],
+        },
+    }
+
+
 def fetch_live_profile(ticker: str) -> Dict[str, Any]:
+    """优先链: Schwab(美股) → OpenBB → Yahoo。加密走 Binance。"""
     symbol = ticker.strip().upper()
+    if symbol.endswith("USDC") or symbol.endswith("USDT"):
+        return fetch_crypto_profile_live(symbol)
+    # 美股: Schwab优先
+    try:
+        return fetch_schwab_profile(symbol)
+    except Exception:
+        pass
     try:
         return fetch_openbb_profile(symbol)
     except Exception:
         pass
-    if symbol.endswith("USDC"):
-        return fetch_crypto_profile_live(symbol)
     return fetch_us_equity_profile_live(symbol)
