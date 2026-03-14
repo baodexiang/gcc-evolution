@@ -11,7 +11,7 @@ TEMPLATE = SCRIPT_DIR / ".GCC" / "gcc_dashboard.html"
 
 # ── Dashboard 格式锁 (2026-03-07 确认为最佳格式) ──────────────────────────
 # 修改模板前必须经用户明确同意，确认后更新此 hash
-TEMPLATE_HASH_LOCK = "b7bf09835cf56c7e481bce1bcb058efd2f66749e01ed1ad9418c552d20130635"
+TEMPLATE_HASH_LOCK = "0a46fdf7f786c9fbaf204f12624a0be042d7ac35d6003b7e279569b1b3bf5425"
 
 if not TEMPLATE.exists():
     print(f"错误：找不到 {TEMPLATE}")
@@ -108,12 +108,16 @@ if card_dir.exists():
             seen_ids.add(cid)
             # Extract category from parent directory name
             cat = jf.parent.name if jf.parent != card_dir else ""
+            _conf = d.get("confidence", 0)
+            try: _conf = float(_conf)
+            except: _conf = 0
             all_cards.append({
                 "id": cid,
                 "key_id": cat,
                 "title": f"{cat} — {d.get('title', jf.stem)}" if cat else d.get("title", jf.stem),
                 "card_type": "knowledge",
                 "layer_priority": 2,
+                "confidence": _conf,
             })
         except Exception:
             pass
