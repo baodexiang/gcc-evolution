@@ -139,7 +139,8 @@ def api_request(method: str, path: str, body: dict = None) -> dict:
     v6更新: 添加 timeout 和重试机制，防止卡死
     v7更新: 支持 POST body (用于下单等写操作)
     """
-    uri = f"{method} api.coinbase.com{path}"
+    # v8: JWT URI不含query string — Coinbase CDP规范要求
+    uri = f"{method} api.coinbase.com{path.split('?')[0]}"
 
     for attempt in range(API_MAX_RETRIES):
         try:
