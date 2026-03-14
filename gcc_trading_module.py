@@ -1208,9 +1208,8 @@ def _save_failed_patterns(patterns: dict) -> None:
     """保存失败模式缓存。"""
     try:
         _FAILED_PATTERN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _FAILED_PATTERN_FILE.write_text(
-            json.dumps(patterns, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        _atomic_write(_FAILED_PATTERN_FILE,
+                      json.dumps(patterns, ensure_ascii=False, indent=2))
     except Exception as e:
         logger.debug("[GCC-TM] save_failed_patterns: %s", e)
 
@@ -2176,9 +2175,8 @@ class GCCTradingModule:
             sym_acc["last_gcc"] = gcc_action
             sym_acc["last_main"] = main_action
 
-            self._accuracy_file.write_text(
-                json.dumps(acc, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            _atomic_write(self._accuracy_file,
+                          json.dumps(acc, ensure_ascii=False, indent=2))
         except Exception as e:
             logger.warning("[GCC-TRADE] compare_with_main: %s", e)
 
@@ -2206,9 +2204,8 @@ class GCCTradingModule:
                 and (gcc_wins / diverge_count > 0.55 if diverge_count else False)
             )
             acc[symbol] = sym_acc
-            self._accuracy_file.write_text(
-                json.dumps(acc, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            _atomic_write(self._accuracy_file,
+                          json.dumps(acc, ensure_ascii=False, indent=2))
         except Exception as e:
             logger.warning("[GCC-TRADE] record_divergence_outcome: %s", e)
 
@@ -2350,7 +2347,7 @@ def _backfill_outcome(symbol: str, current_price: float,
                     # |move| <= 0.5% → 保持 None（neutral，不算）
             updated.append(json.dumps(rec, ensure_ascii=False))
 
-        _KNN_EXP_FILE.write_text("\n".join(updated) + "\n", encoding="utf-8")
+        _atomic_write(_KNN_EXP_FILE, "\n".join(updated) + "\n")
         if fill_count:
             logger.info("[GCC-TRADE] backfill %s: %d outcomes filled", symbol, fill_count)
     except Exception as e:
@@ -2906,7 +2903,7 @@ def _backfill_sim_trades(symbol: str, bars: list) -> None:
                     updated = True
             new_lines.append(json.dumps(rec, ensure_ascii=False))
         if updated:
-            sim_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            _atomic_write(sim_path, "\n".join(new_lines) + "\n")
     except Exception as e:
         logger.debug("[GCC-TM] backfill_sim: %s", e)
 
