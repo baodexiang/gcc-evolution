@@ -1334,6 +1334,7 @@ class VerifierResult:
     ok: bool            # 是否支持该候选方向
     score: float        # 置信度 [0, 1]
     reasoning: str = ""
+    abstain: bool = False  # True=此视角弃权，不计入 consensus
 
 
 # ══════════════════════════════════════════════════════════════
