@@ -839,25 +839,110 @@ def _read_nowcast(symbol: str) -> dict:
 _KB_BRIDGE = None  # 懒加载单例
 _KB_CACHE: Dict[str, list] = {}
 _KB_CACHE_TS: float = 0.0
-_KB_CACHE_TTL = 300  # 5min缓存
+_KB_CACHE_TTL = 300  # 5min查询缓存
+_KB_INDEX_TS: float = 0.0  # 知识卡索引上次加载时间
+_KB_INDEX_TTL = 86400  # 24小时重载知识卡索引(纽约8AM起算)
+_EXP_SYNC_TS: float = 0.0  # 经验卡上次同步时间
+_EXP_SYNC_TTL = 14400  # 4小时同步经验卡
+
+
+def _sync_experience_cards() -> int:
+    """每4小时: 增量同步gcc_knn_experience.jsonl → card_activations.jsonl"""
+    global _EXP_SYNC_TS
+    import time as _t_sync
+
+    if _t_sync.time() - _EXP_SYNC_TS < _EXP_SYNC_TTL:
+        return 0
+    _EXP_SYNC_TS = _t_sync.time()
+
+    _exp_file = _STATE_DIR / "gcc_knn_experience.jsonl"
+    _act_file = _STATE_DIR / "card_activations.jsonl"
+    _marker = _STATE_DIR / ".gcc_tm_exp_synced"
+    if not _exp_file.exists():
+        return 0
+
+    last_synced = 0
+    if _marker.exists():
+        try:
+            last_synced = int(_marker.read_text().strip())
+        except Exception:
+            pass
+
+    entries = []
+    with open(str(_exp_file), "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                try:
+                    entries.append(json.loads(line))
+                except Exception:
+                    pass
+
+    new_exps = [e for i, e in enumerate(entries)
+                if i >= last_synced and e.get("outcome") is not None]
+    if not new_exps:
+        return 0
+
+    synced = 0
+    with open(str(_act_file), "a", encoding="utf-8") as af:
+        for exp in new_exps:
+            act = {
+                "ts": exp.get("ts", ""),
+                "card_id": f"EXP_TM_{exp['symbol']}_{exp['action']}",
+                "rule_index": 0,
+                "symbol": exp["symbol"],
+                "action": exp["action"],
+                "price": exp.get("price", 0),
+                "result": "correct" if exp["outcome"] else "incorrect",
+                "ctx": {"source": "gcc_tm", "features": exp.get("features", [])},
+            }
+            af.write(json.dumps(act, ensure_ascii=False) + "\n")
+            synced += 1
+
+    _marker.write_text(str(len(entries)))
+    logger.info("[GCC-TM][EXP_SYNC] 同步%d条经验卡到card_activations", synced)
+    return synced
+
+
+def _should_reload_kb_index() -> bool:
+    """判断是否需要重载知识卡索引: 每天纽约8AM后首次触发"""
+    from datetime import datetime as _dt_kb
+    from zoneinfo import ZoneInfo as _zi_kb
+    now_ny = _dt_kb.now(_zi_kb("America/New_York"))
+    today_8am = now_ny.replace(hour=8, minute=0, second=0, microsecond=0)
+    if now_ny < today_8am:
+        return False  # 8AM前不重载
+    # 上次加载是昨天或更早 → 需要重载
+    if _KB_INDEX_TS == 0:
+        return True
+    from datetime import datetime as _dt2
+    last_load_ny = _dt2.fromtimestamp(_KB_INDEX_TS, tz=_zi_kb("America/New_York"))
+    return last_load_ny.date() < now_ny.date()
+
 
 def _read_knowledge_cards(symbol: str, vision_bias: str = "", regime: str = "") -> list:
     """读取与当前品种+趋势+regime匹配的top-3知识卡规则。
     返回: [{"card_id": str, "title": str, "direction": "BUY"|"SELL"|"NEUTRAL",
             "confidence": float, "rank_source": str}, ...]
     """
-    global _KB_BRIDGE, _KB_CACHE, _KB_CACHE_TS
+    global _KB_BRIDGE, _KB_CACHE, _KB_CACHE_TS, _KB_INDEX_TS
     import time as _t_kb
+
+    # 每4小时同步经验卡
+    _sync_experience_cards()
 
     cache_key = f"{symbol}_{vision_bias}_{regime}"
     if _t_kb.time() - _KB_CACHE_TS < _KB_CACHE_TTL and cache_key in _KB_CACHE:
         return _KB_CACHE[cache_key]
 
     try:
-        if _KB_BRIDGE is None:
+        # 知识卡索引: 首次加载 或 每天纽约8AM后重载
+        if _KB_BRIDGE is None or _should_reload_kb_index():
             from gcc_evolution.card_bridge import CardBridge
             _KB_BRIDGE = CardBridge()
-            _KB_BRIDGE.load_index()
+            _n = _KB_BRIDGE.load_index()
+            _KB_INDEX_TS = _t_kb.time()
+            _KB_CACHE.clear()
+            logger.info("[GCC-TM][KB] 知识卡索引重载: %d张", _n)
 
         # 构建情境查询
         ctx = {}
@@ -3107,10 +3192,17 @@ def gcc_observe(
                     _po = json.loads(_po_file.read_text(encoding="utf-8"))
                     if _po.get("expired"):
                         # pending被清理/超时/重试失败 → 实际未执行，回滚traded
+                        _vf_reason = _po.get("expire_reason", "unknown")
                         logger.warning(
                             "[GCC-TM][VERIFY] %s traded=True但pending expired(%s) → 回滚traded=False",
-                            symbol, _po.get("expire_reason", "unknown"),
+                            symbol, _vf_reason,
                         )
+                        # 标记原执行轮次为失败
+                        for _rd in state.round_decisions:
+                            if _rd.get("executed"):
+                                _rd["executed"] = False
+                                _rd["verify_failed"] = True
+                                _rd["verify_reason"] = _vf_reason
                         state.traded = False
                         state.trade_round = -1
                         _save_candle_state(state)
