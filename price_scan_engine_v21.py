@@ -6007,18 +6007,8 @@ class PriceScanEngine:
         source = signal_data.get("source") or signal_type
         signal_data["source"] = source
 
-        # KEY-011: 所有外挂BUY/SELL在过滤前推入GCC-TM信号池
-        # GCC-TM在4H结束时统一收集、PUCT裁决，不受P0过滤链影响
-        _sig_action = signal_data.get("signal", "")
-        if _sig_action in ("BUY", "SELL"):
-            try:
-                from gcc_trading_module import gcc_push_signal
-                _sig_conf = float(signal_data.get("consensus_score", 0.5)) or 0.5
-                gcc_push_signal(symbol, source, _sig_action, _sig_conf)
-            except ImportError:
-                pass
-            except Exception as _gcc_err:
-                logger.debug("[GCC-TM] push from scan engine failed: %s", _gcc_err)
+        # KEY-011: 4H外挂不再推入GCC-TM信号池 (v0.3: 信号池只接受15min级别信号源)
+        # 原: gcc_push_signal(symbol, source, _sig_action, _sig_conf)
 
         def _record_key004_trade(executed_flag: bool) -> None:
             try:
@@ -9724,16 +9714,8 @@ class PriceScanEngine:
         # v21.26: 缠论恢复执行模式 — 信号同时推入GCC-TM信号池 + 走正常执行路径
         main_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
 
-        # GCC-TM: 缠论信号推入信号池（与执行路径并行）
-        try:
-            from gcc_trading_module import gcc_push_signal
-            _chanbs_conf = float(result.strength) if result.strength else 0.5
-            gcc_push_signal(symbol, "ChanBS", action, _chanbs_conf)
-            logger.info(f"[ChanBS→GCC-TM] {symbol} {action} conf={_chanbs_conf:.2f} 已推入信号池")
-        except ImportError:
-            pass
-        except Exception as _gcc_err:
-            logger.debug("[ChanBS→GCC-TM] push failed: %s", _gcc_err)
+        # GCC-TM: 4H缠论不再推入信号池 (v0.3: 信号池只接受15min级别信号源)
+        # 原: gcc_push_signal(symbol, "ChanBS", action, _chanbs_conf)
 
         server_response = self._notify_main_server(main_symbol, signal_data)
         signal_data["server_executed"] = server_response.get("executed", False)
@@ -10065,27 +10047,24 @@ class PriceScanEngine:
                 logger.debug(f"[S11] {symbol} ChanBS_15m error: {e}")
 
         # ── 3. SuperTrend 15m ──
+        # v0.3: 纯15min数据, 不传4H l1_signals/market_data, 方向过滤交给Vision门控
         if _supertrend_available:
             try:
                 st_config = self.config[market_type].get("supertrend", {})
                 if st_config.get("enabled", False):
                     close_prices_15m = [b["close"] for b in bars_15m]
-                    l1_signals = self._get_l1_signals_for_supertrend(symbol)
-                    market_data = self._get_market_data_for_supertrend(symbol)
                     plugin = get_supertrend_plugin()
                     st_result = plugin.process(
                         symbol=symbol,
                         ohlcv_bars=bars_15m,
                         close_prices=close_prices_15m,
-                        l1_signals=l1_signals,
-                        market_data=market_data,
+                        l1_signals={},       # 空: 不混入4H信号
+                        market_data={},      # 空: 纯15min判断
                     )
-                    if st_result:
-                        mode_val = getattr(st_result.mode, 'value', st_result.mode) if st_result.mode else None
-                        if mode_val in ("PLUGIN_AGREE", "PLUGIN_CONFLICT") and st_result.action in ("BUY", "SELL"):
-                            _gcc_push_15m(main_symbol, "SuperTrend_15m", st_result.action, 0.6)
-                            pushed += 1
-                            logger.info(f"[S11] {symbol} SuperTrend_15m → {st_result.action}")
+                    if st_result and st_result.action in ("BUY", "SELL"):
+                        _gcc_push_15m(main_symbol, "SuperTrend_15m", st_result.action, 0.6)
+                        pushed += 1
+                        logger.info(f"[S11] {symbol} SuperTrend_15m → {st_result.action}")
             except Exception as e:
                 logger.debug(f"[S11] {symbol} SuperTrend_15m error: {e}")
 

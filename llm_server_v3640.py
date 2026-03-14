@@ -44972,13 +44972,8 @@ def llm_decide():
         plugin_bypass_l2 = True
         print(f"[v3.510] ⚡ {symbol}: 选择执行 [{selected_plugin_name}] → {plugin_exec_bias}")
 
-        # GCC-TM: 所有激活外挂信号推入信号池（4H结束时统一裁决）
-        if _HAS_GCC_TM:
-            for _ap_name, _ap_bias, _ap_res in activated_plugins:
-                _ap_dir = "BUY" if "BUY" in _ap_bias else ("SELL" if "SELL" in _ap_bias else "")
-                _ap_conf = getattr(_ap_res, 'confidence', 0.5) if _ap_res else 0.5
-                if _ap_dir:
-                    _gcc_push(symbol, _ap_name, _ap_dir, float(_ap_conf))
+        # GCC-TM: 4H外挂不再推入信号池 (v0.3: 信号池只接受15min级别信号源)
+        # 原: _gcc_push(symbol, _ap_name, _ap_dir, _ap_conf)
 
         # v3.530: 记录L1外挂触发状态（供监控程序显示）
         try:
@@ -47384,10 +47379,8 @@ def llm_decide():
             }
             
             print(f"[v2.970] P0扫描引擎覆盖: {final_action_before_p0} → {final_action}")
-            # GCC-TM: P0信号推入信号池
-            if _HAS_GCC_TM and final_action in ("BUY", "SELL"):
-                _p0_src = p0_scan_signal.get("signal_details", {}).get("signal_type", "P0-Scan")
-                _gcc_push(symbol, f"P0_{_p0_src}", final_action, float(p0_scan_signal.get("confidence", 0.7)))
+            # GCC-TM: P0不再推入信号池 (v0.3: 信号池只接受15min级别信号源)
+            # 原: _gcc_push(symbol, f"P0_{_p0_src}", final_action, ...)
         else:
             decision["p0_scan_engine"] = {"triggered": False}
     except Exception as e:
@@ -49943,12 +49936,8 @@ def llm_decide():
     except Exception as e:
         print(f"[v3.588] {symbol} Vision同步异常(不影响交易): {e}")
 
-    # S49: KEY-011 GCC交易决策模块 — L1信号推入信号池
-    # v0.2: gcc_observe 已改为scan engine每30分钟轮次触发，L1只推送信号不调observe
-    if _HAS_GCC_TM:
-        _l1_action = decision.get("final_action", "HOLD")
-        if _l1_action in ("BUY", "SELL"):
-            _gcc_push(symbol, "L1_decision", _l1_action, float(decision.get("confidence", 0.5)))
+    # S49: L1不再推入信号池 (v0.3: 信号池只接受15min级别信号源, L1是4H级别)
+    # 原: _gcc_push(symbol, "L1_decision", _l1_action, ...)
 
     return app.response_class(
         response=json.dumps({"input": user_payload, "decision": decision}, default=str),
@@ -50609,11 +50598,8 @@ L2门卫交易触发
                     _macd_conf_shadow = min(0.95, max(0.55, _macd_strength_shadow / 100.0))
                     _gcc_push(symbol, "MACD_L2", macd_action, _macd_conf_shadow)
 
-                if allow_trade and trade_action in ("BUY", "SELL"):
-                    _gate_conf_shadow = 0.75 if str(small_decision).startswith("STRONG_") else 0.65
-                    if gate_result.get("breakout_reverse"):
-                        _gate_conf_shadow = max(_gate_conf_shadow, 0.8)
-                    _gcc_push(symbol, "L2_Gate", trade_action, _gate_conf_shadow)
+                # L2_Gate不再推入信号池 (v0.3: 非标准指标信号)
+                # 原: _gcc_push(symbol, "L2_Gate", trade_action, _gate_conf_shadow)
 
                 log_to_server(
                     f"[GCC-TM][PUSH] {symbol} "

@@ -100,6 +100,8 @@ class CandleState:
     vision_confidence: float      # Vision置信度
     prev_summary: str             # 上一K线8轮汇总方向
     effective_direction: str      # 实际执行方向 (矛盾时=HOLD)
+    bv_direction: str = "HOLD"    # v0.3: BrooksVision形态方向 (BUY/SELL/HOLD)
+    bv_pattern: str = "NONE"      # v0.3: BrooksVision识别的形态名
     current_round: int = 0        # 当前已完成轮次 (0-8)
     traded: bool = False          # 是否已交易
     trade_round: int = -1         # 交易发生在第几轮 (-1=未交易)
@@ -119,6 +121,8 @@ class CandleState:
                 self.candle_open_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             "vision_direction": self.vision_direction,
             "vision_confidence": self.vision_confidence,
+            "bv_direction": self.bv_direction,
+            "bv_pattern": self.bv_pattern,
             "prev_summary": self.prev_summary,
             "effective_direction": self.effective_direction,
             "current_round": self.current_round,
@@ -152,6 +156,8 @@ def _load_candle_state(symbol: str) -> Optional[CandleState]:
             vision_confidence=d["vision_confidence"],
             prev_summary=d.get("prev_summary", "HOLD"),
             effective_direction=d["effective_direction"],
+            bv_direction=d.get("bv_direction", "HOLD"),     # v0.3: 重启恢复BV方向
+            bv_pattern=d.get("bv_pattern", "NONE"),          # v0.3: 重启恢复BV形态
             current_round=d.get("current_round", 0),
             traded=d.get("traded", False),
             trade_round=d.get("trade_round", -1),
@@ -277,20 +283,53 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
         vision_bias, vision_conf = _read_vision(symbol)
         logger.warning("[GCC-TM] %s Vision from STALE cache (no fresh call): %s(%.0f%%)", symbol, vision_bias, vision_conf * 100)
 
+    # v0.3: BrooksVision 形态识别 (4H K线, 每根K线开盘调一次)
+    # 失败时降级为HOLD(弃权), 不阻塞整个流程
+    bv_bias, bv_pattern = "HOLD", "NONE"
+    try:
+        import brooks_vision as _bv
+        _bv_results = _bv.scan_all(_bv.init_radar() if not _bv._mods_ready else _bv._mods_cache,
+                                    symbols=[symbol] if not symbol.endswith("USDC") and not symbol.endswith("USDT")
+                                    else [_bv.INTERNAL_TO_YF.get(symbol, symbol)])
+        if _bv_results:
+            for _bv_r in _bv_results:
+                _bv_final = _bv_r.get("final", "")
+                _bv_sig = _bv_r.get("radar", {}).get("signal", "")
+                _bv_pat = _bv_r.get("radar", {}).get("brooks_pattern", "NONE")
+                if _bv_sig in ("BUY", "SELL"):
+                    bv_bias = _bv_sig
+                    bv_pattern = _bv_pat
+                    break
+        logger.info("[GCC-TM] %s BrooksVision: %s [%s]", symbol, bv_bias, bv_pattern)
+    except ImportError:
+        logger.debug("[GCC-TM] %s BrooksVision not installed, skip", symbol)
+    except Exception as _bv_e:
+        logger.warning("[GCC-TM] %s BrooksVision FAILED (降级HOLD): %s", symbol, _bv_e)
+
     # 上一K线汇总
     prev = _load_prev_summary(symbol)
     prev_dir = prev.get("direction", "HOLD")
 
-    # 信心机制: 矛盾时HOLD
-    if prev_dir == "HOLD" or prev_dir == vision_bias:
-        # 一致或上一K线无方向 → 信任Vision
-        effective = vision_bias
-    elif vision_bias == "HOLD":
-        # Vision也没方向 → HOLD
-        effective = "HOLD"
+    # v0.3: 三方投票 — Vision(趋势) + BrooksVision(形态) + prev_summary(上K汇总)
+    # HOLD=弃权, 2票同方向→执行, 1:1对冲→HOLD, 唯一有方向→跟随
+    votes = {"BUY": 0, "SELL": 0}
+    for _v in [vision_bias, bv_bias, prev_dir]:
+        if _v in votes:
+            votes[_v] += 1
+
+    if votes["BUY"] >= 2:
+        effective = "BUY"
+    elif votes["SELL"] >= 2:
+        effective = "SELL"
+    elif votes["BUY"] == 1 and votes["SELL"] == 0:
+        effective = "BUY"    # 唯一有方向的
+    elif votes["SELL"] == 1 and votes["BUY"] == 0:
+        effective = "SELL"   # 唯一有方向的
     else:
-        # 完全相反 (BUY vs SELL) → 矛盾，不交易
-        effective = "HOLD"
+        effective = "HOLD"   # 1:1对冲或全弃权
+
+    logger.info("[GCC-TM] %s 三方投票: vision=%s bv=%s[%s] prev=%s → effective=%s",
+                symbol, vision_bias, bv_bias, bv_pattern, prev_dir, effective)
 
     state = CandleState(
         symbol=symbol,
@@ -299,6 +338,8 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
         vision_confidence=vision_conf,
         prev_summary=prev_dir,
         effective_direction=effective,
+        bv_direction=bv_bias,
+        bv_pattern=bv_pattern,
     )
 
     # 如果程序重启, 当前已经不在round 0, 标记起点
