@@ -1274,12 +1274,22 @@ def _numerical_feedback(node: TreeNode, verifier: "BeyondEuclidVerifier",
         return 0.3  # HOLD 的基准反馈值（不活跃）
 
     consensus, results, verdict = verifier.verify(node, closes, current_price)
-    # 反馈值: 基于共识度和各视角得分
     if not results:
         return 0.3
-    avg_score = sum(r.score for r in results) / len(results)
-    # consensus 0/3 → 0.1, 1/3 → 0.3, 2/3 → 0.6, 3/3 → 0.9
-    consensus_bonus = consensus * 0.2
+
+    # 只用非弃权视角计算反馈值
+    active_results = [r for r in results if not r.abstain]
+    if not active_results:
+        return 0.2  # 全部弃权，低反馈值（不奖励无法判断的候选）
+
+    avg_score = sum(r.score for r in active_results) / len(active_results)
+    active_consensus = sum(1 for r in active_results if r.ok)
+    active_count = len(active_results)
+
+    # consensus_bonus 基于有效视角比例，而非绝对数量
+    consensus_ratio = active_consensus / active_count
+    consensus_bonus = consensus_ratio * 0.4  # 全通过 +0.4，全拒绝 +0.0
+
     return min(1.0, avg_score * 0.5 + consensus_bonus + 0.1)
 
 
