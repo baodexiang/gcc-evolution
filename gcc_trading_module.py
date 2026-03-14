@@ -180,11 +180,16 @@ def _load_candle_state(symbol: str) -> Optional[CandleState]:
         return None
 
 
+_atomic_write_lock = __import__("threading").Lock()
+
 def _atomic_write(p: Path, data: str) -> None:
-    """P2原子写入: 先写临时文件, 再rename(防止断电导致半写损坏)。"""
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(data, encoding="utf-8")
-    tmp.replace(p)  # 原子 rename
+    """P2原子写入: 先写临时文件, 再rename(防止断电导致半写损坏)。
+    v0.3: 加锁防止Windows并发rename的WinError 32。
+    """
+    with _atomic_write_lock:
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(data, encoding="utf-8")
+        tmp.replace(p)  # 原子 rename
 
 
 def _save_candle_state(state: Optional[CandleState]) -> None:
