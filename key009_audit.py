@@ -843,17 +843,17 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
                            "msg": f"RH震荡过滤率{_rh_tangled_rate:.0%}, ER低于阈值{rh_stats['er_below']}/{rh_stats['scans']}次"})
 
     # 外挂风险: 某外挂触发率极低 → market(0触发=市场无趋势) / execution(发送0执行)
-    # 参考模式下跳过”0执行”类告警(不下单是设计如此)
+    # 参考模式下跳过"0执行"类告警(不下单是设计如此)
     for pname, pdata in scan_plugins.items():
-        # 仅当”扫描高 + 完全无触发/无派发/无执行”才告警(扫描引擎问题，不受参考模式影响)
-        if pdata[“scan”] > 50 and pdata[“trigger”] == 0 and pdata[“dispatch”] == 0 and pdata[“executed”] == 0:
-            issues.append({“task”: f”PLUGIN-{pname}”, “type”: “RISK”, “category”: “market”,
-                           “msg”: f”{pname} 扫描{pdata['scan']}次但0触发, 可能阈值过高”})
-        # “发送但0执行” → 参考模式下跳过(不下单是设计如此)
-        if pdata[“dispatch”] > 5 and pdata[“executed”] == 0:
+        # 仅当"扫描高 + 完全无触发/无派发/无执行"才告警(扫描引擎问题，不受参考模式影响)
+        if pdata["scan"] > 50 and pdata["trigger"] == 0 and pdata["dispatch"] == 0 and pdata["executed"] == 0:
+            issues.append({"task": f"PLUGIN-{pname}", "type": "RISK", "category": "market",
+                           "msg": f"{pname} 扫描{pdata['scan']}次但0触发, 可能阈值过高"})
+        # "发送但0执行" → 参考模式下跳过(不下单是设计如此)
+        if pdata["dispatch"] > 5 and pdata["executed"] == 0:
             if not _is_reference_mode:
-                issues.append({“task”: f”PLUGIN-{pname}”, “type”: “RISK”, “category”: “execution”,
-                               “msg”: f”{pname} 发送{pdata['dispatch']}次但0执行, 全被门控拦截”})
+                issues.append({"task": f"PLUGIN-{pname}", "type": "RISK", "category": "execution",
+                               "msg": f"{pname} 发送{pdata['dispatch']}次但0执行, 全被门控拦截"})
 
     # ── 日志覆盖率检查: 只在每天8am slot执行(check_coverage=True) ──
     if check_coverage:
@@ -1052,7 +1052,8 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
                          plugin_accuracy=plugin_accuracy,
                          plugin_phases=plugin_phases,
                          baseline_data=_baseline_data,
-                         system_evo=system_evo)
+                         system_evo=system_evo,
+                         l1_reference_mode=_is_reference_mode)
 
 
 def _load_system_config() -> dict:
@@ -2728,7 +2729,7 @@ def _parse_evolution_memory() -> list:
 
         def _score(s: str) -> int:
             cjk = len(re.findall(r"[\u3400-\u9fff]", s))
-            bad = len(re.findall(r"[ÃÂâ€œâ€â€™â€”çåäéèêëï¼½œ™]", s))
+            bad = len(re.findall(r"[À-ÿ]", s.encode("utf-8", errors="ignore").decode("ascii", errors="replace")))
             return cjk * 2 - bad * 3
 
         best = value
@@ -2879,7 +2880,8 @@ def _build_result(now_str, hours, tasks, summary_metrics,
                   broker_match=None, plugin_accuracy=None,
                   plugin_phases=None,
                   baseline_data=None,
-                  system_evo=None):
+                  system_evo=None,
+                  l1_reference_mode=False):
     """构建输出数据结构。"""
     # 序列化defaultdict → dict
     _macd = dict(macd_stats)
@@ -2955,7 +2957,7 @@ def _build_result(now_str, hours, tasks, summary_metrics,
     return {
         "generated_at": now_str,
         "hours": hours,
-        "l1_reference_mode": _is_reference_mode,
+        "l1_reference_mode": l1_reference_mode,
         "total_events": sum(t["count"] for t in tasks.values()),
         "total_errors": sum(t["errors"] for t in tasks.values()),
         "tasks": tasks,
