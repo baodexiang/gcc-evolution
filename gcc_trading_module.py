@@ -1342,7 +1342,7 @@ class VerifierResult:
 # 论文: arXiv:2407.09468 Sec.3 Topology (超图连通性)
 # 思路: 把各数据源分数看作超图节点，连通度反映信号一致性
 # 实现: Cheeger常数近似 = 最小割 / 节点数（连通=ok）
-# S25: 信号数 < 3 时 fallback ok=True
+# S25: 信号数 < 3 或 active < 2 时 abstain（弃权）
 # ══════════════════════════════════════════════════════════════
 class TopologyVerifier:
     """
@@ -1416,11 +1416,12 @@ class TopologyVerifier:
         scores = {k: v for k, v in node.scores_by_source.items()
                   if not k.startswith("_")}  # 排除元数据 key
 
-        # S25: 信号源不足 3 个时 fallback 放行
+        # S25: 信号源不足 3 个时弃权
         if len(scores) < 3:
             return VerifierResult(
-                perspective="topology", ok=True, score=0.5,
-                reasoning=f"fallback: only {len(scores)} sources"
+                perspective="topology", ok=False, score=0.5,
+                abstain=True,
+                reasoning=f"abstain: only {len(scores)} sources"
             )
 
         vals = list(scores.values())
@@ -1432,8 +1433,9 @@ class TopologyVerifier:
         active = positive + negative
         if active < 2:
             return VerifierResult(
-                perspective="topology", ok=True, score=0.5,
-                reasoning=f"fallback: active={active} (pos={positive} neg={negative} neutral={neutral})"
+                perspective="topology", ok=False, score=0.5,
+                abstain=True,
+                reasoning=f"abstain: active={active} neutral={neutral} (insufficient)"
             )
 
         # --- Cheeger 近似 (组合法) ---
@@ -1450,9 +1452,18 @@ class TopologyVerifier:
         # Cheeger ≤ 0.34 (组合一致) AND Fiedler > 0 (谱连通)
         ok = cheeger_approx <= 0.34 and fiedler >= 0.0
 
-        # score: Cheeger 和 Fiedler 加权
+        # score: Cheeger 和 Fiedler 加权 + neutral 惩罚
+        total = len(vals)
+        neutral_ratio = neutral / total if total > 0 else 1.0
         balance = majority / active
-        score = round(balance * 0.7 + min(fiedler, 1.0) * 0.3, 4)
+        raw_score = balance * 0.7 + min(fiedler, 1.0) * 0.3
+
+        # neutral 惩罚：neutral_ratio > 0.6 时降权
+        if neutral_ratio > 0.6:
+            penalty = (neutral_ratio - 0.6) * 1.5  # 最多 -0.6
+            score = round(max(0.2, raw_score - penalty), 4)
+        else:
+            score = round(raw_score, 4)
 
         return VerifierResult(
             perspective="topology", ok=ok, score=score,
