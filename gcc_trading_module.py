@@ -778,6 +778,56 @@ def _read_coinbase_obi_cvd(symbol: str) -> dict:
         return {"obi": 0.0, "obi_bias": "UNKNOWN", "cvd": 0.0, "cvd_bias": "UNKNOWN"}
 
 
+# ── Nowcast: 读取最新日频评分 (KEY-005-NC) ──
+_NC_CACHE: Dict[str, dict] = {}
+_NC_CACHE_DATE: str = ""
+
+def _read_nowcast(symbol: str) -> dict:
+    """读取 state/nowcast_log.jsonl 中该品种当天最新评分。
+    返回: {"score": int, "confidence": float, "reasoning": str} 或空 dict。
+    缓存按日刷新 — 日频数据不需要每30min重读。"""
+    global _NC_CACHE, _NC_CACHE_DATE
+    from datetime import datetime as _dt_nc
+    from zoneinfo import ZoneInfo as _zi_nc
+    today = _dt_nc.now(_zi_nc("America/New_York")).strftime("%Y-%m-%d")
+
+    # 日级缓存: 同一天只读一次文件
+    if _NC_CACHE_DATE == today and symbol in _NC_CACHE:
+        return _NC_CACHE[symbol]
+
+    # 刷新缓存
+    if _NC_CACHE_DATE != today:
+        _NC_CACHE.clear()
+        _NC_CACHE_DATE = today
+
+    # 品种映射: gcc-tm用BTCUSDC, nowcast用BTC-USD
+    _NC_SYMBOL_MAP = {
+        "BTCUSDC": "BTC-USD", "ETHUSDC": "ETH-USD",
+        "SOLUSDC": "SOL-USD", "ZECUSDC": "ZEC-USD",
+    }
+    nc_sym = _NC_SYMBOL_MAP.get(symbol, symbol)
+
+    try:
+        nc_file = _STATE_DIR / "nowcast_log.jsonl"
+        if not nc_file.exists():
+            return {}
+        best = {}
+        with open(nc_file, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                entry = json.loads(line)
+                if entry.get("symbol") == nc_sym and entry.get("date") == today and "error" not in entry:
+                    best = {"score": entry["score"], "confidence": entry.get("confidence", 0.5),
+                            "reasoning": entry.get("reasoning", "")}
+        _NC_CACHE[symbol] = best
+        return best
+    except Exception as e:
+        logger.debug("[GCC-TRADE] _read_nowcast %s: %s", symbol, e)
+        return {}
+
+
 # ══════════════════════════════════════════════════════════════
 # L1-S03  DecisionContext — 标准化决策上下文快照
 # 统一所有输入源为一个 dataclass，落盘供回放/dashboard/回填复用
@@ -943,6 +993,12 @@ def _score_buy_candidate(symbol: str, bars: list, context: dict) -> dict:
     _va_score = context.get("value_composite", 0.0)
     scores["value"] = max(-0.15, min(0.15, _va_score * 0.015))  # ±10→±0.15
 
+    # KEY-005-NC: Nowcast日频方向偏置 (权重0.20, score -5~+5)
+    # BUY路径: 正分支持买入, 负分反对买入
+    nc = context.get("nowcast", {})
+    nc_score = nc.get("score", 0)
+    scores["nowcast"] = (nc_score / 5.0) * 0.20 if nc_score != 0 else 0.0
+
     return scores
 
 
@@ -1012,6 +1068,12 @@ def _score_sell_candidate(symbol: str, bars: list, context: dict) -> dict:
     _va_score = context.get("value_composite", 0.0)
     scores["value"] = max(-0.15, min(0.15, -_va_score * 0.015))  # 注意取反: 高分抑制卖出
 
+    # KEY-005-NC: Nowcast日频方向偏置 (权重0.20, score -5~+5)
+    # SELL路径: 负分支持卖出, 正分反对卖出 (取反)
+    nc = context.get("nowcast", {})
+    nc_score = nc.get("score", 0)
+    scores["nowcast"] = (-nc_score / 5.0) * 0.20 if nc_score != 0 else 0.0
+
     return scores
 
 
@@ -1022,7 +1084,7 @@ def _score_hold_candidate() -> dict:
     """HOLD 路径固定中性分 0.0，作为基线竞争者。v0.2: 移除vision。"""
     return {"scan": 0.0, "win_rate": 0.0, "volume": 0.0,
             "vwap": 0.0, "obi": 0.0, "cvd": 0.0,
-            "signal_pool": 0.0}
+            "signal_pool": 0.0, "nowcast": 0.0}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1673,8 +1735,8 @@ class BeyondEuclidVerifier:
             # 单视角：必须 ok 才放行
             verdict = "EXECUTE" if consensus_count >= 1 else "SKIP"
         elif active_count == 2:
-            # 双视角：必须 2/2（严格模式）
-            verdict = "EXECUTE" if consensus_count >= 2 else "SKIP"
+            # 双视角：1/2 不冲突即放行（预测性验证不卡太紧）
+            verdict = "EXECUTE" if consensus_count >= 1 else "SKIP"
         else:
             # 三视角：2/3 通过（原逻辑）
             verdict = "EXECUTE" if consensus_count >= 2 else "SKIP"
@@ -1943,6 +2005,7 @@ class GCCTradingModule:
             extended={
                 "schwab_vwap": _read_schwab_vwap(sym),
                 "coinbase": _read_coinbase_obi_cvd(sym),
+                "nowcast": _read_nowcast(sym),
             },
         )
         # L1-S03 快照落盘
@@ -1960,6 +2023,7 @@ class GCCTradingModule:
             "signal_pool": ctx.signal_pool,
             "schwab_vwap": ctx.extended.get("schwab_vwap", {}),
             "coinbase": ctx.extended.get("coinbase", {}),
+            "nowcast": ctx.extended.get("nowcast", {}),
         }
 
     # ── L2-S03: 树搜索 + rejected_nodes 收集 ────────────────────
@@ -2337,14 +2401,16 @@ def _load_algebra_history(mod: "GCCTradingModule") -> int:
         #   跌(r<0) → BUY=False, SELL=True
         recent = returns[-200:]
         count = 0
+        price = 100.0  # 基准价，用returns累积推算相对价格序列
         for r in recent:
             r_val = float(r)
+            price *= (1.0 + r_val)  # 累积价格，越近的越接近当前价
             if abs(r_val) < 0.005:
                 continue
             buy_outcome = r_val > 0    # 涨了=BUY正确
             sell_outcome = r_val < 0   # 跌了=SELL正确
-            mod._verifier.algebra.record_outcome(100.0, "BUY", buy_outcome)
-            mod._verifier.algebra.record_outcome(100.0, "SELL", sell_outcome)
+            mod._verifier.algebra.record_outcome(price, "BUY", buy_outcome)
+            mod._verifier.algebra.record_outcome(price, "SELL", sell_outcome)
             count += 1
         return count
     except Exception as e:
