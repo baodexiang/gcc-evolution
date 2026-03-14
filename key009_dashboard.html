@@ -1005,7 +1005,7 @@ function _doRender() {
             return `<tr><td><strong>${t.symbol}</strong></td><td>$${t.buy_price.toFixed(2)}</td><td>$${t.sell_price.toFixed(2)}</td><td>${t.qty}</td><td style="color:${pc};font-weight:600">${pnlFmt(t.pnl)}</td><td style="color:${pc}">${t.pnl_pct>=0?'+':''}${t.pnl_pct.toFixed(1)}%</td></tr>`;
         }).join('');
     } else {
-        bpCards.innerHTML = '<div class="card" style="grid-column:1/-1"><div class="label">券商P&L</div><div class="sub">运行 broker_reconciler.py 生成数据</div></div>';
+        $('broker-pnl-cards').innerHTML = '<div class="card" style="grid-column:1/-1"><div class="label">券商P&L</div><div class="sub">运行 broker_reconciler.py 生成数据</div></div>';
         $('broker-daily').innerHTML = '';
         $('broker-weekly').innerHTML = '';
         $('broker-monthly').innerHTML = '';

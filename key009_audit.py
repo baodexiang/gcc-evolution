@@ -845,11 +845,11 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
     # 外挂风险: 某外挂触发率极低 → market(0触发=市场无趋势) / execution(发送0执行)
     # 参考模式下跳过”0执行”类告警(不下单是设计如此)
     for pname, pdata in scan_plugins.items():
-        # 仅当”扫描高 + 完全无触发/无派发/无执行”才告警，避免误报(已有dispatch/executed仍被判0触发)
+        # 仅当”扫描高 + 完全无触发/无派发/无执行”才告警(扫描引擎问题，不受参考模式影响)
         if pdata[“scan”] > 50 and pdata[“trigger”] == 0 and pdata[“dispatch”] == 0 and pdata[“executed”] == 0:
-            if not _is_reference_mode:
-                issues.append({“task”: f”PLUGIN-{pname}”, “type”: “RISK”, “category”: “market”,
-                               “msg”: f”{pname} 扫描{pdata['scan']}次但0触发, 可能阈值过高”})
+            issues.append({“task”: f”PLUGIN-{pname}”, “type”: “RISK”, “category”: “market”,
+                           “msg”: f”{pname} 扫描{pdata['scan']}次但0触发, 可能阈值过高”})
+        # “发送但0执行” → 参考模式下跳过(不下单是设计如此)
         if pdata[“dispatch”] > 5 and pdata[“executed”] == 0:
             if not _is_reference_mode:
                 issues.append({“task”: f”PLUGIN-{pname}”, “type”: “RISK”, “category”: “execution”,
