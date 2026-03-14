@@ -1394,7 +1394,14 @@ function loadGccTm() {
         `;
 
         // ── 品种面板: 每品种展开卡片 ──
-        const panelSymbols = [...allSyms].sort();
+        // 排序: 加密货币(4) → 美股(10) → 期权(1)，组内字母排序
+        const _isCrypto = s => s.endsWith('USDC') || s.endsWith('USDT');
+        const _isOption = s => s.includes('_OPT');
+        const _category = s => _isCrypto(s) ? 0 : _isOption(s) ? 2 : 1;
+        const panelSymbols = [...allSyms].sort((a, b) => {
+            const ca = _category(a), cb = _category(b);
+            return ca !== cb ? ca - cb : a.localeCompare(b);
+        });
         const panelsEl = $('gcctm-symbol-panels');
         if (!panelSymbols.length) {
             panelsEl.innerHTML = '<div style="color:#656d76;padding:16px">暂无品种数据 (等待GCC-TM启动)</div>';
