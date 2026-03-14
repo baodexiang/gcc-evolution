@@ -1933,9 +1933,11 @@ class GCCTradingModule:
             "consensus":    consensus,
             "verifier_results": [
                 {"perspective": r.perspective, "ok": r.ok,
-                 "score": r.score, "reasoning": r.reasoning}
+                 "score": r.score, "reasoning": r.reasoning,
+                 "abstain": r.abstain}
                 for r in ver_results
             ],
+            "active_count": sum(1 for r in ver_results if not r.abstain),
             "current_price": current_price,
             "rejected_nodes": rejected_summary,
             "context":      ctx.as_dict(),
