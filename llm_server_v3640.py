@@ -43089,11 +43089,34 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                 f"qty={_scalp_qty:.2f} price=${_gcc_cur_price:.4f} "
                 f"success={send_ok} order_id={_scalp_res.get('order_id','')}"
             )
+            if send_ok:
+                try:
+                    _scalp_reason = _gcc_order.get("reason", "")
+                    send_email_notification(
+                        f"[剥头皮] {symbol} {_gcc_act} ${_gcc_cur_price:.4f}",
+                        f"来源: GCC-SCALP\n品种: {symbol}\n方向: {_gcc_act}\n"
+                        f"价格: ${_gcc_cur_price:.4f}\n数量: {_scalp_qty:.2f}\n"
+                        f"金额: ${_scalp_qty * _gcc_cur_price:.2f}\n"
+                        f"原因: {_scalp_reason}\n"
+                        f"订单ID: {_scalp_res.get('order_id', '')}"
+                    )
+                except Exception:
+                    pass
         except Exception as _scalp_e:
             log_to_server(f"[GCC-SCALP][ERROR] {symbol} Coinbase: {_scalp_e}")
     else:
         try:
             send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol, source="gcc_tm")
+            if send_ok:
+                try:
+                    send_email_notification(
+                        f"[加密] {symbol} {_gcc_act} ${_gcc_cur_price:.2f}",
+                        f"来源: GCC-TM (3Commas)\n品种: {symbol}\n方向: {_gcc_act}\n"
+                        f"价格: ${_gcc_cur_price:.2f}\n"
+                        f"时间: {datetime.now(ZoneInfo('America/New_York')).strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
+                except Exception:
+                    pass
         except Exception as _3c_e:
             log_to_server(f"[GCC-TM][ERROR] {symbol} 3Commas: {_3c_e}")
     _gcc_confirm(symbol, success=send_ok)
