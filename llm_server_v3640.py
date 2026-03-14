@@ -54206,13 +54206,25 @@ if __name__ == "__main__":
                                 with open(_po_path, "r", encoding="utf-8") as _f:
                                     _po = json.loads(_f.read())
                                 if not _po.get("consumed") and not _po.get("processing"):
-                                    _po["consumed"] = True
-                                    _po["consumed_ts"] = _ny_now.strftime("%Y-%m-%d %H:%M:%S")
-                                    _po["expired"] = True
-                                    _po["expire_reason"] = "daily_8am_cleanup"
-                                    with open(_po_path, "w", encoding="utf-8") as _f:
-                                        _f.write(json.dumps(_po, ensure_ascii=False, indent=2))
-                                    _cleaned += 1
+                                    # 只清理超过4小时的旧单，避免重启后误杀刚写入的pending
+                                    _po_ts = _po.get("ts", "")
+                                    _po_age_ok = True
+                                    if _po_ts:
+                                        try:
+                                            _po_dt = _gcc_dt.strptime(_po_ts, "%Y-%m-%d %H:%M:%S")
+                                            _po_dt = _po_dt.replace(tzinfo=_gcc_zi("America/New_York"))
+                                            _po_age_h = (_ny_now - _po_dt).total_seconds() / 3600
+                                            _po_age_ok = _po_age_h > 4
+                                        except Exception:
+                                            pass
+                                    if _po_age_ok:
+                                        _po["consumed"] = True
+                                        _po["consumed_ts"] = _ny_now.strftime("%Y-%m-%d %H:%M:%S")
+                                        _po["expired"] = True
+                                        _po["expire_reason"] = "daily_8am_cleanup"
+                                        with open(_po_path, "w", encoding="utf-8") as _f:
+                                            _f.write(json.dumps(_po, ensure_ascii=False, indent=2))
+                                        _cleaned += 1
                             except Exception:
                                 pass
                         if _cleaned:
