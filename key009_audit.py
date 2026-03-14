@@ -3116,11 +3116,19 @@ def format_text(data: dict) -> str:
         lines.extend(["", "── L1参考模式 ──",
                        "  ℹ L1参考模式活跃, 0执行类告警已静默(不下单是设计如此)"])
 
-    # 问题
+    # 问题: GCC-TM优先，其他次之
     if data["issues"]:
-        lines.extend(["", "── 问题 & 风险 ──"])
-        for iss in data["issues"]:
-            lines.append(f"  [{iss['type']}] {iss['task']}: {iss['msg']}")
+        gcctm_tasks = {"KEY-011", "L2_MACD", "TRADE"}
+        gcctm_issues = [i for i in data["issues"] if i["task"] in gcctm_tasks]
+        other_issues = [i for i in data["issues"] if i["task"] not in gcctm_tasks]
+        if gcctm_issues:
+            lines.extend(["", "── GCC-TM 问题 ──"])
+            for iss in gcctm_issues:
+                lines.append(f"  [{iss['type']}] {iss['task']}: {iss['msg']}")
+        if other_issues:
+            lines.extend(["", "── 其他问题 & 风险 ──"])
+            for iss in other_issues:
+                lines.append(f"  [{iss['type']}] {iss['task']}: {iss['msg']}")
     return "\n".join(lines)
 
 
