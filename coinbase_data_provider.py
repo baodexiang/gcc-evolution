@@ -100,9 +100,20 @@ def get_candles(symbol: str, granularity: str = "ONE_HOUR",
     if not product_id:
         return []
 
+    # 用start/end时间范围确保拿到足够K线
+    _gran_seconds = {
+        "ONE_MINUTE": 60, "FIVE_MINUTE": 300, "FIFTEEN_MINUTE": 900,
+        "THIRTY_MINUTE": 1800, "ONE_HOUR": 3600, "TWO_HOUR": 7200,
+        "SIX_HOUR": 21600, "ONE_DAY": 86400,
+    }
+    _gs = _gran_seconds.get(granularity, 3600)
+    import time as _t
+    _end = int(_t.time())
+    _start = _end - _gs * limit * 2  # 2x余量，应对缺失K线
+
     data = _public_get(
         f"/api/v3/brokerage/market/products/{product_id}/candles"
-        f"?granularity={granularity}&limit={limit}"
+        f"?granularity={granularity}&start={_start}&end={_end}&limit={min(limit * 2, 300)}"
     )
     if not data or "candles" not in data:
         return []
