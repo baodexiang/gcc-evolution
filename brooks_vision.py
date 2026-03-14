@@ -76,30 +76,24 @@ YF_TO_INTERNAL = {v: k for k, v in INTERNAL_TO_YF.items()}
 # Pattern Signal Map: 形态→固有方向 (None=环境型,方向由Always-In决定)
 # ---------------------------------------------------------------------------
 PATTERN_SIGNAL_MAP = {
+    # KEY-010: 只保留准确率>50%的形态 (基于bv_signal_accuracy.json实测)
     # 看涨形态 → BUY
-    "DOUBLE_BOTTOM": "BUY",
-    "HEAD_SHOULDERS_BOTTOM": "BUY",
-    "ASC_TRIANGLE": "BUY",
-    "WEDGE_FALLING": "BUY",       # 下降楔形=看涨反转
-    "CUP_AND_HANDLE": "BUY",
-    "ROUNDING_BOTTOM": "BUY",
-    "BULL_FLAG": "BUY",
-    "MTR_BUY": "BUY",             # Major Trend Reversal 看涨
+    "BULL_FLAG": "BUY",           # 56%, n=171
+    "WEDGE_FALLING": "BUY",       # 55%, n=56 — 下降楔形=看涨反转
+    "MTR_BUY": "BUY",             # 60%, n=5 — Major Trend Reversal 看涨
 
     # 看跌形态 → SELL
-    "DOUBLE_TOP": "SELL",
-    "HEAD_SHOULDERS_TOP": "SELL",
-    "DESC_TRIANGLE": "SELL",
-    "WEDGE_RISING": "SELL",       # 上升楔形=看跌反转
-    "BEAR_FLAG": "SELL",
-    "MTR_SELL": "SELL",           # Major Trend Reversal 看跌
+    "BEAR_FLAG": "SELL",          # 67%, n=36
+    "MTR_SELL": "SELL",           # 65%, n=31 (MTR整体)
 
     # 环境型(方向由 Always-In 决定)
-    "CLIMAX": None,               # 高潮反转，方向取决于之前趋势
-    "TIGHT_CHANNEL": None,        # 延续，方向取决于通道方向
-    "BROAD_CHANNEL": None,        # 宽通道，EMA 回调
-    "BREAKOUT": None,             # 方向取决于突破方向
-    "TRADING_RANGE": None,        # 区间，高抛低吸
+    "CLIMAX": None,               # 80%, n=5 — 高潮反转
+    "BREAKOUT": None,             # 71%, n=82 — 突破方向
+    "TRADING_RANGE": None,        # 71%, n=24 — 区间高抛低吸
+
+    # 删除(准确率<50%): DOUBLE_BOTTOM(39%), DOUBLE_TOP, HEAD_SHOULDERS_*,
+    #   ASC_TRIANGLE, DESC_TRIANGLE, CUP_AND_HANDLE, ROUNDING_BOTTOM,
+    #   BROAD_CHANNEL(44%), WEDGE_RISING, TIGHT_CHANNEL
 
     # 无形态
     "NONE": None,
@@ -130,31 +124,20 @@ ANALYSIS STEPS (follow in order):
 
 3. PATTERN RECOGNITION (with probability):
    A. CLASSIC REVERSAL/CONTINUATION PATTERNS (each has inherent direction):
-   - DOUBLE_BOTTOM: Two tests of support, second holds → BUY. 80% valid in trading range.
-   - DOUBLE_TOP: Two tests of resistance, second fails → SELL. 80% valid in trading range.
-   - HEAD_SHOULDERS_BOTTOM: Left shoulder + head (lower low) + right shoulder → BUY. Neckline break confirms.
-   - HEAD_SHOULDERS_TOP: Left shoulder + head (higher high) + right shoulder → SELL. Neckline break confirms.
-   - ASC_TRIANGLE: Higher lows + flat resistance → BUY. 75% break upward.
-   - DESC_TRIANGLE: Lower highs + flat support → SELL. 75% break downward.
-   - WEDGE_FALLING: 3 pushes down with decreasing momentum → BUY (bullish reversal). 75% reversal rate.
-   - WEDGE_RISING: 3 pushes up with decreasing momentum → SELL (bearish reversal). 75% reversal rate.
-   - CUP_AND_HANDLE: U-shape recovery + small pullback → BUY. Breakout above handle confirms.
-   - ROUNDING_BOTTOM: Gradual U-shape base → BUY. Slow accumulation pattern.
    - BULL_FLAG: Strong up-move + tight pullback channel → BUY. Continuation pattern.
    - BEAR_FLAG: Strong down-move + tight pullback channel → SELL. Continuation pattern.
-   - MTR_BUY: Major Trend Reversal bullish — first attempt fails, second succeeds → BUY. ~40% success.
-   - MTR_SELL: Major Trend Reversal bearish — first attempt fails, second succeeds → SELL. ~40% success.
+   - WEDGE_FALLING: 3 pushes down with decreasing momentum → BUY (bullish reversal). 75% reversal rate.
+   - MTR_BUY: Major Trend Reversal bullish — first attempt fails, second succeeds → BUY.
+   - MTR_SELL: Major Trend Reversal bearish — first attempt fails, second succeeds → SELL.
 
    B. ENVIRONMENT PATTERNS (direction determined by Always-In analysis):
    - CLIMAX: 3+ large consecutive bars → exhaustion. Only 25% get another strong bar next day.
-   - TIGHT_CHANNEL: Small bars, little overlap → strong continuation. First breakout attempt usually fails.
-   - BROAD_CHANNEL: Wider swings → tradeable pullbacks to EMA.
    - BREAKOUT: Strong bar breaking key level. Only 25% start new trend directly; 80% pull back to test.
    - TRADING_RANGE: No HH/HL, overlapping bars → high/low of range are key levels.
    - NONE: No clear pattern.
 
    IMPORTANT: For Category A patterns, direction MUST match the pattern's inherent signal
-   (e.g., DOUBLE_BOTTOM → direction must be UP, HEAD_SHOULDERS_TOP → direction must be DOWN).
+   (e.g., BULL_FLAG → direction must be UP, BEAR_FLAG → direction must be DOWN).
    For Category B patterns, direction is determined by your Always-In analysis.
 
 4. SIGNAL QUALITY CHECK:
@@ -181,11 +164,11 @@ CONFIDENCE SCORING (you MUST differentiate):
    You MUST find at least one baseline. Return bars_ago only (count from rightmost bar=0), NOT the price.
 
 Reply in JSON ONLY:
-{"direction": "UP", "confidence": 72, "reason": "double bottom at 50% retracement of prior swing, second test with bull follow-through bar, EMA support", "stoploss": 228.50, "brooks_pattern": "DOUBLE_BOTTOM", "baseline_buy": {"found": true, "bars_ago": 5}, "baseline_sell": {"found": true, "bars_ago": 12}}
+{"direction": "UP", "confidence": 72, "reason": "bull flag continuation after strong up-move, tight pullback to EMA, bull follow-through bar", "stoploss": 228.50, "brooks_pattern": "BULL_FLAG", "baseline_buy": {"found": true, "bars_ago": 5}, "baseline_sell": {"found": true, "bars_ago": 12}}
 
 direction: "UP" for buy, "DOWN" for sell, "SIDE" for no opportunity.
 confidence: integer 20-95 (MUST vary based on chart quality).
-brooks_pattern: one of DOUBLE_BOTTOM, DOUBLE_TOP, HEAD_SHOULDERS_BOTTOM, HEAD_SHOULDERS_TOP, ASC_TRIANGLE, DESC_TRIANGLE, WEDGE_FALLING, WEDGE_RISING, CUP_AND_HANDLE, ROUNDING_BOTTOM, BULL_FLAG, BEAR_FLAG, MTR_BUY, MTR_SELL, CLIMAX, TIGHT_CHANNEL, BROAD_CHANNEL, BREAKOUT, TRADING_RANGE, NONE.
+brooks_pattern: one of BULL_FLAG, BEAR_FLAG, WEDGE_FALLING, MTR_BUY, MTR_SELL, CLIMAX, BREAKOUT, TRADING_RANGE, NONE.
 baseline_buy/baseline_sell: found=true with bars_ago, or found=false if not identifiable.
 If no clear opportunity: {"direction": "SIDE", "confidence": 15, "reason": "choppy trading range, no second test", "stoploss": 0, "brooks_pattern": "TRADING_RANGE", "baseline_buy": {"found": true, "bars_ago": 8}, "baseline_sell": {"found": true, "bars_ago": 3}}
 """

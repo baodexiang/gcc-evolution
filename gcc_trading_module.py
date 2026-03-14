@@ -285,8 +285,7 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
         vision_bias, vision_conf = _read_vision(symbol)
         logger.warning("[GCC-TM] %s Vision from STALE cache (no fresh call): %s(%.0f%%)", symbol, vision_bias, vision_conf * 100)
 
-    # v0.3: BrooksVision 形态识别 (4H K线, 每根K线开盘调一次)
-    # 失败时降级为HOLD(弃权), 不阻塞整个流程
+    # KEY-010: BrooksVision 从门控拆出→信号池外挂 (4H开盘扫一次, 推入信号池持续8轮)
     bv_bias, bv_pattern = "HOLD", "NONE"
     try:
         import brooks_vision as _bv
@@ -295,27 +294,31 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
                                     else [_bv.INTERNAL_TO_YF.get(symbol, symbol)])
         if _bv_results:
             for _bv_r in _bv_results:
-                _bv_final = _bv_r.get("final", "")
                 _bv_sig = _bv_r.get("radar", {}).get("signal", "")
                 _bv_pat = _bv_r.get("radar", {}).get("brooks_pattern", "NONE")
+                _bv_conf = _bv_r.get("radar", {}).get("confidence", 50)
                 if _bv_sig in ("BUY", "SELL"):
                     bv_bias = _bv_sig
                     bv_pattern = _bv_pat
+                    # 推入信号池 (权重=1票, 4H TTL内持续参与投票)
+                    gcc_push_signal(symbol, "BrooksVision_4H", _bv_sig,
+                                    min(0.95, max(0.3, _bv_conf / 100.0)))
                     break
-        logger.info("[GCC-TM] %s BrooksVision: %s [%s]", symbol, bv_bias, bv_pattern)
+        logger.info("[GCC-TM] %s BrooksVision→信号池: %s [%s]", symbol, bv_bias, bv_pattern)
     except ImportError:
         logger.debug("[GCC-TM] %s BrooksVision not installed, skip", symbol)
     except Exception as _bv_e:
-        logger.warning("[GCC-TM] %s BrooksVision FAILED (降级HOLD): %s", symbol, _bv_e)
+        logger.warning("[GCC-TM] %s BrooksVision FAILED: %s", symbol, _bv_e)
 
     # 上一K线汇总
     prev = _load_prev_summary(symbol)
     prev_dir = prev.get("direction", "HOLD")
 
-    # v0.3: 三方投票 — Vision(趋势) + BrooksVision(形态) + prev_summary(上K汇总)
-    # HOLD=弃权, 2票同方向→执行, 1:1对冲→HOLD, 唯一有方向→跟随
+    # KEY-010: 两方投票 — Vision(趋势) + prev_summary(上K汇总)
+    # BV已拆出到信号池, 门控只保留趋势判断和惯性
+    # 两票同方向→执行, 1:1对冲→HOLD, 唯一有方向→跟随
     votes = {"BUY": 0, "SELL": 0}
-    for _v in [vision_bias, bv_bias, prev_dir]:
+    for _v in [vision_bias, prev_dir]:
         if _v in votes:
             votes[_v] += 1
 
@@ -330,8 +333,8 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
     else:
         effective = "HOLD"   # 1:1对冲或全弃权
 
-    logger.info("[GCC-TM] %s 三方投票: vision=%s bv=%s[%s] prev=%s → effective=%s",
-                symbol, vision_bias, bv_bias, bv_pattern, prev_dir, effective)
+    logger.info("[GCC-TM] %s 两方投票: vision=%s prev=%s → effective=%s (BV→池: %s[%s])",
+                symbol, vision_bias, prev_dir, effective, bv_bias, bv_pattern)
 
     state = CandleState(
         symbol=symbol,
