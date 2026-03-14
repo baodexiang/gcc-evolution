@@ -94,9 +94,11 @@ if not all_improvements:
             print(f"  skip improvements.json: {e}")
 
 ## Scan .GCC/skill/cards/ for structured JSON knowledge cards
+# 只显示真正的知识卡(JSON), gcc.db的任务步骤卡不计入
+all_cards = []
 card_dir = GCC_DIR / "skill" / "cards"
 if card_dir.exists():
-    seen_ids = {c["id"] for c in all_cards}
+    seen_ids = set()
     for jf in sorted(card_dir.rglob("*.json")):
         try:
             d = json.loads(jf.read_text(encoding="utf-8", errors="ignore"))
@@ -120,6 +122,21 @@ if all_improvements:
     inject_lines.append(f"DATA.improvements = {json.dumps(all_improvements, ensure_ascii=False)};")
 if all_cards:
     inject_lines.append(f"DATA.cards = {json.dumps(all_cards, ensure_ascii=False)};")
+
+# 经验卡计数
+_exp_file = pathlib.Path("state") / "gcc_knn_experience.jsonl"
+_exp_count, _exp_backfilled = 0, 0
+if _exp_file.exists():
+    for _line in _exp_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if _line.strip():
+            try:
+                _e = json.loads(_line)
+                _exp_count += 1
+                if _e.get("outcome") is not None:
+                    _exp_backfilled += 1
+            except: pass
+inject_lines.append(f"DATA.experience_cards = {{total: {_exp_count}, backfilled: {_exp_backfilled}}};")
+loaded.append(f"cards: {len(all_cards)} knowledge, {_exp_count} experience")
 
 # ══ TASKS - collect from all sources ══════════════════════
 all_tasks = []
