@@ -565,43 +565,63 @@ function switchBrokerPeriod(period) {
     _renderBrokerSummaryCard(period);
 }
 
+function _getBrokerPeriodEntry(periodsObj, period) {
+    if (period === 'daily') {
+        const daily = periodsObj.daily || [];
+        const todayStr = new Date().toISOString().slice(0,10);
+        return daily.find(d => d.date === todayStr) || { pnl: 0, trades: 0, fees: 0 };
+    } else if (period === 'weekly') {
+        const weekly = periodsObj.weekly || [];
+        return weekly.length ? weekly[weekly.length - 1] : { pnl: 0, trades: 0, fees: 0 };
+    } else {
+        const monthly = periodsObj.monthly || [];
+        return monthly.length ? monthly[monthly.length - 1] : { pnl: 0, trades: 0, fees: 0 };
+    }
+}
+
+function _splitSchwabSymbols(bp) {
+    // 从schwab symbols拆分: 期权(symbol长度>10或含P0/C0) vs 美股
+    const schwabSyms = ((bp.schwab||{}).symbols) || {};
+    let stockPnl = 0, stockTrades = 0, optPnl = 0, optTrades = 0;
+    for (const [sym, s] of Object.entries(schwabSyms)) {
+        const isOpt = sym.length > 10 || /[PC]\d{5,}/.test(sym);
+        if (isOpt) {
+            optPnl += s.realized_pnl || 0;
+            optTrades += (s.buys || 0) + (s.sells || 0);
+        } else {
+            stockPnl += s.realized_pnl || 0;
+            stockTrades += (s.buys || 0) + (s.sells || 0);
+        }
+    }
+    return { stockPnl, stockTrades, optPnl, optTrades };
+}
+
 function _renderBrokerSummaryCard(period) {
     const bp = (window._DATA_CACHE || DATA).broker_pnl || {};
     const bpCards = document.getElementById('broker-pnl-cards');
     if (!bpCards) return;
     const comb = bp.combined;
     if (!comb) { bpCards.innerHTML = ''; return; }
-    const periods = comb.periods || {};
     const boundary = _nyBoundary(period);
+    const label = boundary.label;
     const pnlColor = v => v >= 0 ? 'green' : 'red';
     const pnlFmt = v => (v >= 0 ? '+$' : '-$') + Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 
-    // 根据period选数据源
-    let pnl = 0, trades = 0, fees = 0, label = boundary.label;
-    if (period === 'daily') {
-        const daily = periods.daily || [];
-        const todayStr = new Date().toISOString().slice(0,10);
-        const entry = daily.find(d => d.date === todayStr);
-        pnl = entry ? entry.pnl : 0;
-        trades = entry ? entry.trades : 0;
-        fees = entry ? (entry.fees || 0) : 0;
-    } else if (period === 'weekly') {
-        const weekly = periods.weekly || [];
-        const last = weekly.length ? weekly[weekly.length - 1] : null;
-        pnl = last ? last.pnl : 0;
-        trades = last ? (last.trades || 0) : 0;
-        fees = last ? (last.fees || 0) : 0;
-    } else {
-        const monthly = periods.monthly || [];
-        const last = monthly.length ? monthly[monthly.length - 1] : null;
-        pnl = last ? last.pnl : 0;
-        trades = last ? (last.trades || 0) : 0;
-        fees = last ? (last.fees || 0) : 0;
-    }
+    // 总P&L (按period)
+    const combEntry = _getBrokerPeriodEntry(comb.periods || {}, period);
+    // 加密货币P&L (按period)
+    const cbEntry = _getBrokerPeriodEntry(((bp.coinbase||{}).periods||{}), period);
+    // 美股+期权拆分 (从symbols汇总, 不受period影响——period级别schwab没拆)
+    // periods级别: schwab整体
+    const schwabEntry = _getBrokerPeriodEntry(((bp.schwab||{}).periods||{}), period);
+    // symbols级别: 拆美股vs期权 (用于60天累计比例展示)
+    const split = _splitSchwabSymbols(bp);
+
     bpCards.innerHTML = `
-        <div class="card"><div class="label">${label} P&L</div><div class="value ${pnlColor(pnl)}">${pnlFmt(pnl)}</div><div class="sub">${trades ? trades+'笔' : '无交易'}</div></div>
-        <div class="card"><div class="label">${label} 手续费</div><div class="value yellow">$${Math.abs(fees).toFixed(2)}</div></div>
-        <div class="card"><div class="label">60天累计</div><div class="value ${pnlColor(comb.total_pnl||0)}">${pnlFmt(comb.total_pnl||0)}</div><div class="sub">${comb.total_trades||0}笔</div></div>
+        <div class="card"><div class="label">${label} 总P&L</div><div class="value ${pnlColor(combEntry.pnl||0)}">${pnlFmt(combEntry.pnl||0)}</div><div class="sub">${(combEntry.trades||0) ? (combEntry.trades||0)+'笔' : '无交易'}</div></div>
+        <div class="card"><div class="label">加密货币</div><div class="value ${pnlColor(cbEntry.pnl||0)}">${pnlFmt(cbEntry.pnl||0)}</div><div class="sub">${(cbEntry.trades||0) ? (cbEntry.trades||0)+'笔' : '无交易'}</div></div>
+        <div class="card"><div class="label">美股</div><div class="value ${pnlColor(schwabEntry.pnl||0)}">${pnlFmt(schwabEntry.pnl||0)}</div><div class="sub">${(schwabEntry.trades||0)+'笔'} (含期权)</div></div>
+        <div class="card"><div class="label">期权累计</div><div class="value ${pnlColor(split.optPnl)}">${pnlFmt(split.optPnl)}</div><div class="sub">${split.optTrades}笔</div></div>
     `;
 }
 
