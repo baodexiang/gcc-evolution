@@ -100,9 +100,9 @@ PATTERN_SIGNAL_MAP = {
 }
 
 # ---------------------------------------------------------------------------
-# Brooks Vision Prompt (v2.6: 扩展形态识别+形态驱动方向)
+# Brooks Vision Prompt V1 (v2.6 backup for rollback)
 # ---------------------------------------------------------------------------
-RADAR_PROMPT = """You are an expert price action trader trained in Al Brooks methodology and Rose's practical rules. Study this 4H chart carefully.
+RADAR_PROMPT_V1 = """You are an expert price action trader trained in Al Brooks methodology and Rose's practical rules. Study this 4H chart carefully.
 
 TASK: Determine if there is a clear BUY or SELL opportunity RIGHT NOW.
 
@@ -172,6 +172,86 @@ brooks_pattern: one of BULL_FLAG, BEAR_FLAG, WEDGE_FALLING, MTR_BUY, MTR_SELL, C
 baseline_buy/baseline_sell: found=true with bars_ago, or found=false if not identifiable.
 If no clear opportunity: {"direction": "SIDE", "confidence": 15, "reason": "choppy trading range, no second test", "stoploss": 0, "brooks_pattern": "TRADING_RANGE", "baseline_buy": {"found": true, "bars_ago": 8}, "baseline_sell": {"found": true, "bars_ago": 3}}
 """
+
+# ---------------------------------------------------------------------------
+# Brooks Vision Prompt V2 (GCC-0262 S2: 5步Brooks框架 + 标注图语义引用)
+# ---------------------------------------------------------------------------
+RADAR_PROMPT_V2 = """You are an expert in Al Brooks Price Action methodology.
+Analyze the annotated candlestick chart and return a structured JSON assessment.
+
+The chart contains these visual annotations:
+- EMA9 (orange line) and EMA21 (blue line)
+- Swing High levels (red dashed horizontal lines)
+- Swing Low levels (green dashed horizontal lines)
+- Current price marker (yellow "NOW" label with white vertical dotted line)
+
+## Your Analysis Framework
+
+### Step 1: Market Structure
+- Is the market in a TREND (bull/bear) or TRADING RANGE?
+- Identify the dominant leg: is momentum expanding or contracting?
+- Are swing highs/lows (red/green dashed lines) being respected or broken?
+
+### Step 2: Bar-by-Bar Context (last 5 bars)
+- Describe the last 5 candles: body size, tail ratios, overlap with prior bars
+- Is there follow-through buying/selling, or are bars overlapping (chop)?
+- Identify key single-bar patterns: outside bar, inside bar, doji, reversal bar
+
+### Step 3: Brooks-Specific Pattern Detection
+Check explicitly for:
+- **BULL_FLAG**: Strong up-move + tight pullback channel → BUY continuation
+- **BEAR_FLAG**: Strong down-move + tight pullback channel → SELL continuation
+- **WEDGE_FALLING**: 3 pushes down with diminishing momentum → BUY reversal (75%)
+- **MTR_BUY**: Major Trend Reversal bullish — first attempt fails, second succeeds → BUY
+- **MTR_SELL**: Major Trend Reversal bearish — first attempt fails, second succeeds → SELL
+- **CLIMAX**: 3+ consecutive large trend bars, far from EMA → exhaustion (only 25% continue)
+- **BREAKOUT**: Strong bar breaking swing high/low level. 80% pull back to test.
+- **TRADING_RANGE**: No HH/HL, overlapping bars → buy low/sell high
+- **Failed Breakout**: Price breaks above swing high (red line) or below swing low (green line) then reverses within 1-3 bars — HIGH priority signal
+
+### Step 4: EMA Assessment
+- Is price above or below EMA9 (orange) and EMA21 (blue)?
+- Are EMAs aligned (both sloping same direction) or tangled?
+- Always-In direction: price above both EMAs = lean BUY, below both = lean SELL
+
+### Step 5: Directional Bias
+Given the above, state your bias and confidence. Apply these rules:
+- If pattern confidence is LOW and environment is unclear → set wait_signal: true
+- If failed_breakout is true → this is HIGH priority regardless of other factors
+- For BULL_FLAG/WEDGE_FALLING/MTR_BUY → direction MUST be UP
+- For BEAR_FLAG/MTR_SELL → direction MUST be DOWN
+- For CLIMAX/BREAKOUT/TRADING_RANGE → direction by Always-In analysis
+
+CONFIDENCE SCORING:
+- 20-35: No clear pattern, choppy, environment unclear
+- 40-55: Pattern visible but environment unfavorable or no second test
+- 60-75: Clear pattern + favorable environment + key level + confirmation
+- 80-95: Strong trend continuation OR reversal with 2+ bar follow-through
+
+## BASELINE IDENTIFICATION
+Find two reference bars from the last 30 bars:
+- baseline_buy: Most recent GREEN bar at a relative LOW position (bars_ago from rightmost=0)
+- baseline_sell: Most recent RED bar at a relative HIGH position
+You MUST find at least one baseline.
+
+## Output Format (strict JSON, no markdown wrapping)
+{"direction": "UP", "confidence": 72, "reason": "bull flag continuation, tight pullback to EMA, follow-through bar", "market_structure": "TREND_UP", "brooks_pattern": "BULL_FLAG", "failed_breakout": false, "wait_signal": false, "stoploss": 228.50, "baseline_buy": {"found": true, "bars_ago": 5}, "baseline_sell": {"found": true, "bars_ago": 12}}
+
+Field definitions:
+- direction: "UP" (buy), "DOWN" (sell), "SIDE" (no opportunity)
+- confidence: integer 20-95
+- reason: one sentence explaining primary signal
+- market_structure: "TREND_UP" | "TREND_DOWN" | "TRADING_RANGE"
+- brooks_pattern: BULL_FLAG | BEAR_FLAG | WEDGE_FALLING | MTR_BUY | MTR_SELL | CLIMAX | BREAKOUT | TRADING_RANGE | NONE
+- failed_breakout: true if price broke swing level then reversed within 1-3 bars
+- wait_signal: true if no clear opportunity (low confidence + unclear environment)
+- stoploss: price level for stop loss (0 if SIDE)
+- baseline_buy/baseline_sell: found + bars_ago
+"""
+
+# GCC-0262 S5: 环境变量开关 (默认V2, =0回滚V1)
+_BV_ENHANCED = os.environ.get("BV_ENHANCED_PROMPT", "1") != "0"
+RADAR_PROMPT = RADAR_PROMPT_V2 if _BV_ENHANCED else RADAR_PROMPT_V1
 
 SCAN_INTERVAL_SEC = 3600  # v2.2: 1小时(从30分钟降频,节省API成本)
 
@@ -547,6 +627,16 @@ def radar_scan(symbol: str, mods: dict) -> Optional[Dict[str, Any]]:
         stoploss = 0.0
     brooks_pattern = str(entry.get("brooks_pattern", "NONE")).upper()
 
+    # GCC-0262 S4: V2新增字段
+    failed_breakout = bool(entry.get("failed_breakout", False))
+    wait_signal = bool(entry.get("wait_signal", False))
+    market_structure = str(entry.get("market_structure", "UNKNOWN")).upper()
+
+    # GCC-0262 S4: wait_signal=true → 不产信号
+    if wait_signal and signal != "NONE":
+        logger.info(f"[{symbol}] wait_signal=True → 信号降级为NONE")
+        signal = "NONE"
+
     result = {
         "bars": [],  # GCC-0194: 不再获取bars (缓存模式)
         "signal": signal,
@@ -554,10 +644,14 @@ def radar_scan(symbol: str, mods: dict) -> Optional[Dict[str, Any]]:
         "confidence": max(0, min(100, conf_pct)),
         "stoploss": stoploss,
         "brooks_pattern": brooks_pattern,
+        "failed_breakout": failed_breakout,       # GCC-0262 S4
+        "wait_signal": wait_signal,               # GCC-0262 S4
+        "market_structure": market_structure,      # GCC-0262 S4
     }
     logger.info(f"[{symbol}] Brooks(缓存): {signal} | "
                 f"[{brooks_pattern}] {result['pattern'][:50]} | "
-                f"conf={conf_pct} | SL={stoploss}")
+                f"conf={conf_pct} | SL={stoploss} | "
+                f"fb={failed_breakout} ws={wait_signal} ms={market_structure}")
     return result
 
 
@@ -640,6 +734,9 @@ def record_observation(symbol: str, radar: Dict, filter_result: Dict,
             "confidence": radar["confidence"],
             "stoploss": radar["stoploss"],
             "brooks_pattern": radar.get("brooks_pattern", "NONE"),
+            "failed_breakout": radar.get("failed_breakout", False),      # GCC-0262 S4
+            "wait_signal": radar.get("wait_signal", False),              # GCC-0262 S4
+            "market_structure": radar.get("market_structure", "UNKNOWN"), # GCC-0262 S4
         },
         "filter": filter_result,
         "l2_signal": l2_signal,

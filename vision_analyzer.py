@@ -975,10 +975,11 @@ def generate_chart_image(bars: List[Dict], title: str = "") -> Optional[str]:
 
 def generate_clean_chart(bars: List[Dict], title: str = "", timeframe: str = "daily") -> Optional[str]:
     """
-    v1.0: Vision专用干净K线图
-    只保留: K线(实体+影线，涨绿跌红) + EMA10(白色) + 成交量(底部，涨绿跌红)
-    去掉: 所有其他指标/趋势线/网格线
-    规格: 1200×800px, 黑色背景
+    v2.0 (GCC-0262 S1): Vision专用标注K线图
+    保留: K线(涨绿跌红) + 成交量(底部)
+    新增: EMA9(橙) + EMA21(蓝) + Swing H/L水平线(红/绿虚线,最近5个) + 当前价NOW标记
+    去掉: 旧EMA10, 网格线
+    规格: 1200×840px, 黑色背景, returnfig=True以便叠加标注
     """
     try:
         import mplfinance as mpf
@@ -995,12 +996,25 @@ def generate_clean_chart(bars: List[Dict], title: str = "", timeframe: str = "da
         return None
 
     try:
-        buf = io.BytesIO()
+        # --- EMA9 + EMA21 ---
+        ema9 = calculate_ema(df['Close'], 9).bfill()
+        ema21 = calculate_ema(df['Close'], 21).bfill()
 
-        # EMA10 白色线
-        ema10 = calculate_ema(df['Close'], 10)
+        # --- Swing H/L (strength=3, 最近5个) ---
+        swing_highs_price, swing_lows_price = [], []
+        high_col, low_col = df['High'].values, df['Low'].values
+        _sw = 3
+        for i in range(_sw, len(df) - _sw):
+            if all(high_col[i] > high_col[i - j] for j in range(1, _sw + 1)) and \
+               all(high_col[i] > high_col[i + j] for j in range(1, _sw + 1)):
+                swing_highs_price.append(float(high_col[i]))
+            if all(low_col[i] < low_col[i - j] for j in range(1, _sw + 1)) and \
+               all(low_col[i] < low_col[i + j] for j in range(1, _sw + 1)):
+                swing_lows_price.append(float(low_col[i]))
+        swing_highs_price = swing_highs_price[-5:]  # 最近5个
+        swing_lows_price = swing_lows_price[-5:]
 
-        # 自定义黑色背景样式
+        # --- 样式 ---
         mc = mpf.make_marketcolors(
             up='#26a69a',     # 涨绿
             down='#ef5350',   # 跌红
@@ -1010,41 +1024,78 @@ def generate_clean_chart(bars: List[Dict], title: str = "", timeframe: str = "da
         )
         style = mpf.make_mpf_style(
             marketcolors=mc,
-            facecolor='#000000',    # 黑色背景
+            facecolor='#000000',
             edgecolor='#333333',
             figcolor='#000000',
-            gridcolor='#111111',    # 网格颜色与背景近似=不可见
+            gridcolor='#111111',
             gridstyle='-',
             y_on_right=True,
         )
 
         addplots = [
-            mpf.make_addplot(ema10, color='#ffffff', width=1.2, linestyle='-'),
+            mpf.make_addplot(ema9, color='#FF9500', width=1.0),   # EMA9 橙
+            mpf.make_addplot(ema21, color='#007AFF', width=1.0),  # EMA21 蓝
         ]
 
-        mpf.plot(
+        # --- hlines: Swing H/L 水平虚线 ---
+        all_hlines = swing_highs_price + swing_lows_price
+        hline_colors = ['#FF4444'] * len(swing_highs_price) + ['#44FF44'] * len(swing_lows_price)
+
+        hlines_kwarg = {}
+        if all_hlines:
+            hlines_kwarg = dict(
+                hlines=dict(
+                    hlines=all_hlines,
+                    colors=hline_colors,
+                    linestyle='--',
+                    linewidths=0.8,
+                    alpha=0.55,
+                ),
+            )
+
+        # --- mpf.plot with returnfig=True ---
+        fig, axes = mpf.plot(
             df,
             type='candle',
             volume=True,
             style=style,
             title=f" {title}",
-            figsize=(12, 8),         # 1200×800 @ dpi=100
+            figsize=(12, 8.4),
             addplot=addplots,
             tight_layout=True,
-            savefig=dict(fname=buf, dpi=100, bbox_inches='tight',
-                         facecolor='#000000'),
+            returnfig=True,
+            **hlines_kwarg,
         )
 
+        # --- 当前价 NOW 标记 (returnfig后操作ax) ---
+        ax = axes[0]
+        current_price = float(df['Close'].iloc[-1])
+        current_bar_idx = len(df) - 1
+        ax.axvline(x=current_bar_idx, color='white', linestyle=':', alpha=0.4, linewidth=0.8)
+        ax.annotate(
+            f'NOW: {current_price:.2f}',
+            xy=(current_bar_idx, current_price),
+            xytext=(current_bar_idx + 0.5, current_price),
+            fontsize=8, color='yellow', fontweight='bold',
+            bbox=dict(boxstyle='round,pad=0.2', facecolor='#333333', alpha=0.7),
+        )
+
+        # --- 输出 base64 ---
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', dpi=100, bbox_inches='tight',
+                    facecolor=fig.get_facecolor())
         buf.seek(0)
+        plt.close(fig)
         img_b64 = base64.b64encode(buf.read()).decode("utf-8")
         buf.close()
 
         bar_count = len(df)
-        print(f"[Vision v1.0] clean chart: {title} | {bar_count}根K线 | {timeframe}")
+        print(f"[Vision v2.0] annotated chart: {title} | {bar_count}根K线 | "
+              f"EMA9/21 | {len(swing_highs_price)}SH+{len(swing_lows_price)}SL | {timeframe}")
         return img_b64
 
     except Exception as e:
-        print(f"[Vision] clean chart生成失败: {e}")
+        print(f"[Vision] annotated chart生成失败: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -1296,6 +1347,21 @@ def _parse_radar_to_pattern(radar_dict: dict) -> Optional[Dict[str, Any]]:
     # position: RADAR_PROMPT不直接输出position, 默认MID
     position = "MID"
 
+    # GCC-0262 S4: V2新增字段 (failed_breakout, wait_signal, market_structure)
+    failed_breakout = bool(radar_dict.get("failed_breakout", False))
+    wait_signal = bool(radar_dict.get("wait_signal", False))
+    market_structure = str(radar_dict.get("market_structure", "")).upper()
+    if market_structure not in ("TREND_UP", "TREND_DOWN", "TRADING_RANGE"):
+        market_structure = "UNKNOWN"
+
+    # GCC-0262 S4: wait_signal=true时强制SIDE (Vision建议观望, 优先级最高)
+    if wait_signal and direction != "SIDE":
+        direction = "SIDE"
+        confidence = min(confidence, 0.35)
+    # GCC-0262 S4: failed_breakout=true时confidence boost (+0.15, wait_signal时不boost)
+    elif failed_breakout and confidence < 0.85:
+        confidence = min(1.0, confidence + 0.15)
+
     return {
         "pattern": pattern,
         "stage": stage,
@@ -1308,6 +1374,9 @@ def _parse_radar_to_pattern(radar_dict: dict) -> Optional[Dict[str, Any]]:
         "stoploss": stoploss,
         "brooks_pattern": brooks_pattern,
         "direction": direction,
+        "failed_breakout": failed_breakout,       # GCC-0262 S4
+        "wait_signal": wait_signal,               # GCC-0262 S4
+        "market_structure": market_structure,      # GCC-0262 S4
     }
 
 
@@ -2339,17 +2408,40 @@ def analyze_patterns(symbol: str, cfg: dict) -> Optional[Dict]:
     if not bars:
         return None
 
-    # 2. 生成形态图 (GCC-0046: 切换到TV风格干净K线图)
+    # 2. 生成标注图 (GCC-0262 S1: Swing H/L + EMA9/21 + NOW标记)
     chart_base64 = generate_clean_chart(bars, f"{symbol} - Pattern Analysis ({len(bars)} bars)", timeframe=_current_label)
     if not chart_base64:
-        print(f"[Vision v3.1] {symbol} 形态图生成失败")
+        print(f"[Vision v3.5] {symbol} 标注图生成失败")
         return None
 
-    # 3. GCC-0194: 使用Brooks RADAR_PROMPT (统一单次GPT调用)
+    # 3. GCC-0262 S2+S3: Brooks RADAR_PROMPT + 动态User Prompt (swing距离)
     from brooks_vision import RADAR_PROMPT
     pattern_prompt = RADAR_PROMPT
 
-    print(f"[Vision v3.5] {symbol} 调用GPT Brooks形态识别 ({_current_label})...")
+    # GCC-0262 S3: 动态注入当前价+swing距离
+    _current_price = bars[-1].get("close", 0) if bars else 0
+    if _current_price > 0:
+        # 计算最近swing high/low (与图表标注一致, strength=3)
+        _df_tmp = bars_to_dataframe(bars)
+        _nearest_sh, _nearest_sl = 0.0, 0.0
+        if _df_tmp is not None and len(_df_tmp) >= 7:
+            _hc, _lc = _df_tmp['High'].values, _df_tmp['Low'].values
+            for i in range(3, len(_df_tmp) - 3):
+                if all(_hc[i] > _hc[i-j] for j in range(1, 4)) and all(_hc[i] > _hc[i+j] for j in range(1, 4)):
+                    _nearest_sh = float(_hc[i])
+                if all(_lc[i] < _lc[i-j] for j in range(1, 4)) and all(_lc[i] < _lc[i+j] for j in range(1, 4)):
+                    _nearest_sl = float(_lc[i])
+        _user_ctx = f"\n\nChart: {symbol} | Timeframe: {_current_label} | Current Price: {_current_price:.2f}"
+        if _nearest_sh > 0:
+            _sh_dist = (_nearest_sh - _current_price) / _current_price * 100
+            _user_ctx += f"\nNearest Swing High (red dashed): {_nearest_sh:.2f} ({_sh_dist:+.2f}%)"
+        if _nearest_sl > 0:
+            _sl_dist = (_current_price - _nearest_sl) / _current_price * 100
+            _user_ctx += f"\nNearest Swing Low (green dashed): {_nearest_sl:.2f} (-{_sl_dist:.2f}%)"
+        _user_ctx += "\nPlease analyze the annotated chart and return the JSON assessment."
+        pattern_prompt = pattern_prompt + _user_ctx
+
+    print(f"[Vision v3.5] {symbol} 调用Claude Brooks形态识别 ({_current_label})...")
     result = call_chatgpt_vision(chart_base64, pattern_prompt, max_retries=2, expected_mode="trend", symbol=symbol)
 
     latency_ms = int((time.time() - start_time) * 1000)
@@ -2407,6 +2499,9 @@ def analyze_patterns(symbol: str, cfg: dict) -> Optional[Dict]:
         "direction": direction,              # GCC-0194: UP/DOWN/SIDE
         "stoploss": stoploss,                # GCC-0194: 止损价
         "brooks_pattern": brooks_pattern,    # GCC-0194: Brooks形态名
+        "failed_breakout": normalized.get("failed_breakout", False),    # GCC-0262 S4
+        "wait_signal": normalized.get("wait_signal", False),            # GCC-0262 S4
+        "market_structure": normalized.get("market_structure", "UNKNOWN"),  # GCC-0262 S4
         "timeframe_minutes": int(_sym_tf),
         "timeframe_label": _current_label,
         "analysis_interval_minutes": int(RUN_CONFIG.get("analysis_interval_minutes", 30)),
