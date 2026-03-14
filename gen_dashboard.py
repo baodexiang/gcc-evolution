@@ -11,7 +11,7 @@ TEMPLATE = SCRIPT_DIR / ".GCC" / "gcc_dashboard.html"
 
 # ── Dashboard 格式锁 (2026-03-07 确认为最佳格式) ──────────────────────────
 # 修改模板前必须经用户明确同意，确认后更新此 hash
-TEMPLATE_HASH_LOCK = "6054c5bc106b1b9b28058db0cda37f2f7ba72dbe2d50f8d0ef3f46611477e040"
+TEMPLATE_HASH_LOCK = "b7bf09835cf56c7e481bce1bcb058efd2f66749e01ed1ad9418c552d20130635"
 
 if not TEMPLATE.exists():
     print(f"错误：找不到 {TEMPLATE}")
@@ -123,9 +123,10 @@ if all_improvements:
 if all_cards:
     inject_lines.append(f"DATA.cards = {json.dumps(all_cards, ensure_ascii=False)};")
 
-# 经验卡计数
+# 经验卡计数 + 排名数据
 _exp_file = pathlib.Path("state") / "gcc_knn_experience.jsonl"
 _exp_count, _exp_backfilled = 0, 0
+_exp_all = []
 if _exp_file.exists():
     for _line in _exp_file.read_text(encoding="utf-8", errors="ignore").splitlines():
         if _line.strip():
@@ -134,8 +135,39 @@ if _exp_file.exists():
                 _exp_count += 1
                 if _e.get("outcome") is not None:
                     _exp_backfilled += 1
+                _exp_all.append(_e)
             except: pass
 inject_lines.append(f"DATA.experience_cards = {{total: {_exp_count}, backfilled: {_exp_backfilled}}};")
+
+# 知识卡 Top10 / Bottom10 (按 confidence 排序)
+_kc_ranked = []
+for _c in all_cards:
+    _conf = 0
+    try: _conf = float(_c.get("confidence", 0) or 0)
+    except: pass
+    _kc_ranked.append({"title": _c.get("title", "")[:60], "confidence": _conf, "key_id": _c.get("key_id", "")})
+_kc_ranked.sort(key=lambda x: x["confidence"], reverse=True)
+_kc_top10 = _kc_ranked[:10]
+_kc_bot10 = _kc_ranked[-10:] if len(_kc_ranked) >= 10 else _kc_ranked
+inject_lines.append(f"DATA.card_rank = {{top10: {json.dumps(_kc_top10, ensure_ascii=False)}, bottom10: {json.dumps(_kc_bot10, ensure_ascii=False)}}};")
+
+# 经验卡按品种胜率排名
+from collections import defaultdict
+_exp_sym = defaultdict(lambda: {"win": 0, "lose": 0, "pending": 0})
+for _e in _exp_all:
+    _s = _e.get("symbol", "?")
+    _o = _e.get("outcome")
+    if _o is True: _exp_sym[_s]["win"] += 1
+    elif _o is False: _exp_sym[_s]["lose"] += 1
+    else: _exp_sym[_s]["pending"] += 1
+_exp_rank = []
+for _s, _v in _exp_sym.items():
+    _total = _v["win"] + _v["lose"]
+    _wr = round(_v["win"] / _total * 100, 1) if _total > 0 else 0
+    _exp_rank.append({"symbol": _s, "win": _v["win"], "lose": _v["lose"], "pending": _v["pending"], "total": _total, "wr": _wr})
+_exp_rank.sort(key=lambda x: x["wr"], reverse=True)
+inject_lines.append(f"DATA.exp_rank = {json.dumps(_exp_rank, ensure_ascii=False)};")
+
 loaded.append(f"cards: {len(all_cards)} knowledge, {_exp_count} experience")
 
 # ══ TASKS - collect from all sources ══════════════════════
