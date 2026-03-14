@@ -188,7 +188,7 @@ PATTERN_CHART_CONFIG = {
 }
 
 # v3.1: 形态检测冷却 (独立于趋势冷却)
-PATTERN_COOLDOWN_MINUTES = 60  # GCC-0194: 1小时冷却 (从4H降频, 对齐BrooksVision)
+PATTERN_COOLDOWN_MINUTES = 240  # 4H冷却 (与趋势分析对齐, GCC-TM candle open为唯一权威调用点)
 
 # v3.4: 形态识别熔断保护（连续失败）
 PATTERN_CIRCUIT_FAIL_THRESHOLD = 3

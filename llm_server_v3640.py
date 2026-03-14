@@ -563,8 +563,8 @@ except ImportError as e:
 
 ENABLE_VISION_TREND_ANALYZER = True  # Vision用于形态+基准价格(RADAR_PROMPT)+N字结构+KEY-001 Cache
 VISION_LATEST_FILE = "state/vision/latest.json"  # 缓存文件
-VISION_RESULT_TTL_SECONDS = 7200  # 结果有效期2小时
-VISION_PER_SYMBOL_COOLDOWN = 1800  # 每品种最少间隔30分钟才重新调API
+VISION_RESULT_TTL_SECONDS = 16200  # 结果有效期4.5小时 (覆盖整根4H K线+余量)
+VISION_PER_SYMBOL_COOLDOWN = 14400  # 每品种4小时冷却 (GCC-TM force_refresh是唯一权威调用点)
 
 # 内存缓存: {symbol: {"result": ..., "ts": float}}
 _vision_mem_cache = {}

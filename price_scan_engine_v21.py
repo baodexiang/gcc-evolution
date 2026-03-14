@@ -9343,7 +9343,7 @@ class PriceScanEngine:
         plugin_scan_interval_seconds = SCAN_INTERVAL_BY_TF.get(symbol_tf_minutes, 300)
 
         # GCC-0046: 扫描引擎直接调用Vision形态识别 (脱离TV依赖)
-        # analyze_patterns内部有4h冷却，不会每次都调API
+        # analyze_patterns内部有4H冷却(PATTERN_COOLDOWN_MINUTES=240)，不会每次都调API
         # 冷却期内返回None，plugin继续读上次的pattern_latest.json缓存
         pattern_lookup_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
         if _vision_pattern_available and _vision_get_symbols_config:

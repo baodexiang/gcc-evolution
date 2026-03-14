@@ -62,8 +62,8 @@ def get_timeframe_params(timeframe_minutes: int, is_crypto: bool = True) -> dict
     # 扫描引擎周期字符串
     scan_timeframe_str = _minutes_to_scan_str(tf)
 
-    # GCC-0194: Vision冷却固定60分钟 (1H统一刷新, 不再跟随周期)
-    vision_cooldown_minutes = 60
+    # Vision冷却4小时 (趋势分析不需高频, 节省API成本)
+    vision_cooldown_minutes = 240
 
     return {
         "timeframe_minutes": tf,
