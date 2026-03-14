@@ -6636,6 +6636,68 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
         )
         results["audit"] = ok
 
+        # Step 2.5: gcc-tm经验卡 → card_activations (打通gcc-tm→gcc-evo)
+        try:
+            _exp_file = project_root / "state" / "gcc_knn_experience.jsonl"
+            _act_file = project_root / "state" / "card_activations.jsonl"
+            _sync_marker = project_root / "state" / ".gcc_tm_exp_synced"
+            # 读取上次同步位置
+            _last_synced = 0
+            if _sync_marker.exists():
+                try:
+                    _last_synced = int(_sync_marker.read_text().strip())
+                except Exception:
+                    pass
+            if _exp_file.exists():
+                _exp_entries = []
+                with open(str(_exp_file), "r", encoding="utf-8") as _ef:
+                    for _line in _ef:
+                        _line = _line.strip()
+                        if _line:
+                            try:
+                                _exp_entries.append(json.loads(_line))
+                            except Exception:
+                                pass
+                # 只处理已回填且未同步的经验卡
+                _new_exps = [e for i, e in enumerate(_exp_entries)
+                             if i >= _last_synced and e.get("outcome") is not None]
+                if _new_exps:
+                    _synced = 0
+                    with open(str(_act_file), "a", encoding="utf-8") as _af:
+                        for _exp in _new_exps:
+                            # 经验卡 → card_activation 格式
+                            _act = {
+                                "ts": _exp.get("ts", ""),
+                                "card_id": f"EXP_TM_{_exp['symbol']}_{_exp['action']}",
+                                "rule_index": 0,
+                                "symbol": _exp["symbol"],
+                                "action": _exp["action"],
+                                "price": _exp.get("price", 0),
+                                "result": "correct" if _exp["outcome"] else "incorrect",
+                                "ctx": {
+                                    "source": "gcc_tm",
+                                    "features": _exp.get("features", []),
+                                    "strongest_source": _exp.get("strongest_source", ""),
+                                    "signals_count": _exp.get("signals_count", 0),
+                                    "vote_detail": _exp.get("vote_detail", {}),
+                                },
+                            }
+                            _af.write(json.dumps(_act, ensure_ascii=False) + "\n")
+                            _synced += 1
+                    # 更新同步标记
+                    _sync_marker.write_text(str(len(_exp_entries)))
+                    click.echo(f"  ✓ Step 2.5: gcc-tm经验卡 → {_synced}条同步到card_activations")
+                    results["exp_sync"] = True
+                else:
+                    click.echo(f"  ○ Step 2.5: gcc-tm经验卡 — 无新增")
+                    results["exp_sync"] = True
+            else:
+                click.echo(f"  ○ Step 2.5: gcc-tm经验卡 — 文件不存在")
+                results["exp_sync"] = False
+        except Exception as _exp_e:
+            click.echo(f"  ✗ Step 2.5: gcc-tm经验卡 — {_exp_e}")
+            results["exp_sync"] = False
+
         # Step 3: Distill (经验提炼→SkillBank)
         if dry_run:
             click.echo(f"  ⏳ Step 3/5: Distill (提炼)... [dry-run skip]")

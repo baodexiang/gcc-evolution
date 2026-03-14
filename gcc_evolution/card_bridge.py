@@ -250,8 +250,18 @@ class CardBridge:
                 if entry.get("type") == "outcome":
                     key = (cid, entry.get("symbol", ""))
                     outcomes.setdefault(key, []).append(entry.get("correct", False))
+                elif entry.get("result") in ("correct", "incorrect"):
+                    # gcc-tm经验卡: 激活+结果在同一条记录里
+                    ctx = entry.get("ctx", {})
+                    if want_trend and ctx.get("trend", "").upper() != want_trend:
+                        continue
+                    if want_regime and ctx.get("regime", "").lower() != want_regime:
+                        continue
+                    activations.setdefault(cid, []).append(entry)
+                    key = (cid, entry.get("symbol", ""))
+                    outcomes.setdefault(key, []).append(entry["result"] == "correct")
                 else:
-                    # 情境匹配: 如果提供了context, 只统计相似情境的激活
+                    # 知识卡激活: 结果后续通过 outcome 条目回填
                     ctx = entry.get("ctx", {})
                     if want_trend and ctx.get("trend", "").upper() != want_trend:
                         continue
