@@ -55,21 +55,10 @@ CRYPTO_POOL = [
 ]
 
 # ============================================================
-# LLM配置
+# LLM配置 — Claude API + web search (v2: 从DeepSeek/OpenAI切换)
 # ============================================================
-NC_PROVIDER = os.environ.get("NC_PROVIDER", "deepseek").strip().lower()
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-DEFAULT_MODEL_BY_PROVIDER = {
-    "deepseek": "deepseek-chat",
-    "openai": "gpt-4o-mini",
-}
-DEFAULT_BASE_URL_BY_PROVIDER = {
-    "deepseek": "https://api.deepseek.com/v1",
-    "openai": None,
-}
-NC_MODEL = os.environ.get("NC_MODEL", DEFAULT_MODEL_BY_PROVIDER.get(NC_PROVIDER, "deepseek-chat")).strip()
-NC_API_BASE_URL = os.environ.get("NC_API_BASE_URL", DEFAULT_BASE_URL_BY_PROVIDER.get(NC_PROVIDER) or "").strip()
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+NC_MODEL = os.environ.get("NC_MODEL", "claude-sonnet-4-20250514").strip()
 
 # ============================================================
 # 邮件配置 (复用主系统)
@@ -99,48 +88,24 @@ def _log(msg: str):
 # ============================================================
 PROMPT_TEMPLATE = """Today is {date}. Evaluate {symbol} ({company}) for a 1-3 day outlook.
 
-Use your market knowledge to judge likely short-term direction. Consider:
-- business quality and typical sector sensitivity
-- likely reaction to macro / crypto / growth conditions
-- whether the name is usually momentum-driven or mean-reverting
-- whether your confidence should be low because fresh information is unavailable
+Search the web for the latest news, earnings, analyst opinions, and market sentiment
+about this stock. Base your rating on FRESH information you find, not just general knowledge.
 
 Rate from -5 (very bearish) to +5 (very bullish).
 0 means neutral or insufficient edge.
 
-Output ONLY a JSON object:
-{{"score": <int -5 to 5>, "confidence": <float 0.0 to 1.0>, "reasoning": "<1-2 sentences>"}}
+Output ONLY a JSON object (no markdown, no explanation outside the JSON):
+{{"score": <int -5 to 5>, "confidence": <float 0.0 to 1.0>, "reasoning": "<1-2 sentences citing what you found>"}}
 """
-
-
-def _resolve_llm_config() -> dict:
-    """Resolve provider-specific API settings for nowcast."""
-    provider = NC_PROVIDER or "deepseek"
-    if provider == "openai":
-        return {
-            "provider": provider,
-            "api_key": OPENAI_API_KEY,
-            "base_url": NC_API_BASE_URL or None,
-            "model": NC_MODEL or DEFAULT_MODEL_BY_PROVIDER["openai"],
-        }
-
-    return {
-        "provider": "deepseek",
-        "api_key": DEEPSEEK_API_KEY,
-        "base_url": NC_API_BASE_URL or DEFAULT_BASE_URL_BY_PROVIDER["deepseek"],
-        "model": NC_MODEL or DEFAULT_MODEL_BY_PROVIDER["deepseek"],
-    }
 
 
 def nowcast_single(symbol: str, company: str, target_date: str = None) -> dict:
     """
     单品种Nowcast评分。
-    默认使用 DeepSeek 文本模型，输出结构化短线打分。
+    v2: Claude API + web search tool，LLM自主搜网获取最新信息。
     """
-    llm_cfg = _resolve_llm_config()
-    if not llm_cfg["api_key"]:
-        env_name = "OPENAI_API_KEY" if llm_cfg["provider"] == "openai" else "DEEPSEEK_API_KEY"
-        return {"error": f"{env_name} not set"}
+    if not ANTHROPIC_API_KEY:
+        return {"error": "ANTHROPIC_API_KEY not set"}
 
     if target_date is None:
         target_date = datetime.now(NY_TZ).strftime("%Y-%m-%d")
@@ -148,24 +113,28 @@ def nowcast_single(symbol: str, company: str, target_date: str = None) -> dict:
     prompt = PROMPT_TEMPLATE.format(date=target_date, symbol=symbol, company=company)
 
     try:
-        from openai import OpenAI
-        import httpx
-        client_kwargs = {
-            "api_key": llm_cfg["api_key"],
-            "timeout": httpx.Timeout(60.0, connect=10.0),
-            "max_retries": 2,
-        }
-        if llm_cfg["base_url"]:
-            client_kwargs["base_url"] = llm_cfg["base_url"]
-        client = OpenAI(**client_kwargs)
+        import anthropic
 
-        response = client.chat.completions.create(
-            model=llm_cfg["model"],
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
+        client = anthropic.Anthropic(
+            api_key=ANTHROPIC_API_KEY,
+            timeout=120.0,
+            max_retries=2,
         )
 
-        text = response.choices[0].message.content or ""
+        response = client.messages.create(
+            model=NC_MODEL,
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+        )
+
+        # 从response中提取文本内容(跳过web_search_tool_result块)
+        text = ""
+        for block in response.content:
+            if block.type == "text":
+                text = block.text
+                break
+
         # 提取JSON
         text = text.strip()
         if "```" in text:
@@ -180,7 +149,9 @@ def nowcast_single(symbol: str, company: str, target_date: str = None) -> dict:
         score = max(-5, min(5, score))
         confidence = float(result.get("confidence", 0.5))
         confidence = max(0.0, min(1.0, confidence))
-        reasoning = str(result.get("reasoning", ""))[:200]
+        import re
+        reasoning = str(result.get("reasoning", ""))
+        reasoning = re.sub(r'</?cite[^>]*>', '', reasoning)[:200]
 
         return {
             "symbol": symbol,
@@ -188,7 +159,7 @@ def nowcast_single(symbol: str, company: str, target_date: str = None) -> dict:
             "score": score,
             "confidence": round(confidence, 3),
             "reasoning": reasoning,
-            "model": llm_cfg["model"],
+            "model": NC_MODEL,
             "actual_return": None,
             "backfilled": False,
         }
@@ -421,7 +392,7 @@ def send_nowcast_email(results: list, accuracy: dict = None):
             f"Top5 Avg Return: {accuracy['top5_avg_return']:.4%}",
         ])
 
-    lines.extend(["", f"Provider/Model: {NC_PROVIDER}/{NC_MODEL}", "Phase 1: 仅日志, 不影响交易决策"])
+    lines.extend(["", f"Model: {NC_MODEL} (web search enabled)", "Phase 1: 仅日志, 不影响交易决策"])
 
     body = "\n".join(lines)
 
