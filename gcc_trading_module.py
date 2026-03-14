@@ -835,6 +835,70 @@ def _read_nowcast(symbol: str) -> dict:
         return {}
 
 
+# ── 知识卡: 读取card_bridge匹配的top-3规则 (GCC-0265 S1/S2) ──
+_KB_BRIDGE = None  # 懒加载单例
+_KB_CACHE: Dict[str, list] = {}
+_KB_CACHE_TS: float = 0.0
+_KB_CACHE_TTL = 300  # 5min缓存
+
+def _read_knowledge_cards(symbol: str, vision_bias: str = "", regime: str = "") -> list:
+    """读取与当前品种+趋势+regime匹配的top-3知识卡规则。
+    返回: [{"card_id": str, "title": str, "direction": "BUY"|"SELL"|"NEUTRAL",
+            "confidence": float, "rank_source": str}, ...]
+    """
+    global _KB_BRIDGE, _KB_CACHE, _KB_CACHE_TS
+    import time as _t_kb
+
+    cache_key = f"{symbol}_{vision_bias}_{regime}"
+    if _t_kb.time() - _KB_CACHE_TS < _KB_CACHE_TTL and cache_key in _KB_CACHE:
+        return _KB_CACHE[cache_key]
+
+    try:
+        if _KB_BRIDGE is None:
+            from gcc_evolution.card_bridge import CardBridge
+            _KB_BRIDGE = CardBridge()
+            _KB_BRIDGE.load_index()
+
+        # 构建情境查询
+        ctx = {}
+        if vision_bias in ("BUY", "SELL"):
+            ctx["trend"] = "UP" if vision_bias == "BUY" else "DOWN"
+        if regime:
+            ctx["regime"] = regime
+
+        results = _KB_BRIDGE.query_contextual(
+            card_type="RULE", context=ctx if ctx else None, min_samples=1
+        )
+
+        # 提取top-3, 判断方向
+        top3 = []
+        for card in results[:3]:
+            # 从rules推断方向
+            direction = "NEUTRAL"
+            rules = card.get("rules", [])
+            if rules:
+                rule_text = str(rules[0].get("then", "") if isinstance(rules[0], dict) else rules[0]).upper()
+                if any(w in rule_text for w in ("买", "BUY", "做多", "LONG", "BULLISH")):
+                    direction = "BUY"
+                elif any(w in rule_text for w in ("卖", "SELL", "做空", "SHORT", "BEARISH")):
+                    direction = "SELL"
+
+            top3.append({
+                "card_id": card.get("card_id", ""),
+                "title": card.get("title", "")[:60],
+                "direction": direction,
+                "confidence": card.get("confidence", 0.5),
+                "rank_source": card.get("rank_source", "static"),
+            })
+
+        _KB_CACHE[cache_key] = top3
+        _KB_CACHE_TS = _t_kb.time()
+        return top3
+    except Exception as e:
+        logger.debug("[GCC-TRADE] _read_knowledge_cards %s: %s", symbol, e)
+        return []
+
+
 # ══════════════════════════════════════════════════════════════
 # L1-S03  DecisionContext — 标准化决策上下文快照
 # 统一所有输入源为一个 dataclass，落盘供回放/dashboard/回填复用
@@ -2029,14 +2093,16 @@ class GCCTradingModule:
     # ── 内部: 组装上下文 → DecisionContext ────────────────────
     def _build_context(self, bars: list, ts: str = "") -> DecisionContext:
         sym = self.symbol
+        _vision = _read_vision(sym)
+        _regime = _read_regime(sym)
         ctx = DecisionContext(
             symbol=sym, ts=ts,
-            vision=_read_vision(sym),
+            vision=_vision,
             scan=_read_scan_signal(sym),
             win_rate_buy=_read_win_rate(sym, "BUY"),
             win_rate_sell=_read_win_rate(sym, "SELL"),
             # L1-S02 新增槽位
-            regime=_read_regime(sym),
+            regime=_regime,
             signal_direction=_read_signal_direction_detail(),
             position=_read_position(sym),
             # Phase B1: Schwab VWAP + Phase B2: Coinbase OBI/CVD
@@ -2044,6 +2110,9 @@ class GCCTradingModule:
                 "schwab_vwap": _read_schwab_vwap(sym),
                 "coinbase": _read_coinbase_obi_cvd(sym),
                 "nowcast": _read_nowcast(sym),
+                "cards": _read_knowledge_cards(
+                    sym, _vision[0] if _vision else "",
+                    (_regime or {}).get("regime", "")),
             },
         )
         # L1-S03 快照落盘
@@ -2062,6 +2131,7 @@ class GCCTradingModule:
             "schwab_vwap": ctx.extended.get("schwab_vwap", {}),
             "coinbase": ctx.extended.get("coinbase", {}),
             "nowcast": ctx.extended.get("nowcast", {}),
+            "cards": ctx.extended.get("cards", []),
         }
 
     # ── L2-S03: 树搜索 + rejected_nodes 收集 ────────────────────
