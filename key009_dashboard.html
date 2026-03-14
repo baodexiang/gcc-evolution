@@ -296,11 +296,6 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 </div>
 
 <div class="tab-content" id="tab-broker">
-<div style="display:flex;gap:8px;margin:12px 0">
-<div class="tab broker-period-tab active" data-period="daily" onclick="switchBrokerPeriod('daily')">24小时</div>
-<div class="tab broker-period-tab" data-period="weekly" onclick="switchBrokerPeriod('weekly')">本周</div>
-<div class="tab broker-period-tab" data-period="monthly" onclick="switchBrokerPeriod('monthly')">本月</div>
-</div>
 <div class="summary" id="broker-pnl-cards"></div>
 <div id="broker-period-daily">
 <h2>每日P&L</h2>
@@ -487,6 +482,9 @@ function switchRange(range, btn) {
         b.style.background = '#fff'; b.style.color = '#656d76';
     });
     btn.style.background = '#0969da'; btn.style.color = '#fff';
+    // 同步券商对账period: 24h→daily, 1w→weekly, 1m→monthly
+    const _rangeToPeriod = {'24h':'daily','1w':'weekly','1m':'monthly'};
+    switchBrokerPeriod(_rangeToPeriod[range] || 'daily');
     $('subtitle').textContent = 'Loading...';
     setTimeout(() => render(), 10);
 }
@@ -558,9 +556,6 @@ function switchBrokerPeriod(period) {
     ['daily','weekly','monthly'].forEach(p => {
         const el = document.getElementById('broker-period-'+p);
         if (el) el.style.display = p === period ? '' : 'none';
-    });
-    document.querySelectorAll('.broker-period-tab').forEach(t => {
-        t.classList.toggle('active', t.dataset.period === period);
     });
     _renderBrokerSummaryCard(period);
 }
