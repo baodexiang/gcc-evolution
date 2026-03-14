@@ -10091,14 +10091,9 @@ class PriceScanEngine:
                 else:
                     rsi = 100.0 if avg_gain > 0 else 50.0
 
-                if rsi < 30:
-                    _gcc_push_15m(main_symbol, "RSI_15m", "BUY", 0.55)
-                    pushed += 1
-                    logger.info(f"[GCC-0259] {symbol} RSI_15m={rsi:.1f} → BUY")
-                elif rsi > 70:
-                    _gcc_push_15m(main_symbol, "RSI_15m", "SELL", 0.55)
-                    pushed += 1
-                    logger.info(f"[GCC-0259] {symbol} RSI_15m={rsi:.1f} → SELL")
+                # S1: RSI — v0.3禁用(均值回归信号, 与趋势跟随系统矛盾)
+                # if rsi < 30: _gcc_push_15m(main_symbol, "RSI_15m", "BUY", 0.55)
+                # elif rsi > 70: _gcc_push_15m(main_symbol, "RSI_15m", "SELL", 0.55)
 
                 # ── S2: EMA9×EMA21 金叉死叉 ──
                 def _ema(arr, period):
@@ -10136,21 +10131,9 @@ class PriceScanEngine:
                     pushed += 1
                     logger.info(f"[GCC-0259] {symbol} MACD柱状图翻负 → SELL")
 
-                # ── S4: Bollinger Band(20,2) 触碰 ──
-                if n >= 20:
-                    bb_mid = np.mean(closes[-20:])
-                    bb_std = np.std(closes[-20:])
-                    bb_upper = bb_mid + 2 * bb_std
-                    bb_lower = bb_mid - 2 * bb_std
-                    cur_close = closes[-1]
-                    if cur_close <= bb_lower:
-                        _gcc_push_15m(main_symbol, "BB_15m", "BUY", 0.5)
-                        pushed += 1
-                        logger.info(f"[GCC-0259] {symbol} BB下轨触碰 {cur_close:.2f}<={bb_lower:.2f} → BUY")
-                    elif cur_close >= bb_upper:
-                        _gcc_push_15m(main_symbol, "BB_15m", "SELL", 0.5)
-                        pushed += 1
-                        logger.info(f"[GCC-0259] {symbol} BB上轨触碰 {cur_close:.2f}>={bb_upper:.2f} → SELL")
+                # S4: BB — v0.3禁用(均值回归信号, 与趋势跟随系统矛盾)
+                # if cur_close <= bb_lower: _gcc_push_15m("BB_15m", "BUY")
+                # elif cur_close >= bb_upper: _gcc_push_15m("BB_15m", "SELL")
 
         except Exception as _ind_e:
             logger.debug(f"[GCC-0259] {symbol} 技术指标信号异常: {_ind_e}")
@@ -10206,8 +10189,8 @@ class PriceScanEngine:
                     # v3.545: Rob Hoffman外挂 (1H EMA排列+IRB回调入场, v2.0.1恢复)
                     self._scan_rob_hoffman(symbol)
 
-                    # v3.671: N字结构外挂 (状态转换→BUY/SELL信号)
-                    self._scan_n_structure(symbol)
+                    # v3.671: N字结构外挂 — v0.3禁用(效果不行, Vision三方门控替代)
+                    # self._scan_n_structure(symbol)
 
                     # v21.1: 缠论买卖点外挂 (4H, 一/二/三买卖点)
                     self._scan_chan_bs(symbol)
@@ -10337,8 +10320,8 @@ class PriceScanEngine:
                     # v3.545: Rob Hoffman外挂 (1H EMA排列+IRB回调入场, v2.0.1恢复)
                     self._scan_rob_hoffman(symbol, market_type="stock")
 
-                    # v3.671: N字结构外挂 (状态转换→BUY/SELL信号)
-                    self._scan_n_structure(symbol, market_type="stock")
+                    # v3.671: N字结构外挂 — v0.3禁用(效果不行, Vision三方门控替代)
+                    # self._scan_n_structure(symbol, market_type="stock")
 
                     # v21.1: 缠论买卖点外挂 (4H, 二买/三买/二卖/三卖)
                     self._scan_chan_bs(symbol, market_type="stock")

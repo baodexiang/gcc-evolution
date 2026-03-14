@@ -512,20 +512,9 @@ def _read_scan_signal(symbol: str) -> Tuple[str, float]:
 # 读 state/n_gate_active.json → {symbol_BUY: {block, reason}}
 # ══════════════════════════════════════════════════════════════
 def _read_n_gate(symbol: str, direction: str) -> str:
-    """读取 N字门控状态。"""
-    if not _N_GATE_FILE.exists():
-        return "INACTIVE"
-    try:
-        d = json.loads(_N_GATE_FILE.read_text(encoding="utf-8"))
-        key = f"{symbol}_{direction.upper()}"
-        entry = d.get(key, {})
-        if not entry:
-            return "INACTIVE"
-        blocked = entry.get("block", False)
-        return "BLOCK" if blocked else "OBSERVE"
-    except Exception as e:
-        logger.debug("[GCC-TRADE] _read_n_gate %s %s: %s", symbol, direction, e)
-        return "INACTIVE"
+    """读取 N字门控状态。v0.3: 禁用N字门控, 始终返回INACTIVE。"""
+    # N字门控在GCC-TM中不需要, Vision三方门控已替代方向过滤
+    return "INACTIVE"
 
 
 # ══════════════════════════════════════════════════════════════
