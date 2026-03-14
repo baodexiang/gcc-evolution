@@ -10361,6 +10361,28 @@ class PriceScanEngine:
                         pass
                     except Exception as _gcc_round_err:
                         logger.debug(f"[GCC-TM][ROUND] {main_symbol} crypto error: {_gcc_round_err}")
+
+                    # GCC-0256 S5: OP剥头皮5min调度
+                    # 每轮扫描时检查OP(不管当前品种是什么)，5min节奏由内部节流控制
+                    try:
+                        from gcc_trading_module import gcc_scalp_observe as _gcc_scalp
+                        from coinbase_data_provider import get_candles as _cb_candles
+                        _SCALP_INTERVAL = 300  # 5min
+                        _scalp_last_key = "_scalp_op_last_ts"
+                        _scalp_last = getattr(self, _scalp_last_key, 0)
+                        if time.time() - _scalp_last >= _SCALP_INTERVAL:
+                            setattr(self, _scalp_last_key, time.time())
+                            _op_bars = _cb_candles("OPUSDC", granularity="FIVE_MINUTE", limit=40)
+                            if _op_bars and len(_op_bars) >= 15:
+                                # Coinbase返回倒序，翻转为时间正序
+                                _op_bars.sort(key=lambda x: x.get("start", "0"))
+                                _scalp_res = _gcc_scalp("OPUSDC", _op_bars)
+                                if _scalp_res:
+                                    logger.info(f"[GCC-SCALP] OP: {_scalp_res}")
+                    except ImportError:
+                        pass
+                    except Exception as _scalp_err:
+                        logger.debug(f"[GCC-SCALP] OP error: {_scalp_err}")
                 else:
                     logger.debug(f"[v21.7] {symbol} 外挂扫描跳过(TF={_sym_tf}min, 间隔{_scan_interval_tf}s未到)")
 

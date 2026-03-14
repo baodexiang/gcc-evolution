@@ -2426,6 +2426,8 @@ _GCC_TM_EXECUTE_SYMBOLS: frozenset = frozenset({
     "AMD", "COIN", "RKLB", "RDDT", "NVDA", "PLTR",
     # 加密
     "BTCUSDC", "ETHUSDC", "ZECUSDC", "SOLUSDC",
+    # GCC-0256 S5: OP剥头皮
+    "OPUSDC",
 })  # B4: 逐品种开启，随时可关
 
 
@@ -3258,6 +3260,389 @@ def gcc_observe(
                 mod.phase = original_phase
         except Exception:
             pass
+
+
+# ══════════════════════════════════════════════════════════════
+# GCC-0256 S5: OP剥头皮模块 — RSI(7)均值回归 + 方向门控
+# 独立于 gcc_observe 的轻量5min入口
+# 策略: RSI<25做多 / RSI>75做空, 三方投票方向门控, $500限额
+# ══════════════════════════════════════════════════════════════
+
+_SCALP_STATE_FILE = _STATE_DIR / "gcc_scalp_state.json"
+_SCALP_TRADES_FILE = _STATE_DIR / "gcc_scalp_trades.jsonl"
+_SCALP_MAX_POSITION_USD = 500      # 最大仓位$500
+_SCALP_RSI_PERIOD = 7
+_SCALP_RSI_OVERSOLD = 25           # 超卖阈值
+_SCALP_RSI_OVERBOUGHT = 75        # 超买阈值
+_SCALP_RSI_EXIT_HIGH = 70         # BUY出场RSI
+_SCALP_RSI_EXIT_LOW = 30          # SELL出场RSI
+_SCALP_ATR_PERIOD = 3
+_SCALP_MAX_HOLD_BARS = 12         # 最多持仓12根(1h)
+_SCALP_COOLDOWN_BARS = 3          # 冷却3根(15min)
+_SCALP_SYMBOLS = frozenset({"OPUSDC"})  # 剥头皮白名单
+
+
+def _scalp_calc_rsi(closes: list, period: int = 7) -> float:
+    """RSI(7) Wilder平滑，返回最新值。需要至少period+1个close。"""
+    if len(closes) < period + 1:
+        return 50.0  # 数据不足返回中性
+    import numpy as _np
+    arr = _np.array(closes, dtype=float)
+    deltas = _np.diff(arr)
+    gains = _np.where(deltas > 0, deltas, 0.0)
+    losses = _np.where(deltas < 0, -deltas, 0.0)
+    avg_gain = _np.mean(gains[:period])
+    avg_loss = _np.mean(losses[:period])
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def _scalp_calc_atr(highs: list, lows: list, closes: list, period: int = 3) -> float:
+    """ATR(3)，返回最新值。"""
+    if len(closes) < period + 1:
+        return closes[-1] * 0.005 if closes else 0.01
+    import numpy as _np
+    h = _np.array(highs, dtype=float)
+    l = _np.array(lows, dtype=float)
+    c = _np.array(closes, dtype=float)
+    tr1 = h[1:] - l[1:]
+    tr2 = _np.abs(h[1:] - c[:-1])
+    tr3 = _np.abs(l[1:] - c[:-1])
+    tr = _np.maximum(tr1, _np.maximum(tr2, tr3))
+    return float(_np.mean(tr[-period:]))
+
+
+def _load_scalp_state() -> dict:
+    """加载剥头皮持仓状态。"""
+    if _SCALP_STATE_FILE.exists():
+        try:
+            return json.loads(_SCALP_STATE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {
+        "in_trade": False,
+        "direction": None,        # "BUY" or "SELL"
+        "entry_price": 0.0,
+        "entry_ts": None,
+        "bars_held": 0,
+        "cooldown": 0,
+        "tp_price": 0.0,          # 止盈价
+        "sl_price": 0.0,          # 止损价
+        "quantity": 0.0,          # 持仓数量(OP个数)
+    }
+
+
+def _save_scalp_state(state: dict) -> None:
+    """持久化剥头皮状态(原子写入)。"""
+    try:
+        _SCALP_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(_SCALP_STATE_FILE,
+                      json.dumps(state, ensure_ascii=False, indent=2))
+    except Exception as e:
+        logger.warning("[GCC-SCALP] save state: %s", e)
+
+
+def _record_scalp_trade(trade: dict) -> None:
+    """记录剥头皮交易到JSONL(不可变追加)。"""
+    try:
+        _SCALP_TRADES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(_SCALP_TRADES_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(trade, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.warning("[GCC-SCALP] record trade: %s", e)
+
+
+def scalp_get_pnl_summary() -> dict:
+    """读取剥头皮交易记录，计算24h/当天/当月P&L。
+    返回: {
+        "h24": {"pnl": float, "trades": int, "wins": int},
+        "today": {"pnl": float, "trades": int, "wins": int},
+        "month": {"pnl": float, "trades": int, "wins": int},
+        "all_time": {"pnl": float, "trades": int, "wins": int},
+    }
+    """
+    result = {
+        "h24":      {"pnl": 0.0, "trades": 0, "wins": 0},
+        "today":    {"pnl": 0.0, "trades": 0, "wins": 0},
+        "month":    {"pnl": 0.0, "trades": 0, "wins": 0},
+        "all_time": {"pnl": 0.0, "trades": 0, "wins": 0},
+    }
+    if not _SCALP_TRADES_FILE.exists():
+        return result
+
+    now = datetime.now(_NY_TZ)
+    today_str = now.strftime("%Y-%m-%d")
+    month_str = now.strftime("%Y-%m")
+    h24_cutoff = time.time() - 86400
+
+    try:
+        with open(_SCALP_TRADES_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    t = json.loads(line)
+                except Exception:
+                    continue
+                pnl = float(t.get("net_pnl_usd", 0))
+                is_win = pnl > 0
+                ts_epoch = float(t.get("exit_epoch", 0))
+                ts_str = t.get("exit_ts", "")
+
+                # all_time
+                result["all_time"]["pnl"] += pnl
+                result["all_time"]["trades"] += 1
+                if is_win:
+                    result["all_time"]["wins"] += 1
+
+                # 24h
+                if ts_epoch > h24_cutoff:
+                    result["h24"]["pnl"] += pnl
+                    result["h24"]["trades"] += 1
+                    if is_win:
+                        result["h24"]["wins"] += 1
+
+                # today
+                if ts_str.startswith(today_str):
+                    result["today"]["pnl"] += pnl
+                    result["today"]["trades"] += 1
+                    if is_win:
+                        result["today"]["wins"] += 1
+
+                # month
+                if ts_str.startswith(month_str):
+                    result["month"]["pnl"] += pnl
+                    result["month"]["trades"] += 1
+                    if is_win:
+                        result["month"]["wins"] += 1
+    except Exception as e:
+        logger.warning("[GCC-SCALP] read trades: %s", e)
+
+    return result
+
+
+def gcc_scalp_observe(
+    symbol: str,
+    bars_5m: list,
+) -> Optional[dict]:
+    """
+    GCC-0256 S5: OP剥头皮5min入口。
+    轻量路径: 方向门控 + RSI(7)信号 + $500仓位检查 → Coinbase限价单。
+    跳过树搜索/BEV/PUCT/信号池。
+
+    Args:
+        symbol: 品种名 (如 "OPUSDC")
+        bars_5m: 5min OHLCV列表, 至少30根
+            每根: {"open": f, "high": f, "low": f, "close": f, "volume": f}
+
+    Returns:
+        None 或 {"action": str, "reason": str, ...}
+    """
+    if symbol not in _SCALP_SYMBOLS:
+        return None
+    if not bars_5m or len(bars_5m) < 15:
+        logger.debug("[GCC-SCALP] %s: bars不足(%d)", symbol, len(bars_5m) if bars_5m else 0)
+        return None
+
+    # ── 提取OHLC序列 ──
+    closes = [float(b.get("close") or b.get("c") or 0) for b in bars_5m]
+    highs = [float(b.get("high") or b.get("h") or 0) for b in bars_5m]
+    lows = [float(b.get("low") or b.get("l") or 0) for b in bars_5m]
+    current_price = closes[-1]
+    if current_price <= 0:
+        return None
+
+    # ── 计算指标 ──
+    rsi = _scalp_calc_rsi(closes, _SCALP_RSI_PERIOD)
+    atr = _scalp_calc_atr(highs, lows, closes, _SCALP_ATR_PERIOD)
+
+    # ── 方向门控: 读取当前K线的三方投票方向 ──
+    gate_direction = "HOLD"
+    try:
+        cs = _load_candle_state(symbol)
+        if cs is None:
+            # 没有4H CandleState — 尝试读crypto母品种(OPUSDC没有4H的,用自身或跳过)
+            # 剥头皮品种可能没有4H门控，降级为无门控
+            gate_direction = "BOTH"  # 允许双向
+        else:
+            gate_direction = cs.effective_direction or "HOLD"
+    except Exception:
+        gate_direction = "BOTH"
+
+    # ── 加载持仓状态 ──
+    state = _load_scalp_state()
+
+    # 冷却递减
+    if state["cooldown"] > 0:
+        state["cooldown"] -= 1
+        _save_scalp_state(state)
+
+    # ── 持仓中: 检查出场条件 ──
+    if state["in_trade"]:
+        state["bars_held"] += 1
+        should_exit = False
+        exit_reason = ""
+
+        if state["direction"] == "BUY":
+            if current_price >= state["tp_price"]:
+                should_exit, exit_reason = True, "TP"
+            elif current_price <= state["sl_price"]:
+                should_exit, exit_reason = True, "SL"
+            elif rsi > _SCALP_RSI_EXIT_HIGH:
+                should_exit, exit_reason = True, "RSI_EXIT"
+        else:  # SELL
+            if current_price <= state["tp_price"]:
+                should_exit, exit_reason = True, "TP"
+            elif current_price >= state["sl_price"]:
+                should_exit, exit_reason = True, "SL"
+            elif rsi < _SCALP_RSI_EXIT_LOW:
+                should_exit, exit_reason = True, "RSI_EXIT"
+
+        if state["bars_held"] >= _SCALP_MAX_HOLD_BARS:
+            should_exit, exit_reason = True, "TIMEOUT"
+
+        if should_exit:
+            # 计算P&L
+            entry_p = state["entry_price"]
+            if state["direction"] == "BUY":
+                raw_pnl_pct = (current_price - entry_p) / entry_p
+            else:
+                raw_pnl_pct = (entry_p - current_price) / entry_p
+            fee_pct = 0.0009  # maker来回0.09%
+            net_pnl_pct = raw_pnl_pct - fee_pct
+            net_pnl_usd = net_pnl_pct * _SCALP_MAX_POSITION_USD
+
+            now_ts = datetime.now(_NY_TZ)
+            trade_record = {
+                "symbol": symbol,
+                "direction": state["direction"],
+                "entry_price": entry_p,
+                "exit_price": current_price,
+                "entry_ts": state["entry_ts"],
+                "exit_ts": now_ts.strftime("%Y-%m-%d %H:%M:%S"),
+                "exit_epoch": time.time(),
+                "bars_held": state["bars_held"],
+                "exit_reason": exit_reason,
+                "rsi_at_exit": round(rsi, 1),
+                "raw_pnl_pct": round(raw_pnl_pct * 100, 3),
+                "net_pnl_pct": round(net_pnl_pct * 100, 3),
+                "net_pnl_usd": round(net_pnl_usd, 2),
+                "quantity": state["quantity"],
+            }
+            _record_scalp_trade(trade_record)
+
+            logger.info(
+                "[GCC-SCALP] %s EXIT %s: $%.4f→$%.4f %s P&L=$%+.2f (%.2f%%)",
+                symbol, state["direction"], entry_p, current_price,
+                exit_reason, net_pnl_usd, net_pnl_pct * 100,
+            )
+
+            # 写平仓pending_order (SELL平多 / BUY平空)
+            close_action = "SELL" if state["direction"] == "BUY" else "BUY"
+            _scalp_write_pending(symbol, close_action, current_price, state["quantity"],
+                                 f"scalp_exit_{exit_reason}")
+
+            # 重置状态
+            state = {
+                "in_trade": False, "direction": None,
+                "entry_price": 0.0, "entry_ts": None,
+                "bars_held": 0, "cooldown": _SCALP_COOLDOWN_BARS,
+                "tp_price": 0.0, "sl_price": 0.0, "quantity": 0.0,
+            }
+            _save_scalp_state(state)
+            return {"action": close_action, "reason": exit_reason,
+                    "pnl_usd": net_pnl_usd}
+
+        _save_scalp_state(state)
+        return None  # 持仓中，未触发出场
+
+    # ── 未持仓: 检查进场条件 ──
+    if state["cooldown"] > 0:
+        return None
+
+    signal = None
+    if rsi < _SCALP_RSI_OVERSOLD:
+        signal = "BUY"
+    elif rsi > _SCALP_RSI_OVERBOUGHT:
+        signal = "SELL"
+
+    if signal is None:
+        return None
+
+    # 方向门控
+    if gate_direction not in ("BOTH", signal, "HOLD"):
+        # HOLD时允许双向 (剥头皮品种可能无4H门控)
+        if gate_direction != "HOLD":
+            logger.info("[GCC-SCALP] %s RSI=%s but gate=%s → blocked",
+                        symbol, signal, gate_direction)
+            return None
+
+    # 计算止盈止损
+    quantity = _SCALP_MAX_POSITION_USD / current_price
+    if signal == "BUY":
+        tp_price = current_price + atr
+        sl_price = current_price - atr
+    else:
+        tp_price = current_price - atr
+        sl_price = current_price + atr
+
+    now_ts = datetime.now(_NY_TZ)
+
+    # 写进场pending_order
+    _scalp_write_pending(symbol, signal, current_price, quantity,
+                         f"scalp_entry_RSI{rsi:.0f}")
+
+    # 更新状态
+    state = {
+        "in_trade": True,
+        "direction": signal,
+        "entry_price": current_price,
+        "entry_ts": now_ts.strftime("%Y-%m-%d %H:%M:%S"),
+        "bars_held": 0,
+        "cooldown": 0,
+        "tp_price": tp_price,
+        "sl_price": sl_price,
+        "quantity": quantity,
+    }
+    _save_scalp_state(state)
+
+    logger.info(
+        "[GCC-SCALP] %s ENTRY %s @ $%.4f RSI=%.1f TP=$%.4f SL=$%.4f qty=%.2f",
+        symbol, signal, current_price, rsi, tp_price, sl_price, quantity,
+    )
+    return {"action": signal, "reason": f"RSI={rsi:.0f}", "price": current_price}
+
+
+def _scalp_write_pending(symbol: str, action: str, price: float,
+                         quantity: float, reason: str) -> None:
+    """写剥头皮pending_order，标记source=gcc_scalp区分正常GCC-TM。"""
+    order = {
+        "symbol":    symbol,
+        "action":    action,
+        "price_ref": price,
+        "quantity":  quantity,
+        "ts":        datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+        "source":    "gcc_scalp",
+        "reason":    reason,
+        "consumed":  False,
+        "processing": False,
+        "max_usd":   _SCALP_MAX_POSITION_USD,
+    }
+    pending_path = _STATE_DIR / f"gcc_pending_order_{symbol}.json"
+    try:
+        pending_path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(pending_path,
+                      json.dumps(order, ensure_ascii=False, indent=2))
+        logger.info("[GCC-SCALP] pending_order: %s %s @ $%.4f qty=%.2f (%s)",
+                    action, symbol, price, quantity, reason)
+    except Exception as e:
+        logger.warning("[GCC-SCALP] write pending: %s", e)
 
 
 # ══════════════════════════════════════════════════════════════

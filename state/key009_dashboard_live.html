@@ -420,6 +420,11 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <h2>品种实时面板 (当前4H K线)</h2>
 <div id="gcctm-symbol-panels"></div>
 
+<!-- GCC-0256 S5: OP剥头皮 P&L -->
+<h2 style="margin-top:24px">OP 剥头皮 (5min RSI)</h2>
+<div id="scalp-pnl-cards" class="summary" style="margin-bottom:12px"></div>
+<div id="scalp-state-info" style="font-size:0.85em;color:#656d76;padding:4px 0"></div>
+
 <!-- 上一K线汇总 -->
 <h2 style="margin-top:24px">上一K线汇总 (已完成)</h2>
 <table>
@@ -1208,7 +1213,7 @@ function loadGccTm() {
     // KNN 9维特征名称 (与 gcc_trading_module.py KNNExperience.feature_names 对齐)
     const FEAT_NAMES = ['vision_conf','scan_conf','n_gate_buy','filter_passed',
         'filter_vol_score','win_rate','vol_ratio','topology_score','geometry_score'];
-    const CRYPTO_SYMS = new Set(['BTCUSDC','ETHUSDC','SOLUSDC','ZECUSDC']);
+    const CRYPTO_SYMS = new Set(['BTCUSDC','ETHUSDC','SOLUSDC','ZECUSDC','OPUSDC']);
     const US_EXECUTE = new Set(['TSLA','CRWV','NBIS','ONDS','OPEN','HIMS','AMD','COIN','RKLB','RDDT','NVDA','PLTR']);
     const formatGccTmTimestamp = (rawTs) => {
         if (!rawTs) return '-';
@@ -1372,6 +1377,7 @@ function loadGccTm() {
     }).then(d => {
         const signalPool = d.signal_pool || {};
         const directionLocks = d.direction_locks || {};
+        const scalpPnl = d.scalp_pnl || {};
         // 只保留1天内的数据
         const _1dayAgo = Date.now() - 24 * 3600 * 1000;
         const _isRecent = (ts) => { if (!ts) return true; const d = new Date(ts.replace(' ', 'T')); return isNaN(d) || d.getTime() > _1dayAgo; };
@@ -1627,6 +1633,27 @@ function loadGccTm() {
 
         // Summary bar
         summary.textContent = `共 ${decisions.length} 条决策 | 活跃品种:${allSyms.size} | 已交易:${tradedSyms} | 模拟:${simTrades.length}笔 | KNN:${knn.length}`;
+
+        // ── GCC-0256 S5: OP剥头皮 P&L面板 ──
+        {
+            const spEl = $('scalp-pnl-cards');
+            const spInfo = $('scalp-state-info');
+            const _spFmt = (v) => `$${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
+            const _spClr = (v) => v >= 0 ? 'green' : 'red';
+            const _spWr = (w, t) => t > 0 ? (w / t * 100).toFixed(1) + '%' : '-';
+            const h24 = scalpPnl.h24 || {pnl:0,trades:0,wins:0};
+            const today = scalpPnl.today || {pnl:0,trades:0,wins:0};
+            const month = scalpPnl.month || {pnl:0,trades:0,wins:0};
+            const all = scalpPnl.all_time || {pnl:0,trades:0,wins:0};
+            const hasData = all.trades > 0;
+            spEl.innerHTML = hasData ? `
+                <div class="card"><div class="label">24h P&L</div><div class="value ${_spClr(h24.pnl)}">${_spFmt(h24.pnl)}</div><div class="sub">${h24.trades}笔 胜率${_spWr(h24.wins,h24.trades)}</div></div>
+                <div class="card"><div class="label">今日 P&L</div><div class="value ${_spClr(today.pnl)}">${_spFmt(today.pnl)}</div><div class="sub">${today.trades}笔 胜率${_spWr(today.wins,today.trades)}</div></div>
+                <div class="card"><div class="label">本月 P&L</div><div class="value ${_spClr(month.pnl)}">${_spFmt(month.pnl)}</div><div class="sub">${month.trades}笔 胜率${_spWr(month.wins,month.trades)}</div></div>
+                <div class="card"><div class="label">累计 P&L</div><div class="value ${_spClr(all.pnl)}">${_spFmt(all.pnl)}</div><div class="sub">${all.trades}笔 胜率${_spWr(all.wins,all.trades)}</div></div>
+            ` : '<div class="card"><div class="label">OP剥头皮</div><div class="value blue">待启动</div><div class="sub">$500限额 RSI(7) 5min</div></div>';
+            spInfo.textContent = hasData ? `策略: RSI(7)<25买/>75卖 | VIP1 maker费率 | $500封顶 | 24/7运行` : '等待首笔交易...';
+        }
 
         // ── GCC-TM交易 P&L ──
         const simBody = $('gcctm-sim-body');

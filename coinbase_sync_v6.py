@@ -91,6 +91,7 @@ SYMBOL_MAP = {
     "ETH": "ETHUSDC",
     "SOL": "SOLUSDC",
     "ZEC": "ZECUSDC",
+    "OP": "OPUSDC",
 }
 
 # 每个单位的交易数量 (按币种)

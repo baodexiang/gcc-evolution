@@ -43012,7 +43012,8 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
     try:
         if is_crypto_symbol(symbol):
             _cb_map = {"BTCUSDC": "BTC", "ETHUSDC": "ETH",
-                       "SOLUSDC": "SOL", "ZECUSDC": "ZEC"}
+                       "SOLUSDC": "SOL", "ZECUSDC": "ZEC",
+                       "OPUSDC": "OP"}
             _cb_sym = _cb_map.get(symbol)
             if _cb_sym:
                 from coinbase_sync_v6 import get_price as _cb_gp
@@ -43063,6 +43064,33 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             send_ok = send_signalstack_order(_gcc_act, symbol, source="gcc_tm")
         except Exception as _ss_e:
             log_to_server(f"[GCC-TM][ERROR] {symbol} SignalStack: {_ss_e}")
+    elif _gcc_order.get("source") == "gcc_scalp":
+        # GCC-0256 S5: OP剥头皮 → Coinbase API限价单 (maker费率)
+        try:
+            from coinbase_sync_v6 import place_order as _cb_place
+            _scalp_product = {"OPUSDC": "OP-USDC"}.get(symbol, f"{symbol[:symbol.index('USD')]}-USDC" if "USD" in symbol else symbol)
+            _scalp_qty = float(_gcc_order.get("quantity", 0))
+            _scalp_max = float(_gcc_order.get("max_usd", 500))
+            if _scalp_qty <= 0:
+                _scalp_qty = _scalp_max / _gcc_cur_price if _gcc_cur_price > 0 else 0
+            if _gcc_act == "BUY":
+                # 限价买入: 用quote_size(USDC金额), 限价=当前价
+                _scalp_res = _cb_place(_scalp_product, "BUY",
+                                       quote_size=min(_scalp_max, _scalp_qty * _gcc_cur_price),
+                                       limit_price=_gcc_cur_price)
+            else:
+                # 限价卖出: 用base_size(OP数量), 限价=当前价
+                _scalp_res = _cb_place(_scalp_product, "SELL",
+                                       base_size=_scalp_qty,
+                                       limit_price=_gcc_cur_price)
+            send_ok = _scalp_res.get("success", False)
+            log_to_server(
+                f"[GCC-SCALP][EXECUTE] {symbol} {_gcc_act}: "
+                f"qty={_scalp_qty:.2f} price=${_gcc_cur_price:.4f} "
+                f"success={send_ok} order_id={_scalp_res.get('order_id','')}"
+            )
+        except Exception as _scalp_e:
+            log_to_server(f"[GCC-SCALP][ERROR] {symbol} Coinbase: {_scalp_e}")
     else:
         try:
             send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol, source="gcc_tm")
@@ -51374,6 +51402,15 @@ def key009_gcctm():
     knn_entries = list(reversed(knn_entries))
     sim_trades = list(reversed(sim_trades))
     round_decisions = list(reversed(round_decisions))
+
+    # GCC-0256 S5: OP剥头皮P&L汇总
+    scalp_pnl = {}
+    try:
+        from gcc_trading_module import scalp_get_pnl_summary as _scalp_pnl_fn
+        scalp_pnl = _scalp_pnl_fn()
+    except Exception:
+        pass
+
     return app.response_class(
         json.dumps(
             {
@@ -51389,6 +51426,7 @@ def key009_gcctm():
                 "direction_locks": direction_locks,
                 "observe_signals": list(reversed(observe_signals)),
                 "error_classify": error_classify,
+                "scalp_pnl": scalp_pnl,
             },
             ensure_ascii=False,
         ),
