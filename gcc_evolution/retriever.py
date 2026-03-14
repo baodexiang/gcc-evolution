@@ -909,8 +909,17 @@ class Retriever:
         aligned = getattr(card, 'anchor_aligned', True)
         align_mult = 1.0 if aligned else 0.3
 
+        # v5.050 StockMem: 因果三元组匹配加分 (同品种/同key失败经验优先)
+        causal_boost = 0.0
+        causal_text = f"{getattr(card, 'causal_trigger', '')} {getattr(card, 'causal_outcome', '')}"
+        if causal_text.strip():
+            causal_kw = set(re.findall(r'\w{3,}', causal_text.lower()))
+            causal_overlap = len(q_kw & causal_kw)
+            if causal_overlap >= 2:
+                causal_boost = min(0.15, causal_overlap * 0.05)
+
         reuse_penalty = math.log2(max(card.use_count, 0) + 1) * 0.05
-        return max(0.0, base_score * layer_mult * anchor_mult * align_mult
+        return max(0.0, (base_score + causal_boost) * layer_mult * anchor_mult * align_mult
                    - reuse_penalty)
 
     def _effective_confidence(self, card: ExperienceCard) -> float:

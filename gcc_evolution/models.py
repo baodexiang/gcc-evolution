@@ -255,6 +255,11 @@ class ExperienceCard:
     last_validated: str = ""
     decay_rate: float = 0.05
 
+    # v5.050 P2-StockMem: 因果三元组 (Skeptic失败时写入, 检索时匹配同类失败)
+    causal_trigger: str = ""    # 触发条件 (key=xxx symbol=xxx)
+    causal_action: str = ""     # 执行动作 (Skeptic verdict)
+    causal_outcome: str = ""    # 结果 (metrics below threshold)
+
     # v4.0: Experience Graph (from ARG-Designer insight)
     parent_id: str = ""
     supersedes_id: str = ""
@@ -330,6 +335,8 @@ class ExperienceCard:
             " ".join(self.merged_steps),
             " ".join(self.attachments),
             self.source_ref,
+            # v5.050 StockMem: 因果三元组纳入检索 (同品种/同key失败模式匹配)
+            self.causal_trigger, self.causal_action, self.causal_outcome,
         ]
         return " ".join(p for p in parts if p)
 

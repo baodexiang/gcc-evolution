@@ -692,12 +692,9 @@ class Skeptic:
                 outcomes.append(f"{d.label}: {d.after:.3f} (need {d.threshold:.3f})")
         outcome = "; ".join(outcomes[:3]) if outcomes else "metrics below threshold"
 
-        if hasattr(card, "causal_trigger"):
-            card.causal_trigger = context
-        if hasattr(card, "causal_action"):
-            card.causal_action = event
-        if hasattr(card, "causal_outcome"):
-            card.causal_outcome = outcome
+        card.causal_trigger = context
+        card.causal_action = event
+        card.causal_outcome = outcome
 
     def _generate_constraints(
         self,
