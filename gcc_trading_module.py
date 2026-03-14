@@ -3535,6 +3535,24 @@ def gcc_scalp_observe(
             }
             _record_scalp_trade(trade_record)
 
+            # 经验卡: 平仓回填 outcome (赚钱=True, 亏钱=False)
+            try:
+                _write_knn_experience_dict({
+                    "symbol": symbol,
+                    "action": state["direction"],
+                    "features": [rsi / 100.0, atr / current_price,
+                                 1.0, current_price, net_pnl_pct],
+                    "outcome": net_pnl_usd > 0,
+                    "ts": now_ts.strftime("%Y-%m-%d %H:%M:%S"),
+                    "price": current_price,
+                    "ref_price": entry_p,
+                    "strongest_source": f"scalp_exit_{exit_reason}",
+                    "source": "gcc_scalp",
+                    "pnl_usd": net_pnl_usd,
+                })
+            except Exception:
+                pass
+
             logger.info(
                 "[GCC-SCALP] %s EXIT %s: $%.4f→$%.4f %s P&L=$%+.2f (%.2f%%)",
                 symbol, state["direction"], entry_p, current_price,
@@ -3595,6 +3613,24 @@ def gcc_scalp_observe(
     # 写进场pending_order
     _scalp_write_pending(symbol, signal, current_price, quantity,
                          f"scalp_entry_RSI{rsi:.0f}")
+
+    # 经验卡: 开仓写入 (outcome=None, 平仓时回填)
+    try:
+        _write_knn_experience_dict({
+            "symbol": symbol,
+            "action": signal,
+            "features": [rsi / 100.0, atr / current_price,
+                         1.0 if gate_direction in (signal, "BOTH") else 0.0,
+                         current_price, 0.0],
+            "outcome": None,
+            "ts": now_ts.strftime("%Y-%m-%d %H:%M:%S"),
+            "price": current_price,
+            "ref_price": current_price,
+            "strongest_source": f"scalp_RSI{rsi:.0f}",
+            "source": "gcc_scalp",
+        })
+    except Exception:
+        pass
 
     # 更新状态
     state = {
