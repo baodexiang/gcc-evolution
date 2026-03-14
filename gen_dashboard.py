@@ -341,11 +341,41 @@ for _lid, _lname, _ldir, _ltier in _layer_spec:
     _layers.append({'id': _lid, 'name': _lname, 'tier': _ltier, 'active': len(_py_files) > 0, 'files': len(_py_files)})
 inject_lines.append(f"DATA.layers = {json.dumps(_layers, ensure_ascii=False)};")
 
-# skillbank / suggestions
-for key, fname in [("skills","skillbank.jsonl"),("suggestions","suggestions.jsonl")]:
+# skillbank: 优先读蒸馏skill(实战验证), 回退老skillbank
+_skills_path = pathlib.Path("state") / "gcc_skills.json"
+if not _skills_path.exists():
+    _skills_path = GCC_DIR / "skillbank.jsonl"
+if not _skills_path.exists():
+    _skills_path = pathlib.Path("gcc") / "skillbank.jsonl"
+if _skills_path.exists():
+    _skill_rows = []
+    if _skills_path.suffix == ".json":
+        try:
+            _skill_rows = json.loads(_skills_path.read_text(encoding="utf-8"))
+            # 转换为dashboard兼容格式
+            _skill_rows = [{
+                "skill_id": s.get("skill_id", ""),
+                "name": s.get("name", ""),
+                "skill_type": s.get("type", "general"),
+                "success_rate": s.get("correct_rate", 0),
+                "use_count": s.get("samples", 0),
+                "confidence": s.get("correct_rate", 0.5),
+                "version": 1,
+                "source": "distilled",
+            } for s in _skill_rows]
+        except: pass
+    else:
+        for line in _skills_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.strip():
+                try: _skill_rows.append(json.loads(line))
+                except: pass
+    if _skill_rows:
+        inject_lines.append(f"DATA.skills = {json.dumps(_skill_rows, ensure_ascii=False)};")
+        loaded.append(f"skillbank: {len(_skill_rows)} skills")
+
+# suggestions
+for key, fname in [("suggestions","suggestions.jsonl")]:
     fp = GCC_DIR / fname
-    if not fp.exists():
-        fp = pathlib.Path("gcc") / fname
     if fp.exists():
         rows = []
         for line in fp.read_text(encoding="utf-8", errors="ignore").splitlines():
