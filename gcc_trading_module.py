@@ -1130,37 +1130,45 @@ _CRYPTO_SYMBOLS = frozenset({
 })
 
 def _apply_pruning(nodes: List[TreeNode], symbol: str,
-                   context: dict) -> List[TreeNode]:
+                   context: dict,
+                   failed_patterns: Optional[dict] = None) -> List[TreeNode]:
     """
-    对候选节点应用剪枝规则 P1-P3。
+    对候选节点应用剪枝规则 P0-P2。
+    P0: 失败模式记忆 — 已知失败的信号组合直接剪 (arXiv:2603.04735 negative constraint)
     P1: SignalDirectionFilter ENFORCE — 方向占优时剪反向
-    P2: Vision — 形态不适合交易时剪枝
-    P3: Position Control — 仓位已满时阻止同方向
+    P2: Position Control — 仓位已满时阻止同方向
     """
     position, max_units = context.get("position", (0, 5))
-    vision_bias, vision_conf = context.get("vision", ("HOLD", 0.5))
     sig_dir = context.get("signal_direction", {})
     sig_dir_label = sig_dir.get("direction", "NO_ANSWER")
     sig_dir_mode = sig_dir.get("mode", _read_signal_direction())
+
+    # 预计算信号指纹（P0 使用）
+    fingerprint = _make_signal_fingerprint(context) if failed_patterns else ""
 
     for node in nodes:
         if node.pruned:
             continue
 
+        # P0: 失败模式记忆（论文: negative constraint）
+        if failed_patterns and node.action in ("BUY", "SELL"):
+            if _is_failed_pattern(symbol, node.action, fingerprint, failed_patterns):
+                node.pruned = True
+                node.prune_reason = f"P0:known_failed_pattern({node.action})"
+                continue
+
         # P1: SignalDirectionFilter — ENFORCE模式下方向占优时剪反向
         if sig_dir_mode == "ENFORCE":
             if node.action == "BUY" and sig_dir_label == "SELL_DOMINANT":
                 node.pruned = True
-                node.prune_reason = f"P1:SignalFilter SELL_DOMINANT"
+                node.prune_reason = "P1:SignalFilter SELL_DOMINANT"
                 continue
             if node.action == "SELL" and sig_dir_label == "BUY_DOMINANT":
                 node.pruned = True
-                node.prune_reason = f"P1:SignalFilter BUY_DOMINANT"
+                node.prune_reason = "P1:SignalFilter BUY_DOMINANT"
                 continue
 
-        # v0.2: P2 Vision剪枝已移除 (Vision提升为K线级门控，见CandleState)
-
-        # P2: Position Control — 仓位已满不加仓，空仓不减仓 (原P3)
+        # P2: Position Control — 仓位已满不加仓，空仓不减仓
         if node.action == "BUY" and position >= max_units:
             node.pruned = True
             node.prune_reason = f"P2:Position full({position}/{max_units})"
@@ -1295,6 +1303,70 @@ def _numerical_feedback(node: TreeNode, verifier: "BeyondEuclidVerifier",
 
 # 访问统计持久化 — 跨调用累积经验
 _VISIT_STATS_FILE = _STATE_DIR / "gcc_puct_visits.json"
+
+# 失败模式记忆 — arXiv:2603.04735 negative constraint
+_FAILED_PATTERN_FILE = _STATE_DIR / "gcc_puct_failed_patterns.json"
+_FAILED_PATTERN_MAX = 50   # 每个 symbol 最多记录50个失败模式
+_FAILED_PATTERN_TTL = 8    # 失败模式有效期：8根K线
+
+
+def _make_signal_fingerprint(context: dict) -> str:
+    """生成信号指纹：提取关键信号状态组合作为唯一标识。"""
+    scan_dir = context.get("scan", ("NONE", 0.0))[0] if isinstance(context.get("scan"), (list, tuple)) else "NONE"
+    sig_label = context.get("signal_direction", {}).get("direction", "NO_ANSWER")
+    filter_buy = "Y" if context.get("filter_buy", {}).get("passed") else "N"
+    filter_sell = "Y" if context.get("filter_sell", {}).get("passed") else "N"
+    n_gate_buy = context.get("n_gate_buy", "INACTIVE")
+    n_gate_sell = context.get("n_gate_sell", "INACTIVE")
+    return f"{scan_dir}|{sig_label}|fb{filter_buy}|fs{filter_sell}|nb{n_gate_buy}|ns{n_gate_sell}"
+
+
+def _load_failed_patterns() -> dict:
+    """加载失败模式缓存 {symbol: [{fingerprint, action, candle_count}]}"""
+    if not _FAILED_PATTERN_FILE.exists():
+        return {}
+    try:
+        return json.loads(_FAILED_PATTERN_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_failed_patterns(patterns: dict) -> None:
+    """保存失败模式缓存。"""
+    try:
+        _FAILED_PATTERN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _FAILED_PATTERN_FILE.write_text(
+            json.dumps(patterns, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception as e:
+        logger.debug("[GCC-TM] save_failed_patterns: %s", e)
+
+
+def _is_failed_pattern(symbol: str, action: str, fingerprint: str,
+                        patterns: dict) -> bool:
+    """检查当前信号组合是否是已知失败模式。"""
+    for p in patterns.get(symbol, []):
+        if p.get("action") == action and p.get("fingerprint") == fingerprint:
+            if p.get("candle_count", 0) < _FAILED_PATTERN_TTL:
+                return True
+    return False
+
+
+def _record_failed_pattern(symbol: str, action: str, fingerprint: str,
+                            patterns: dict) -> None:
+    """记录失败模式（verdict=SKIP 后调用）。"""
+    if symbol not in patterns:
+        patterns[symbol] = []
+    for p in patterns[symbol]:
+        if p.get("action") == action and p.get("fingerprint") == fingerprint:
+            return  # 已存在
+    patterns[symbol].append({
+        "fingerprint": fingerprint,
+        "action": action,
+        "candle_count": 0,
+    })
+    if len(patterns[symbol]) > _FAILED_PATTERN_MAX:
+        patterns[symbol] = patterns[symbol][-_FAILED_PATTERN_MAX:]
 
 
 def _load_visit_stats() -> Dict[str, Dict[str, dict]]:
@@ -1834,6 +1906,16 @@ class GCCTradingModule:
             best_node, closes, current_price
         )
 
+        # 失败模式记忆：SKIP 时记录信号指纹
+        if verdict == "SKIP" and best_node and best_node.action in ("BUY", "SELL"):
+            try:
+                fp = _make_signal_fingerprint(context)
+                failed_pats = _load_failed_patterns()
+                _record_failed_pattern(self.symbol, best_node.action, fp, failed_pats)
+                _save_failed_patterns(failed_pats)
+            except Exception as _fp_e:
+                logger.debug("[GCC-TM] record_failed_pattern: %s", _fp_e)
+
         # L2-S03: rejected_nodes 摘要
         rejected_summary = [
             {"action": n.action, "aggregate": round(n.aggregate, 4),
@@ -2093,8 +2175,9 @@ class GCCTradingModule:
                 TreeNode("HOLD", hold_scores, 0.0, depth=1),
             ]
 
-        # ── Step 2: L1 剪枝 ──
-        _apply_pruning(l1_nodes, sym, context)
+        # ── Step 2: L1 剪枝 — 含失败模式记忆 ──
+        failed_patterns = _load_failed_patterns()
+        _apply_pruning(l1_nodes, sym, context, failed_patterns=failed_patterns)
         surviving_l1 = [n for n in l1_nodes if not n.pruned]
         self._last_rejected_nodes.extend(n for n in l1_nodes if n.pruned)
         if not surviving_l1:
