@@ -179,9 +179,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div class="tab" data-tab="verdict">裁决分析</div>
 <div class="tab" data-tab="vgate">Vision门控</div>
 <div class="tab" data-tab="sigpool">信号池</div>
-<div class="tab" data-tab="accuracy">准确率</div>
 <div class="tab" data-tab="tasks">GCC任务</div>
-<div class="tab" data-tab="issues">问题&风险</div>
 <div class="tab" data-tab="evolution">进化</div>
 </div>
 
@@ -202,40 +200,6 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 </div>
 
 <!-- Tab: 问题&风险 -->
-<div class="tab-content" id="tab-issues">
-
-<!-- Human Guidance -->
-<div class="section" id="hg-section">
-<h3>👤 人类指导中心</h3>
-<div class="layer-strip" id="hg-layer-strip"></div>
-<div class="hg-loop-bar">
-  <div class="hg-loop-dot" id="hg-loop-dot"></div>
-  <span class="hg-loop-label" id="hg-loop-label">GCC-EVO 循环: 检测中</span>
-  <span class="hg-loop-sub" id="hg-loop-sub"></span>
-</div>
-<div class="hg-steps" id="hg-steps-bar">
-  <span class="hg-step" id="hg-s-tasks">○ 任务</span>
-  <span class="hg-step-sep">›</span>
-  <span class="hg-step" id="hg-s-audit">○ 审计</span>
-  <span class="hg-step-sep">›</span>
-  <span class="hg-step" id="hg-s-distill">○ 提炼</span>
-  <span class="hg-step-sep">›</span>
-  <span class="hg-step" id="hg-s-rules">○ 规则</span>
-  <span class="hg-step-sep">›</span>
-  <span class="hg-step" id="hg-s-dashboard">○ 看板</span>
-  <span id="hg-s-round" style="margin-left:auto;color:#afb8c1;font-size:0.85em"></span>
-</div>
-<div class="hg-anchors" id="hg-anchor-list"></div>
-<div class="hg-strategies" id="hg-strategy-list"></div>
-</div>
-
-<div class="section" id="issues-box">
-<h3>问题 & 风险 & 改善建议</h3>
-<div id="issues-timerange" style="color:#666;font-size:0.9em;margin-bottom:8px"></div>
-<div id="strengths-list"></div>
-<div id="issues-list"></div>
-</div>
-</div>
 
 <!-- Tab: 交易分析 (GCC-TM trades) -->
 <div class="tab-content" id="tab-trades">
@@ -288,13 +252,6 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div id="sigpool-density"></div>
 </div>
 
-<!-- Tab: 准确率 -->
-<div class="tab-content" id="tab-accuracy">
-<div class="summary" id="accuracy-summary"></div>
-<h2>全品种准确率明细</h2>
-<table><thead><tr><th>品种</th><th>总决策</th><th>一致</th><th>一致率</th><th>分歧率</th><th>分歧数</th><th>GCC最新</th><th>主程序最新</th><th>接管就绪</th></tr></thead>
-<tbody id="accuracy-full-body"></tbody></table>
-</div>
 
 <div class="tab-content" id="tab-broker">
 <div class="summary" id="broker-pnl-cards"></div>
@@ -620,8 +577,6 @@ function _hgDeleted() { try { return new Set(JSON.parse(localStorage.getItem(_HG
 function deleteHgAnchor(id) {
   const s = _hgDeleted(); s.add(id);
   localStorage.setItem(_HG_DEL_KEY, JSON.stringify([...s]));
-  renderHumanGuidance();
-  renderStrategies();
   // Call server if available
   if (location.protocol !== 'file:') {
     fetch('/api/delete_anchor', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({anchor_id:id}) }).catch(()=>{});
@@ -641,104 +596,6 @@ function renderLayers() {
   }).join('');
 }
 
-function renderHumanGuidance() {
-  // human_guidance is a top-level key in MULTI_DATA (shared across ranges)
-  const hg = (MULTI_DATA && MULTI_DATA.human_guidance) || {};
-  const deleted = _hgDeleted();
-  // Loop status
-  const running = !!hg.loop_running;
-  const dotEl = $('hg-loop-dot'), labelEl = $('hg-loop-label'), subEl = $('hg-loop-sub');
-  if (dotEl.className !== undefined) {
-    dotEl.className = 'hg-loop-dot' + (running ? ' running' : '');
-    labelEl.textContent = running ? 'GCC-EVO 循环: 运行中' : 'GCC-EVO 循环: 未启动';
-    subEl.textContent = hg.loop_last ? ('最后活跃: ' + hg.loop_last.slice(0,16)) : '';
-  }
-  // 5-step strip
-  const _sIcon = { ok:'✓', running:'⏳', error:'✗', skip:'—', pending:'○' };
-  const _sLabel = { tasks:'任务', audit:'审计', distill:'提炼', rules:'规则', dashboard:'看板' };
-  const steps = hg.loop_steps || {};
-  ['tasks','audit','distill','rules','dashboard'].forEach(k => {
-    const el = $('hg-s-' + k); if (!el) return;
-    const s = steps[k] || {}; const st = s.status || 'pending';
-    const detail = s.detail ? `<span class="hg-step-detail">(${s.detail})</span>` : '';
-    el.className = 'hg-step ' + st;
-    el.innerHTML = `${_sIcon[st]||'○'} ${_sLabel[k]}${detail}`;
-  });
-  const roundEl = $('hg-s-round');
-  if (roundEl && hg.loop_round) roundEl.textContent = `Round #${hg.loop_round}`;
-  const anchors = (hg.anchors || []).filter(a => !deleted.has(a.anchor_id || (a.symbol + a.created_at)));
-  const listEl = $('hg-anchor-list');
-  if (!anchors.length) {
-    listEl.innerHTML = '<div style="color:#656d76;font-size:0.82em;padding:8px 0">无活跃锚点</div>';
-    return;
-  }
-  const _dmap = { bullish:'↑多', bearish:'↓空', neutral:'—中性' };
-  listEl.innerHTML = anchors.map(a => {
-    const aid = a.anchor_id || (a.symbol + a.created_at);
-    const dc = (a.direction||'neutral').toLowerCase();
-    return `<div class="hg-anchor ${dc}">
-      <button class="hg-del" onclick="deleteHgAnchor('${aid}')" title="删除">×</button>
-      <div class="hg-anchor-header">
-        <span class="hg-anchor-sym">${a.symbol||'全局'}</span>
-        <span class="hg-anchor-dir ${dc}">${_dmap[dc]||dc}</span>
-      </div>
-      <div class="hg-anchor-concern">${(a.concern||'').slice(0,70)}${(a.concern||'').length>70?'…':''}</div>
-      <div class="hg-anchor-meta">${a.expires_after||''} · ${a.created_at||''}</div>
-    </div>`;
-  }).join('');
-}
-
-function renderStrategies() {
-  const hg = (MULTI_DATA && MULTI_DATA.human_guidance) || {};
-  const strategies = hg.strategies || [];
-  const el = $('hg-strategy-list');
-  if (!el) return;
-  if (!strategies.length) {
-    el.innerHTML = '';
-    return;
-  }
-  el.innerHTML = '<div class="hg-strat-title">📋 策略锚定</div>' + strategies.map(s => {
-    const validated = s.validated ? 'validated' : '';
-    const statusBadge = s.tracking_status === 'active'
-      ? '<span class="hg-strat-badge active">生效中</span>'
-      : '<span class="hg-strat-badge expired">已过期</span>';
-    const scopeLabel = s.scope === 'crypto' ? '🪙 加密货币' : (s.scope === 'stock' ? '📈 美股' : s.scope);
-    const rules = s.rules || {};
-    const buyRule = rules.buy || {};
-    const sellRule = rules.sell || {};
-    const applies = (s.applies_to || []).map(t => `<code>${t}</code>`).join(' ');
-    return `<div class="hg-strat ${validated}">
-      <div class="hg-strat-header">
-        <span class="hg-strat-name">${s.name || '未命名策略'}</span>
-        ${statusBadge}
-        <span class="hg-strat-scope">${scopeLabel}</span>
-        ${s.timeframe ? '<span class="hg-strat-scope">' + s.timeframe + '</span>' : ''}
-      </div>
-      <div class="hg-strat-desc">${s.description || ''}</div>
-      <div class="hg-strat-rules">
-        <div class="hg-strat-rule">
-          <div class="hg-strat-rule-label buy">🟢 买入规则</div>
-          <div class="hg-strat-rule-step">触发: ${buyRule.trigger || '-'}</div>
-          <div class="hg-strat-rule-step">手动: ${buyRule.manual_action || '-'}</div>
-          <div class="hg-strat-rule-step">自动: ${buyRule.auto_action || '-'}</div>
-        </div>
-        <div class="hg-strat-rule">
-          <div class="hg-strat-rule-label sell">🔴 卖出规则</div>
-          <div class="hg-strat-rule-step">触发: ${sellRule.trigger || '-'}</div>
-          <div class="hg-strat-rule-step">手动: ${sellRule.manual_action || '-'}</div>
-          <div class="hg-strat-rule-step">自动: ${sellRule.auto_action || '-'}</div>
-        </div>
-      </div>
-      ${applies ? '<div class="hg-strat-applies">适用: ' + applies + '</div>' : ''}
-      <div class="hg-strat-meta">
-        <span>⚠️ ${s.main_concern || ''}</span>
-        <span>📅 ${s.created_at || ''}</span>
-        <span>⏳ ${s.expires_after || ''}</span>
-        ${s.validation_note ? '<span>✅ ' + s.validation_note.slice(0,60) + (s.validation_note.length>60?'…':'') + '</span>' : ''}
-      </div>
-    </div>`;
-  }).join('');
-}
 
 function render() {
     if (!DATA) return;
@@ -848,80 +705,8 @@ function _doRender() {
         </tr>`;
     }
 
-    // ── 人类指导 ──
+    // ── 层级渲染 ──
     renderLayers();
-    renderHumanGuidance();
-    renderStrategies();
-
-    // ── 问题&风险 Tab ──
-    const issTimerange = $('issues-timerange');
-    if (DATA.generated_at && DATA.hours) {
-        issTimerange.textContent = `检测窗口: 过去 ${DATA.hours}h | 截至 ${DATA.generated_at}`;
-    }
-    // 系统亮点 (POSITIVE)
-    const strengthsList = $('strengths-list');
-    const positives = (DATA.issues || []).filter(i => i.type === 'POSITIVE');
-    if (positives.length > 0) {
-        let sHtml = '<div style="margin-bottom:12px"><div style="font-weight:600;color:#1a7f37;font-size:1.05em;margin-bottom:6px">✅ 系统亮点</div>';
-        sHtml += positives.map(i =>
-            `<div class="strength-item"><strong>${i.task}</strong>: ${i.msg}</div>`
-        ).join('');
-        sHtml += '</div>';
-        strengthsList.innerHTML = sHtml;
-    } else {
-        strengthsList.innerHTML = '';
-    }
-    const issList = $('issues-list');
-    const allNonPositive = (DATA.issues || []).filter(i => i.type !== 'POSITIVE');
-    if (allNonPositive.length > 0) {
-        const active = allNonPositive.filter(i => !i.acked && !i.fixed);
-        const fixed = allNonPositive.filter(i => i.fixed);
-        const acked = allNonPositive.filter(i => i.acked && !i.fixed);
-        // 按category分组显示
-        const catLabels = {
-            execution: {name: '信号执行', icon: '⚡', desc: 'SignalStack/3Commas/P0发送'},
-            data:      {name: '数据层',   icon: '📊', desc: '数据源/估值/过期'},
-            market:    {name: '市场环境', icon: '📈', desc: '趋势/震荡/HOLD率'},
-            signal:    {name: '信号质量', icon: '🎯', desc: '准确率/胜率/门控'},
-            system:    {name: '系统',     icon: '⚙️', desc: 'GCC任务/覆盖率'},
-        };
-        const catOrder = ['execution', 'data', 'signal', 'market', 'system'];
-        const grouped = {};
-        active.forEach(i => {
-            const cat = i.category || 'system';
-            if (!grouped[cat]) grouped[cat] = [];
-            grouped[cat].push(i);
-        });
-        let html = '';
-        for (const cat of catOrder) {
-            const items = grouped[cat];
-            if (!items || !items.length) continue;
-            const info = catLabels[cat] || {name: cat, icon: '?', desc: ''};
-            html += `<div style="margin-top:12px;margin-bottom:4px;font-weight:600;color:#24292f;font-size:0.95em">${info.icon} ${info.name} <span style="font-weight:400;color:#656d76;font-size:0.85em">${info.desc}</span></div>`;
-            html += items.map(i =>
-                `<div class="issue-item"><span class="issue-tag ${i.type}">[${i.type}]</span><strong>${i.task}</strong>: ${i.msg}</div>`
-            ).join('');
-        }
-        if (fixed.length > 0) {
-            html += `<div class="ack-toggle" onclick="$('fixed-issues').style.display=$('fixed-issues').style.display==='none'?'block':'none'">` +
-                `已修复 (${fixed.length}) ▸</div>`;
-            html += `<div id="fixed-issues" style="display:none">` + fixed.map(i =>
-                `<div class="issue-item issue-fixed"><span class="issue-tag" style="color:#1a7f37">[FIXED]</span><strong>${i.task}</strong>: ${i.msg}` +
-                (i.fix_note ? ` <span class="fix-note">— ${i.fix_note}</span>` : '') + `</div>`
-            ).join('') + `</div>`;
-        }
-        if (acked.length > 0) {
-            html += `<div class="ack-toggle" onclick="$('acked-issues').style.display=$('acked-issues').style.display==='none'?'block':'none'">` +
-                `已确认 (${acked.length}) ▸</div>`;
-            html += `<div id="acked-issues" style="display:none">` + acked.map(i =>
-                `<div class="issue-item issue-acked"><span class="issue-tag ${i.type}">[${i.type}]</span><strong>${i.task}</strong>: ${i.msg}` +
-                (i.ack_reason ? ` <span class="ack-reason">— ${i.ack_reason}</span>` : '') + `</div>`
-            ).join('') + `</div>`;
-        }
-        issList.innerHTML = html;
-    } else {
-        issList.innerHTML = '<div class="issue-item" style="color:#1a7f37">All systems OK - no issues detected</div>';
-    }
 
     // ── 券商对账 Tab: P&L面板 ──
     const bp = DATA.broker_pnl || {};
@@ -2079,46 +1864,6 @@ function loadGccTm() {
             `;
         }
 
-        // ── 准确率 Tab (tab-accuracy) ──
-        {
-            const accSymbols = Object.keys(accuracy2).sort((a,b) => (accuracy2[b].total||0) - (accuracy2[a].total||0));
-            let totalDec = 0, totalMatch = 0;
-            let bestSym = '-', bestRate = -1, worstSym = '-', worstRate = 2;
-            accSymbols.forEach(sym => {
-                const a = accuracy2[sym];
-                totalDec += a.total || 0;
-                totalMatch += a.match || 0;
-                const r = a.rate || 0;
-                if ((a.total||0) >= 5 && r > bestRate) { bestRate = r; bestSym = sym; }
-                if ((a.total||0) >= 5 && r < worstRate) { worstRate = r; worstSym = sym; }
-            });
-            const avgRate = totalDec > 0 ? (totalMatch / totalDec * 100).toFixed(1) : '-';
-            $('accuracy-summary').innerHTML = `
-                <div class="card"><div class="label">平均一致率</div><div class="value ${Number(avgRate)>=50?'green':'red'}">${avgRate}%</div><div class="sub">${totalMatch}/${totalDec}</div></div>
-                <div class="card"><div class="label">总决策</div><div class="value blue">${totalDec}</div></div>
-                <div class="card"><div class="label">最佳品种</div><div class="value green">${bestSym}</div><div class="sub">${bestRate>=0?(bestRate*100).toFixed(1)+'%':'-'}</div></div>
-                <div class="card"><div class="label">最差品种</div><div class="value red">${worstSym}</div><div class="sub">${worstRate<=1?(worstRate*100).toFixed(1)+'%':'-'}</div></div>
-            `;
-            $('accuracy-full-body').innerHTML = accSymbols.length ? accSymbols.map(sym => {
-                const a = accuracy2[sym];
-                const rate = a.rate != null ? (a.rate * 100).toFixed(1) + '%' : '-';
-                const divRate = a.divergence_rate != null ? (a.divergence_rate * 100).toFixed(1) + '%' : '-';
-                const rateColor = (a.rate||0) >= 0.6 ? '#1a7f37' : (a.rate||0) >= 0.3 ? '#9a6700' : '#cf222e';
-                const gccColor = (a.last_gcc||'-') === 'BUY' ? '#1a7f37' : (a.last_gcc||'-') === 'SELL' ? '#cf222e' : '#656d76';
-                const takeover = a.takeover_ready ? '<span class="badge badge-ok">READY</span>' : '<span class="badge" style="background:#eaeef2;color:#656d76">NO</span>';
-                return `<tr>
-                    <td style="font-weight:600">${sym}</td>
-                    <td>${a.total||0}</td>
-                    <td>${a.match||0}</td>
-                    <td style="color:${rateColor};font-weight:600">${rate}</td>
-                    <td>${divRate}</td>
-                    <td>${a.divergence_count||0}</td>
-                    <td style="color:${gccColor};font-weight:600">${a.last_gcc||'-'}</td>
-                    <td>${a.last_main||'-'}</td>
-                    <td>${takeover}</td>
-                </tr>`;
-            }).join('') : '<tr><td colspan="9" style="color:#656d76">暂无准确率数据</td></tr>';
-        }
 
         // ══════════════════════════════════════════════════════
         // 5维度错误标签: D1代码/D2信号/D3过滤/D4执行/D5盈亏
