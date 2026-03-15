@@ -238,6 +238,18 @@
         "架构：不动现有主程序，作为独立模块接入llm_decide()末尾一行，Phase1只观察记录，Phase2执行"
       ],
       "sub_items": []
+    },
+    "KEY-012": {
+      "title": "美股期权对冲模块 — Protective Put + Covered Call + Collar",
+      "status": "PLANNING",
+      "phase": "Pipeline已建, 等用户确认后执行",
+      "observations": [
+        "CRWV满仓500股(-43%), AMD 100股(-27%): 需Protective Put保护",
+        "现有qqq_options.py只支持TSLA单品种, 需扩展多品种+多策略",
+        "Schwab期权链API已验证: CRWV/AMD/HIMS都有期权, 4/17流动性最好",
+        "CRWV IV=87%(贵), AMD IV=55%(合理), HIMS IV=98%(很贵)"
+      ],
+      "sub_items": []
     }
   }
 }
