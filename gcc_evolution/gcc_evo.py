@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gcc-evo v5.405 — GCC Evolution Engine with Visual Dashboard"""
+"""gcc-evo v5.410 — GCC Evolution Engine with Visual Dashboard"""
 from __future__ import annotations
 
 import json
@@ -28,10 +28,14 @@ except ImportError:
 _GCC_SELF_DIR = str(Path(__file__).resolve().parent)
 if _GCC_SELF_DIR not in sys.path:
     sys.path.insert(0, _GCC_SELF_DIR)
+# Also add project root so gcc_evolution/ package resolves (for research fetch etc.)
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 KEYS_FILE = Path(".gcc/keys.yaml")
 
-HELP_TEXT = """  GCC v5.405 — Active Evolution Engine
+HELP_TEXT = """  GCC v5.410 — Active Evolution Engine
   ═══════════════════════════════════════════════════
 
   Daily Use:
@@ -1198,9 +1202,13 @@ def cmd_distill(subcommand, days, max_insights, project, single_card, merge, dry
       gcc-evo distill insights --dry-run
       gcc-evo distill skills
     """
-    from gcc_evolution.experience_store import GlobalMemory
-    from gcc_evolution.distiller import Distiller, InsightCard
-    from gcc_evolution.config import GCCConfig
+    try:
+        from gcc_evolution.experience_store import GlobalMemory
+        from gcc_evolution.distiller import Distiller, InsightCard
+        from gcc_evolution.config import GCCConfig
+    except ImportError as _e:
+        click.echo(f"  ⚠  distill 跳过: 依赖模块未找到 ({_e})")
+        sys.exit(2)  # exit code 2 = skip (不是错误)
     from datetime import datetime, timezone, timedelta
 
     # --merge 等效 --single-card + --max 1
@@ -1895,17 +1903,6 @@ def cmd_ho_create(description, key):
 
     # ── Step 7: Auto-update dashboard ──
     _auto_export_dashboard()
-
-    # ── Step 8: Auto-refresh mirrored skill docs ──
-    try:
-        from gcc_evolution.cli import _sync_docs_after_ho_create
-        sync_ok, sync_msg = _sync_docs_after_ho_create()
-        if sync_ok:
-            click.echo(f"  ✓ Skill sync: {sync_msg}")
-        else:
-            click.echo(f"  · Skill sync warning: {sync_msg}")
-    except Exception as e:
-        click.echo(f"  · Skill sync warning: {e}")
 
 
 def _db_auto_sync():
@@ -5703,7 +5700,7 @@ def _knn_classify_failure(key, acc, avg_wr, n_samples, is_crypto):
 
 
 def _knn_smart_prune_v2(db, key, target_keep_ratio=0.7):
-    """TiM-inspired: Phase1 forget老旧无信息样本 + Phase2 merge相似特征向量"""
+    """TiM-inspired: forget老旧无信息样本"""
     import numpy as np
     data = db.get_history(key)
     if data is None:
@@ -5716,42 +5713,12 @@ def _knn_smart_prune_v2(db, key, target_keep_ratio=0.7):
     if n < 100:
         return 0
 
-    # Phase 1: forget old low-information samples
     keep_mask = np.ones(n, dtype=bool)
     oldest_third = n // 3
     for i in range(oldest_third):
         if abs(rets[i]) < 0.005:
             keep_mask[i] = False
 
-    # Phase 2 (S09): merge near-duplicate feature vectors
-    # Cosine distance < 0.15 ≈ similarity > 0.989 → 信息冗余
-    remaining_idx = np.where(keep_mask)[0]
-    if len(remaining_idx) >= 50 and feat.shape[1] > 0:
-        sub_feat = feat[remaining_idx]
-        norms = np.linalg.norm(sub_feat, axis=1, keepdims=True)
-        norms = np.where(norms < 1e-8, 1.0, norms)
-        normed = sub_feat / norms
-
-        n_sub = len(remaining_idx)
-        sub_merged = np.zeros(n_sub, dtype=bool)
-
-        for i in range(n_sub):
-            if sub_merged[i]:
-                continue
-            dists = np.linalg.norm(normed[i:i+1] - normed[i+1:], axis=1)
-            near = np.where((dists < 0.15) & (~sub_merged[i+1:]))[0]
-            if len(near) == 0:
-                continue
-            near_abs = near + i + 1
-            group_orig = remaining_idx[np.concatenate([[i], near_abs])]
-            # Average features and returns into the representative sample
-            feat[remaining_idx[i]] = feat[group_orig].mean(axis=0)
-            rets[remaining_idx[i]] = rets[group_orig].mean()
-            for j in near_abs:
-                sub_merged[j] = True
-                keep_mask[remaining_idx[j]] = False
-
-    # Phase 3: trim to target if still over
     kept = keep_mask.sum()
     target = int(n * target_keep_ratio)
     if kept > target:
@@ -6505,6 +6472,205 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
     project_root = Path(__file__).parent.parent
     tasks_json_path = _gcc_dir() / "pipeline" / "tasks.json"
 
+    # ── 卡片周期门控 ──────────────────────────────────────────
+    # 经验卡: 半月周期 (1-15=H1, 16-末=H2), 每周期淘汰+蒸馏一次
+    # 知识卡: 自然月周期, 每月淘汰+蒸馏一次
+    _cycle_state_path = project_root / "state" / "card_cycle_state.json"
+
+    def _exp_cycle_key(dt: datetime) -> str:
+        """经验卡半月周期标记: e.g. '2026-03-H1' or '2026-03-H2'"""
+        half = "H1" if dt.day <= 15 else "H2"
+        return f"{dt.strftime('%Y-%m')}-{half}"
+
+    def _know_cycle_key(dt: datetime) -> str:
+        """知识卡月度周期标记: e.g. '2026-03'"""
+        return dt.strftime("%Y-%m")
+
+    def _load_cycle_state() -> dict:
+        if _cycle_state_path.exists():
+            try:
+                return json.loads(_cycle_state_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {}
+
+    def _save_cycle_state(state: dict):
+        _cycle_state_path.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _is_daily_8am_window(now: datetime) -> bool:
+        """是否在每天NY 8:00-8:09 AM的10分钟窗口内（匹配5min interval）"""
+        return now.hour == 8 and now.minute < 10
+
+    def _daily_key(now: datetime) -> str:
+        return now.strftime("%Y-%m-%d")
+
+    def _should_run_daily_cards(now: datetime) -> bool:
+        """每天8am NY: 经验卡/知识卡进入循环（每日一次）"""
+        if not _is_daily_8am_window(now):
+            return False
+        state = _load_cycle_state()
+        return state.get("daily_last") != _daily_key(now)
+
+    def _mark_daily_done(now: datetime):
+        state = _load_cycle_state()
+        state["daily_last"] = _daily_key(now)
+        state["daily_last_ts"] = now.isoformat()
+        _save_cycle_state(state)
+
+    def _should_run_exp_cycle(now: datetime) -> bool:
+        """经验卡: 本半月周期是否已执行过淘汰+蒸馏"""
+        state = _load_cycle_state()
+        return state.get("exp_last_cycle") != _exp_cycle_key(now)
+
+    def _should_run_know_cycle(now: datetime) -> bool:
+        """知识卡: 本月周期是否已执行过淘汰+蒸馏"""
+        state = _load_cycle_state()
+        return state.get("know_last_cycle") != _know_cycle_key(now)
+
+    def _mark_exp_cycle_done(now: datetime):
+        state = _load_cycle_state()
+        state["exp_last_cycle"] = _exp_cycle_key(now)
+        state["exp_last_ts"] = now.isoformat()
+        _save_cycle_state(state)
+
+    def _mark_know_cycle_done(now: datetime):
+        state = _load_cycle_state()
+        state["know_last_cycle"] = _know_cycle_key(now)
+        state["know_last_ts"] = now.isoformat()
+        _save_cycle_state(state)
+
+    # ── 淘汰底部10% + 每日随机选卡 ─────────────────────────
+
+    # 淘汰黑名单: 记录被淘汰的卡片标题关键词, 防止类似内容重新加入
+    _cull_registry_path = project_root / "state" / "culled_cards_registry.json"
+
+    def _load_cull_registry() -> dict:
+        if _cull_registry_path.exists():
+            try:
+                return json.loads(_cull_registry_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {"experience": [], "knowledge": []}
+
+    def _save_cull_registry(reg: dict):
+        _cull_registry_path.write_text(
+            json.dumps(reg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _is_similar_to_culled(title: str, culled_titles: list) -> bool:
+        """检查标题是否与已淘汰卡片相似 (简化: 去除数字后前20字符匹配)"""
+        import re as _re
+        norm = _re.sub(r'[\d%.]+', '', title).strip()[:20].lower()
+        for ct in culled_titles:
+            cn = _re.sub(r'[\d%.]+', '', ct).strip()[:20].lower()
+            if norm and cn and (norm in cn or cn in norm):
+                return True
+        return False
+
+    def _cull_experience_cards_bottom10():
+        """淘汰经验卡底部10%。标记status=CULLED,不删除。排序依据: confidence。"""
+        try:
+            from gcc_evolution.experience_store import GlobalMemory
+            from gcc_evolution.models import CardStatus
+            gm = GlobalMemory()
+            all_cards = gm.get_all(limit=9999)
+            # 只对活跃卡排序(排除已CULLED)
+            active = [c for c in all_cards if getattr(c, 'status', None) != CardStatus.CULLED]
+            if len(active) < 10:
+                click.echo(f"    经验卡: {len(active)}张活跃, 不足10张不淘汰")
+                gm.close()
+                return 0
+            sorted_cards = sorted(active, key=lambda c: c.confidence)
+            cull_count = max(1, len(sorted_cards) // 10)
+            culled = sorted_cards[:cull_count]
+            reg = _load_cull_registry()
+            for card in culled:
+                card.status = CardStatus.CULLED
+                gm.store(card)
+                # 记录到淘汰黑名单
+                # 提取source(外挂名)用于后续相似性匹配
+                _src = card.key_insight.split(":")[0].strip() if ":" in card.key_insight else ""
+                entry = {"id": card.id, "title": card.key_insight[:60],
+                         "source": _src,
+                         "confidence": card.confidence,
+                         "culled_at": datetime.now(NY).isoformat()}
+                reg["experience"].append(entry)
+            _save_cull_registry(reg)
+            gm.close()
+            click.echo(f"    经验卡淘汰: {cull_count}/{len(active)}张 (底部10%, conf<={culled[-1].confidence:.2f})")
+            return cull_count
+        except Exception as e:
+            click.echo(f"    经验卡淘汰失败: {e}")
+            return 0
+
+    def _cull_knowledge_cards_bottom10():
+        """淘汰知识卡底部10%。在JSON中标记culled=true,不删除文件。"""
+        cards_dir = project_root / ".GCC" / "skill" / "cards"
+        all_cards = []
+        for jf in cards_dir.glob("CARD-*.json"):
+            try:
+                d = json.loads(jf.read_text(encoding="utf-8"))
+                if d.get("culled"):
+                    continue  # 已淘汰的不参与排序
+                conf = d.get("confidence", 0.5)
+                try:
+                    conf = float(conf)
+                except (ValueError, TypeError):
+                    conf = 0.5
+                all_cards.append({"path": jf, "data": d, "id": d.get("id", jf.stem),
+                                  "title": d.get("title", ""), "confidence": conf})
+            except Exception:
+                continue
+        if len(all_cards) < 10:
+            click.echo(f"    知识卡: {len(all_cards)}张活跃, 不足10张不淘汰")
+            return 0
+        sorted_cards = sorted(all_cards, key=lambda c: c["confidence"])
+        cull_count = max(1, len(sorted_cards) // 10)
+        culled = sorted_cards[:cull_count]
+        reg = _load_cull_registry()
+        for card in culled:
+            # 在原JSON中标记
+            card["data"]["culled"] = True
+            card["data"]["culled_at"] = datetime.now(NY).isoformat()
+            card["data"]["culled_reason"] = "bottom_10pct"
+            card["path"].write_text(
+                json.dumps(card["data"], ensure_ascii=False, indent=2), encoding="utf-8")
+            # 记录到淘汰黑名单(含标题,用于相似性过滤)
+            entry = {"id": card["id"], "title": card["title"][:60],
+                     "confidence": card["confidence"],
+                     "culled_at": datetime.now(NY).isoformat()}
+            reg["knowledge"].append(entry)
+        _save_cull_registry(reg)
+        click.echo(f"    知识卡淘汰: {cull_count}/{len(all_cards)}张 (底部10%, conf<={culled[-1]['confidence']:.2f})")
+        return cull_count
+
+    def _pick_random_card():
+        """每日随机选1张知识卡使用, 记录到 state/daily_card_pick.json"""
+        import random as _rnd
+        cards_dir = project_root / ".GCC" / "skill" / "cards"
+        card_files = list(cards_dir.glob("CARD-*.json"))
+        if not card_files:
+            return None
+        pick = _rnd.choice(card_files)
+        try:
+            d = json.loads(pick.read_text(encoding="utf-8"))
+            result = {
+                "date": datetime.now(NY).strftime("%Y-%m-%d"),
+                "card_id": d.get("id", pick.stem),
+                "title": d.get("title", ""),
+                "confidence": d.get("confidence", 0),
+                "file": pick.name,
+            }
+            pick_path = project_root / "state" / "daily_card_pick.json"
+            pick_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            click.echo(f"    📌 今日卡片: {result['card_id']} — {result['title'][:40]} (conf={result['confidence']})")
+            return result
+        except Exception as e:
+            click.echo(f"    随机选卡失败: {e}")
+            return None
+
     # ── L0 Gate: 校验 SessionConfig ──────────────────────
     try:
         _root_path = Path(__file__).parent.parent
@@ -6585,6 +6751,28 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
                     click.echo(f"       ○ {sid}: {stitle[:45]}")
         return done_steps, total_steps
 
+    # ── loop_state.json 写入 ────────────────────────────────
+    _loop_state_path = Path(__file__).parent / "loop_state.json"
+
+    def _write_loop_state(running, round_num=0, last_start="", last_end="", steps=None):
+        """写入 .GCC/loop_state.json 供 dashboard 读取"""
+        state = {
+            "running": running,
+            "round": round_num,
+            "last_start": last_start,
+            "last_end": last_end,
+            "steps": steps or {},
+        }
+        try:
+            _loop_state_path.write_text(
+                json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+    # ─────────────────────────────────────────────────────
+
+    _loop_round = [0]  # mutable counter
+
     def _run_step(name, cmd, timeout=120):
         """运行子步骤,返回(success, output)"""
         click.echo(f"  ⏳ {name}...", nl=False)
@@ -6597,6 +6785,9 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
             if proc.returncode == 0:
                 click.echo(f" ✓")
                 return True, proc.stdout
+            elif proc.returncode == 2:
+                click.echo(f" — (skip)")
+                return "skip", proc.stdout
             else:
                 click.echo(f" ✗ (rc={proc.returncode})")
                 err = (proc.stderr or "")[:200]
@@ -6613,8 +6804,303 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
     def _icon(ok):
         return "✓" if ok else "✗"
 
+    def _generate_suggestions(results, step_status, bound_tasks, round_num, ts):
+        """分析循环结果，生成锚定到具体层的改善建议 → .GCC/suggestions.jsonl"""
+        suggestions = []
+
+        def _add(layer, title, detail, priority="medium", source=""):
+            suggestions.append({
+                "layer": layer,
+                "title": title,
+                "detail": detail,
+                "priority": priority,
+                "round": round_num,
+                "ts": ts,
+                "status": "open",
+                "source": source,
+            })
+            _prio_icon = {"high": "🔴", "medium": "🟡", "low": "⚪"}.get(priority, "⚪")
+            click.echo(f"    {_prio_icon} [{layer}] {title}  ← {source or '系统检查'}")
+
+        # ── L1 Memory: 检查经验卡质量 ──
+        _exp_path = project_root / "state" / "gcc_knn_experience.jsonl"
+        if _exp_path.exists():
+            _exp_lines = [l for l in _exp_path.read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+            _exp_total = len(_exp_lines)
+            _exp_pending = 0
+            _exp_by_sym = {}
+            for _el in _exp_lines:
+                try:
+                    _e = json.loads(_el)
+                    if _e.get("outcome") is None:
+                        _exp_pending += 1
+                    _s = _e.get("symbol", "?")
+                    if _s not in _exp_by_sym:
+                        _exp_by_sym[_s] = {"win": 0, "lose": 0}
+                    if _e.get("outcome") is True:
+                        _exp_by_sym[_s]["win"] += 1
+                    elif _e.get("outcome") is False:
+                        _exp_by_sym[_s]["lose"] += 1
+                except Exception:
+                    pass
+            if _exp_pending > _exp_total * 0.3 and _exp_total > 10:
+                _add("L1", f"经验卡待验证比例过高 ({_exp_pending}/{_exp_total})",
+                     "超过30%的经验卡尚未backfill outcome，建议加速验证回填", "high", "gcc_knn_experience.jsonl")
+            # 低胜率品种警告
+            for _sym, _sv in _exp_by_sym.items():
+                _st = _sv["win"] + _sv["lose"]
+                if _st >= 5 and _sv["win"] / _st < 0.4:
+                    _wr = round(_sv["win"] / _st * 100, 1)
+                    _add("L1", f"{_sym} 经验卡胜率偏低 ({_wr}%)",
+                         f"{_sym}: {_sv['win']}胜/{_sv['lose']}负，胜率{_wr}%，建议审查该品种决策逻辑", "high", "gcc_knn_experience.jsonl")
+
+        # ── L2 Retrieval: 检查知识卡覆盖 ──
+        _card_dir = _gcc_dir() / "skill" / "cards"
+        if _card_dir.exists():
+            _low_conf = []
+            for _jf in _card_dir.rglob("*.json"):
+                try:
+                    _d = json.loads(_jf.read_text(encoding="utf-8", errors="ignore"))
+                    _c = float(_d.get("confidence", 0) or 0)
+                    if _c < 0.4:
+                        _low_conf.append(_d.get("title", _jf.stem)[:40])
+                except Exception:
+                    pass
+            if len(_low_conf) > 50:
+                _add("L2", f"{len(_low_conf)}张知识卡置信度<0.4",
+                     "大量低置信度卡片可能影响检索质量，建议清理或补充验证", "medium", "skill/cards/*.json")
+
+        # ── L3 Distillation: 检查提炼步骤 ──
+        if not results.get("distill"):
+            _add("L3", "Distill 提炼步骤失败",
+                 "经验提炼未完成，SkillBank无法更新。检查distiller模块日志", "high", "loop_step:distill")
+
+        # ── L4 Decision: 检查外挂信号准确率 ──
+        _pa_path = project_root / "state" / "plugin_signal_accuracy.json"
+        if _pa_path.exists():
+            try:
+                _pa = json.loads(_pa_path.read_text(encoding="utf-8"))
+                for _src, _sv in _pa.items():
+                    if isinstance(_sv, dict) and _sv.get("total", 0) >= 10:
+                        _acc = _sv.get("correct", 0) / _sv["total"] * 100
+                        if _acc < 40:
+                            _add("L4", f"外挂 {_src} 准确率偏低 ({_acc:.0f}%)",
+                                 f"{_src}: {_sv['correct']}/{_sv['total']}，建议检查信号逻辑或调整参数", "high", "plugin_signal_accuracy.json")
+            except Exception:
+                pass
+
+        # ── L5 Orchestration: 检查循环健康 ──
+        if not results.get("audit"):
+            _add("L5", "Audit 审计步骤失败",
+                 "key009_audit.py 执行失败，无法生成审计报告。检查日志", "high", "loop_step:audit")
+        if not results.get("dashboard"):
+            _add("L5", "Dashboard 看板步骤异常",
+                 "审计export文件缺失或解析失败", "medium", "loop_step:dashboard")
+
+        # 未完成任务提醒
+        _stale_tasks = []
+        for _t in bound_tasks:
+            _steps = _t.get("steps", [])
+            _done = sum(1 for s in _steps if s.get("status") == "done")
+            if _steps and _done == 0:
+                _stale_tasks.append(_t.get("task_id", ""))
+        if _stale_tasks:
+            _add("L5", f"{len(_stale_tasks)}个任务无进展",
+                 f"任务 {', '.join(_stale_tasks[:5])} 所有步骤均未完成，建议推进或关闭", "medium", "pipeline/tasks.json")
+
+        # ── 规则检查 ──
+        if not results.get("rules"):
+            _add("L4", "结构化规则缺失",
+                 "state/key009_rules.json 不存在或为空，建议运行规则提取", "medium", "key009_rules.json")
+
+        # ── GCC-TM: 交易执行质量 ──
+        _state_dir = project_root / "state"
+        # 待定单过期率 (执行失败)
+        _po_total, _po_expired = 0, 0
+        for _pf in _state_dir.glob("gcc_pending_order_*.json"):
+            try:
+                _pd = json.loads(_pf.read_text(encoding="utf-8"))
+                _po_total += 1
+                if _pd.get("expired"):
+                    _po_expired += 1
+            except Exception:
+                pass
+        if _po_expired > 0:
+            _add("L4", f"GCC-TM 待定单过期 {_po_expired}/{_po_total}",
+                 f"{_po_expired}个品种待定单expired=True，表示执行通道未成功消费。检查3Commas/Coinbase连接", "high", "gcc_pending_order_*.json")
+
+        # K线交易率 + 验证失败
+        _hist_path = _state_dir / "gcc_candle_history.jsonl"
+        if _hist_path.exists():
+            _h_lines = [l for l in _hist_path.read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+            _h_total = len(_h_lines)
+            _h_traded, _h_vf = 0, 0
+            for _hl in _h_lines:
+                try:
+                    _hd = json.loads(_hl)
+                    if _hd.get("traded"):
+                        _h_traded += 1
+                    _h_vf += sum(1 for r in _hd.get("round_decisions", []) if r.get("verify_failed"))
+                except Exception:
+                    pass
+            if _h_total >= 10:
+                _trade_rate = round(_h_traded / _h_total * 100, 1)
+                if _trade_rate < 20:
+                    _add("L4", f"GCC-TM K线交易率偏低 ({_trade_rate}%)",
+                         f"{_h_traded}/{_h_total}根K线产生交易，可能信号池质量不足或门控过严", "medium", "gcc_candle_history.jsonl")
+            if _h_vf > 0:
+                _add("L4", f"GCC-TM 执行验证失败 {_h_vf}次",
+                     f"历史{_h_total}根K线中有{_h_vf}次verify_failed，待定单被消费但执行通道返回失败", "high", "gcc_candle_history.jsonl")
+
+        # 当前K线 — 多品种HOLD比例
+        _cs_files = list(_state_dir.glob("gcc_candle_state_*.json"))
+        _cs_hold = 0
+        for _cf in _cs_files:
+            try:
+                _cd = json.loads(_cf.read_text(encoding="utf-8"))
+                if _cd.get("effective_direction") == "HOLD":
+                    _cs_hold += 1
+            except Exception:
+                pass
+        if _cs_files and _cs_hold > len(_cs_files) * 0.6:
+            _add("L4", f"GCC-TM 多数品种方向HOLD ({_cs_hold}/{len(_cs_files)})",
+                 "超过60%品种被三方门控锁定为HOLD，可能Vision或BrooksVision信号分歧过大", "medium", "gcc_candle_state_*.json")
+
+        # ── 美股期权 (TSLA) ──
+        _opt_log = _state_dir / "qqq_options_trades.jsonl"
+        if _opt_log.exists():
+            _opt_lines = [l for l in _opt_log.read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+            _opt_total = len(_opt_lines)
+            _opt_win, _opt_lose = 0, 0
+            _opt_fail = 0
+            for _ol in _opt_lines:
+                try:
+                    _od = json.loads(_ol)
+                    if _od.get("success") is False:
+                        _opt_fail += 1
+                    if _od.get("pnl") is not None:
+                        if _od["pnl"] > 0:
+                            _opt_win += 1
+                        else:
+                            _opt_lose += 1
+                except Exception:
+                    pass
+            if _opt_fail > 0 and _opt_total >= 3:
+                _add("L4", f"TSLA期权执行失败 {_opt_fail}/{_opt_total}",
+                     f"{_opt_fail}次期权下单失败，检查qqq_options模块连接和账户权限", "high", "qqq_options_trades.jsonl")
+            if _opt_win + _opt_lose >= 5:
+                _opt_wr = round(_opt_win / (_opt_win + _opt_lose) * 100, 1)
+                if _opt_wr < 40:
+                    _add("L4", f"TSLA期权胜率偏低 ({_opt_wr}%)",
+                         f"期权: {_opt_win}胜/{_opt_lose}负，胜率{_opt_wr}%，建议检查4H方向门控准确性", "high", "qqq_options_trades.jsonl")
+        else:
+            # 检查是否有TSLA pending order但无期权日志
+            _tsla_po = _state_dir / "gcc_pending_order_TSLA.json"
+            if _tsla_po.exists():
+                try:
+                    _td = json.loads(_tsla_po.read_text(encoding="utf-8"))
+                    if _td.get("consumed") and not _opt_log.exists():
+                        _add("L4", "TSLA期权无交易日志",
+                             "有TSLA待定单但无qqq_options_trades.jsonl，期权执行可能未记录", "medium", "gcc_pending_order_TSLA.json")
+                except Exception:
+                    pass
+
+        # ── 加密货币剥头皮 (OP) ──
+        _scalp_log = _state_dir / "gcc_scalp_trades.jsonl"
+        if _scalp_log.exists():
+            _sc_lines = [l for l in _scalp_log.read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+            _sc_total = len(_sc_lines)
+            _sc_win, _sc_lose, _sc_fail = 0, 0, 0
+            _sc_pnl = 0.0
+            for _sl in _sc_lines:
+                try:
+                    _sd = json.loads(_sl)
+                    if _sd.get("success") is False:
+                        _sc_fail += 1
+                    if _sd.get("pnl") is not None:
+                        _sc_pnl += float(_sd["pnl"])
+                        if _sd["pnl"] > 0:
+                            _sc_win += 1
+                        else:
+                            _sc_lose += 1
+                except Exception:
+                    pass
+            if _sc_fail > 0:
+                _add("L4", f"剥头皮执行失败 {_sc_fail}/{_sc_total}",
+                     f"{_sc_fail}次Coinbase限价单失败，检查API权限和余额", "high", "gcc_scalp_trades.jsonl")
+            if _sc_win + _sc_lose >= 5:
+                _sc_wr = round(_sc_win / (_sc_win + _sc_lose) * 100, 1)
+                if _sc_wr < 45:
+                    _add("L4", f"剥头皮胜率偏低 ({_sc_wr}%)",
+                         f"剥头皮: {_sc_win}胜/{_sc_lose}负 累计PnL=${_sc_pnl:.2f}，建议调整RSI阈值或ATR倍数", "high", "gcc_scalp_trades.jsonl")
+                if _sc_pnl < -50:
+                    _add("L4", f"剥头皮累计亏损 ${_sc_pnl:.2f}",
+                         f"剥头皮持续亏损，建议暂停并回测参数", "high", "gcc_scalp_trades.jsonl")
+            if _sc_total == 0:
+                _add("L4", "剥头皮无交易记录",
+                     "gcc_scalp_trades.jsonl为空，RSI可能长期未触发阈值(25/75)，考虑放宽", "low", "gcc_scalp_trades.jsonl")
+        else:
+            _add("L4", "剥头皮尚无交易日志",
+                 "state/gcc_scalp_trades.jsonl不存在，模块可能未启动或RSI未触发", "low", "gcc_scalp_trades.jsonl")
+
+        # ── 写入 suggestions.jsonl (更新模式: 同类建议覆盖旧值) ──
+        _sug_path = _gcc_dir() / "suggestions.jsonl"
+        # 提取去重key: 去掉括号内数值，只保留描述性前缀
+        import re as _re
+        def _dedup_key(title):
+            return _re.sub(r'\s*\(.*?\)\s*', ' ', title).strip().split(' ')[0:4]
+
+        def _same_topic(a, b):
+            return _dedup_key(a) == _dedup_key(b)
+
+        # 读取现有建议
+        existing = []
+        if _sug_path.exists():
+            for _line in _sug_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if _line.strip():
+                    try:
+                        existing.append(json.loads(_line))
+                    except Exception:
+                        pass
+
+        # 合并: 新建议覆盖同类旧建议(open状态), 保留closed/resolved
+        merged = []
+        new_count = 0
+        used_new = set()
+        for _old in existing:
+            if _old.get("status") != "open":
+                merged.append(_old)  # 已关闭的保留
+                continue
+            # 查找是否有新建议替代
+            replaced = False
+            for i, _new in enumerate(suggestions):
+                if i not in used_new and _same_topic(_old.get("title", ""), _new["title"]):
+                    merged.append(_new)  # 用新值覆盖
+                    used_new.add(i)
+                    replaced = True
+                    break
+            if not replaced:
+                merged.append(_old)  # 无更新，保留
+        # 添加全新的建议
+        for i, _new in enumerate(suggestions):
+            if i not in used_new:
+                merged.append(_new)
+                new_count += 1
+
+        # 写回
+        with open(str(_sug_path), "w", encoding="utf-8") as _sf:
+            for s in merged:
+                _sf.write(json.dumps(s, ensure_ascii=False) + "\n")
+        _open_count = sum(1 for s in merged if s.get("status") == "open")
+        if new_count:
+            click.echo(f"  💡 新增 {new_count} 条建议，共 {_open_count} 条open → suggestions.jsonl")
+        else:
+            click.echo(f"  💡 已更新，共 {_open_count} 条open建议")
+
     def _run_once():
         now = datetime.now(NY)
+        _loop_round[0] += 1
+        ts_start = now.strftime("%Y-%m-%dT%H:%M:%S")
         all_tasks = _load_tasks()
         bound = _find_bound_tasks(all_tasks)
         task_label = ", ".join(task_ids) if task_ids else f"{key} (活跃)"
@@ -6622,94 +7108,88 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
         click.echo(f"  {'═' * 55}")
 
         results = {}
+        _step_status = {}  # 供 loop_state.json 使用
 
         # Step 1: 任务进度
+        _write_loop_state(True, _loop_round[0], ts_start, "", {"tasks": {"status": "running"}, "audit": {"status": "pending"}, "distill": {"status": "pending"}, "rules": {"status": "pending"}, "dashboard": {"status": "pending"}})
         click.echo(f"\n  📋 Step 1/5: 任务进度 ({len(bound)} 个绑定任务)")
         done_s, total_s = _show_task_progress(bound)
         task_pct = f"{done_s}/{total_s}" if total_s else "N/A"
         results["tasks"] = len(bound) > 0
+        _step_status["tasks"] = {"status": "ok" if results["tasks"] else "skip", "detail": task_pct}
 
         # Step 2: Audit (日志分析+经验卡+规则)
+        # 每日8am NY: 经验卡/知识卡进入循环
+        # 经验卡淘汰+写入: 半月周期 (1-15=H1, 16-末=H2)
+        # 知识卡蒸馏: 每自然月
+        _now_ny = datetime.now(NY)
+        _daily_due = _should_run_daily_cards(_now_ny)
+        _exp_due = _daily_due and _should_run_exp_cycle(_now_ny)  # 半月淘汰+蒸馏
+        _know_due = _daily_due and _should_run_know_cycle(_now_ny)  # 月度淘汰+蒸馏
+        _audit_cmd = [sys.executable, "key009_audit.py", "--export"]
+        # 经验卡写入: 每天8am都写(根据当天审计自动生成)
+        # 非8am窗口: 跳过卡片写入
+        if not _daily_due:
+            _audit_cmd.append("--skip-cards")
+        else:
+            click.echo(f"  🕗 每日8am卡片循环触发 ({_now_ny.strftime('%Y-%m-%d %H:%M')})")
+            click.echo(f"    经验卡写入: ✓ 每日 | 淘汰+蒸馏: {'✓ 半月周期到期' if _exp_due else f'○ {_exp_cycle_key(_now_ny)}已完成'}")
+            click.echo(f"    知识卡导入: ✓ 每日 | 淘汰+蒸馏: {'✓ 月度周期到期' if _know_due else f'○ {_know_cycle_key(_now_ny)}已完成'}")
+        _write_loop_state(True, _loop_round[0], ts_start, "", {**_step_status, "audit": {"status": "running"}, "distill": {"status": "pending"}, "rules": {"status": "pending"}, "dashboard": {"status": "pending"}})
         ok, out = _run_step(
             "Step 2/5: Audit (分析+经验卡+规则)",
-            [sys.executable, "key009_audit.py", "--export"]
+            _audit_cmd,
         )
         results["audit"] = ok
+        _step_status["audit"] = {"status": "ok" if ok else "error"}
+        if ok and _exp_due:
+            _mark_exp_cycle_done(_now_ny)
+        if ok and _daily_due:
+            _mark_daily_done(_now_ny)
 
-        # Step 2.5: gcc-tm经验卡 → card_activations (打通gcc-tm→gcc-evo)
-        try:
-            _exp_file = project_root / "state" / "gcc_knn_experience.jsonl"
-            _act_file = project_root / "state" / "card_activations.jsonl"
-            _sync_marker = project_root / "state" / ".gcc_tm_exp_synced"
-            # 读取上次同步位置
-            _last_synced = 0
-            if _sync_marker.exists():
-                try:
-                    _last_synced = int(_sync_marker.read_text().strip())
-                except Exception:
-                    pass
-            if _exp_file.exists():
-                _exp_entries = []
-                with open(str(_exp_file), "r", encoding="utf-8") as _ef:
-                    for _line in _ef:
-                        _line = _line.strip()
-                        if _line:
-                            try:
-                                _exp_entries.append(json.loads(_line))
-                            except Exception:
-                                pass
-                # 只处理已回填且未同步的经验卡
-                _new_exps = [e for i, e in enumerate(_exp_entries)
-                             if i >= _last_synced and e.get("outcome") is not None]
-                if _new_exps:
-                    _synced = 0
-                    with open(str(_act_file), "a", encoding="utf-8") as _af:
-                        for _exp in _new_exps:
-                            # 经验卡 → card_activation 格式
-                            _act = {
-                                "ts": _exp.get("ts", ""),
-                                "card_id": f"EXP_TM_{_exp['symbol']}_{_exp['action']}",
-                                "rule_index": 0,
-                                "symbol": _exp["symbol"],
-                                "action": _exp["action"],
-                                "price": _exp.get("price", 0),
-                                "result": "correct" if _exp["outcome"] else "incorrect",
-                                "ctx": {
-                                    "source": "gcc_tm",
-                                    "features": _exp.get("features", []),
-                                    "strongest_source": _exp.get("strongest_source", ""),
-                                    "signals_count": _exp.get("signals_count", 0),
-                                    "vote_detail": _exp.get("vote_detail", {}),
-                                },
-                            }
-                            _af.write(json.dumps(_act, ensure_ascii=False) + "\n")
-                            _synced += 1
-                    # 更新同步标记
-                    _sync_marker.write_text(str(len(_exp_entries)))
-                    click.echo(f"  ✓ Step 2.5: gcc-tm经验卡 → {_synced}条同步到card_activations")
-                    results["exp_sync"] = True
-                else:
-                    click.echo(f"  ○ Step 2.5: gcc-tm经验卡 — 无新增")
-                    results["exp_sync"] = True
-            else:
-                click.echo(f"  ○ Step 2.5: gcc-tm经验卡 — 文件不存在")
-                results["exp_sync"] = False
-        except Exception as _exp_e:
-            click.echo(f"  ✗ Step 2.5: gcc-tm经验卡 — {_exp_e}")
-            results["exp_sync"] = False
+        # 每日8am: 随机选1张知识卡
+        if _daily_due:
+            _pick_random_card()
 
-        # Step 3: Distill (经验提炼→SkillBank)
+        # Step 3: Distill (淘汰底部10% + 经验提炼→SkillBank)
+        # 经验卡: 每半月淘汰+蒸馏 | 知识卡: 每自然月淘汰+蒸馏
+        # 只在每日8am触发, 且对应周期未完成时执行
+        _distill_due = _exp_due or _know_due
+        _write_loop_state(True, _loop_round[0], ts_start, "", {**_step_status, "distill": {"status": "running"}, "rules": {"status": "pending"}, "dashboard": {"status": "pending"}})
         if dry_run:
             click.echo(f"  ⏳ Step 3/5: Distill (提炼)... [dry-run skip]")
             results["distill"] = True
+        elif not _distill_due:
+            _reason = "非8am窗口" if not _daily_due else "本周期已完成"
+            click.echo(f"  ○ Step 3/5: Distill — {_reason}, 跳过")
+            click.echo(f"    经验卡蒸馏: 半月({_exp_cycle_key(_now_ny)})")
+            click.echo(f"    知识卡蒸馏: 月度({_know_cycle_key(_now_ny)})")
+            results["distill"] = "skip"
         else:
+            _distill_label = []
+            # 淘汰底部10% (在蒸馏前执行)
+            if _exp_due:
+                _distill_label.append(f"经验卡半月({_exp_cycle_key(_now_ny)})")
+                click.echo(f"  🗑  经验卡淘汰底部10%:")
+                _cull_experience_cards_bottom10()
+            if _know_due:
+                _distill_label.append(f"知识卡月度({_know_cycle_key(_now_ny)})")
+                click.echo(f"  🗑  知识卡淘汰底部10%:")
+                _cull_knowledge_cards_bottom10()
+            # 蒸馏
+            click.echo(f"  ✦ Distill 触发: {' + '.join(_distill_label)}")
             ok, out = _run_step(
                 "Step 3/5: Distill (经验提炼→SkillBank)",
                 [sys.executable, str(_gcc_dir() / "gcc_evo.py"), "distill"]
             )
             results["distill"] = ok
+            if ok and _know_due:
+                _mark_know_cycle_done(_now_ny)
+        _distill_st = "ok" if results["distill"] is True else ("skip" if results["distill"] == "skip" else "error")
+        _step_status["distill"] = {"status": _distill_st}
 
         # Step 4: Rules check
+        _write_loop_state(True, _loop_round[0], ts_start, "", {**_step_status, "rules": {"status": "running"}, "dashboard": {"status": "pending"}})
         rules_path = project_root / "state" / "key009_rules.json"
         if rules_path.exists():
             try:
@@ -6721,14 +7201,18 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
                     n_rules = len(rules_data) if isinstance(rules_data, list) else 0
                 click.echo(f"  ✓ Step 4/5: Rules — {n_rules} 条结构化规则")
                 results["rules"] = True
+                _step_status["rules"] = {"status": "ok", "detail": f"{n_rules}条规则"}
             except Exception as _re:
                 click.echo(f"  ✗ Step 4/5: Rules — {_re}")
                 results["rules"] = False
+                _step_status["rules"] = {"status": "error"}
         else:
             click.echo(f"  ○ Step 4/5: Rules — 无规则文件")
             results["rules"] = False
+            _step_status["rules"] = {"status": "skip"}
 
         # Step 5: Dashboard check
+        _write_loop_state(True, _loop_round[0], ts_start, "", {**_step_status, "dashboard": {"status": "running"}})
         export_path = project_root / "state" / "key009_audit.json"
         if export_path.exists():
             try:
@@ -6738,58 +7222,31 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
                 total_issues = 0
                 total_fixed = 0
                 for rng in ranges:
-                    rng_data = data.get(rng, {})
-                    if not isinstance(rng_data, dict):
+                    _rng_data = data.get(rng, {})
+                    if not isinstance(_rng_data, dict):
                         continue
-                    issues = rng_data.get("issues", [])
+                    issues = _rng_data.get("issues", [])
                     total_issues += len([i for i in issues if i.get("type") != "POSITIVE" and not i.get("fixed") and not i.get("acked")])
                     total_fixed += len([i for i in issues if i.get("fixed")])
                 click.echo(f"  ✓ Step 5/5: Dashboard — {ranges}, 问题{total_issues}, 已修复{total_fixed}")
                 results["dashboard"] = True
+                _step_status["dashboard"] = {"status": "ok", "detail": f"问题{total_issues}/修复{total_fixed}"}
             except Exception as _ee:
                 click.echo(f"  ✗ Step 5/5: Dashboard — {_ee}")
                 results["dashboard"] = False
+                _step_status["dashboard"] = {"status": "error"}
         else:
             click.echo(f"  ✗ Step 5/5: Dashboard — 无export文件")
             results["dashboard"] = False
-
-        # Step 6: 卡片淘汰 (知识卡30天/经验卡2周)
-        try:
-            _prune_marker = project_root / "state" / ".card_prune_last"
-            _prune_interval = 14 * 86400  # 2周最短间隔
-            _should_prune = True
-            import time as _prune_time
-            if _prune_marker.exists():
-                try:
-                    _last_prune = float(_prune_marker.read_text().strip())
-                    if _prune_time.time() - _last_prune < _prune_interval:
-                        _should_prune = False
-                except Exception:
-                    pass
-            if _should_prune and not dry_run:
-                from gcc_evolution.card_bridge import CardBridge as _PruneCB
-                _pcb = _PruneCB()
-                _pcb.load_index()
-                _prune_result = _pcb.prune_deprecated()
-                _prune_marker.write_text(str(_prune_time.time()))
-                click.echo(f"  ✓ Step 6a: 卡片淘汰 — 淘汰{_prune_result['deprecated']}张"
-                           f" (检查{_prune_result['total_checked']}张)")
-                # Step 6b: 蒸馏好卡→skill
-                _distill_result = _pcb.distill_to_skills()
-                click.echo(f"  ✓ Step 6b: 蒸馏→skill — 新增{_distill_result['new_skills']}条skill"
-                           f" (蒸馏{_distill_result['distilled_cards']}张卡)")
-                results["prune"] = True
-            else:
-                click.echo(f"  ○ Step 6: 卡片淘汰 — {'[dry-run]' if dry_run else '未到周期'}")
-                results["prune"] = True
-        except Exception as _prune_e:
-            click.echo(f"  ✗ Step 6: 卡片淘汰 — {_prune_e}")
-            results["prune"] = False
 
         # Summary
         ok_count = sum(1 for v in results.values() if v)
         total = len(results)
         health = "✓ HEALTHY" if ok_count == total else f"⚠ {ok_count}/{total}"
+        # 写入完成状态
+        ts_end = datetime.now(NY).strftime("%Y-%m-%dT%H:%M:%S")
+        _write_loop_state(not once, _loop_round[0], ts_start, ts_end, _step_status)
+
         click.echo(f"\n  {'─' * 55}")
         click.echo(f"  闭环: {health}  |  任务Steps: {task_pct}")
         click.echo(f"  Tasks={_icon(results['tasks'])} Audit={_icon(results['audit'])} "
@@ -6807,6 +7264,22 @@ def cmd_loop(task_ids, key, once, interval, dry_run):
                 click.echo(f"\n  📌 下一步:")
                 for ns in next_steps[:3]:
                     click.echo(f"     → {ns}")
+        # ── 生成系统改善建议 ──────────────────────────────────
+        _generate_suggestions(results, _step_status, bound, _loop_round[0], ts_end)
+
+        # ── 自动刷新 Dashboard HTML ──────────────────────────
+        try:
+            import subprocess, pathlib
+            _gen_script = pathlib.Path(__file__).resolve().parent.parent / "gen_dashboard.py"
+            if _gen_script.exists():
+                subprocess.run(
+                    [sys.executable, str(_gen_script)],
+                    capture_output=True, timeout=30,
+                )
+                click.echo(f"  📊 Dashboard 已刷新")
+        except Exception as _dash_e:
+            click.echo(f"  ⚠  Dashboard 刷新失败: {_dash_e}")
+
         click.echo()
         return ok_count == total
 
