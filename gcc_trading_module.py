@@ -196,6 +196,19 @@ def _load_candle_state(symbol: str) -> Optional[CandleState]:
 
 _atomic_write_lock = __import__("threading").Lock()
 
+# v0.6: per-symbol pending_order locks (防止scan_engine和consumer线程竞争读写)
+_pending_order_locks: dict = {}
+_pending_locks_guard = __import__("threading").Lock()
+
+
+def _get_pending_lock(symbol: str):
+    """获取品种级别的pending_order锁 (lazy init, thread-safe)。"""
+    if symbol not in _pending_order_locks:
+        with _pending_locks_guard:
+            if symbol not in _pending_order_locks:  # double-check
+                _pending_order_locks[symbol] = __import__("threading").Lock()
+    return _pending_order_locks[symbol]
+
 def _atomic_write(p: Path, data: str) -> None:
     """P2原子写入: 先写临时文件, 再rename(防止断电导致半写损坏)。
     v0.3: 加锁防止Windows并发rename的WinError 32。
@@ -2210,7 +2223,9 @@ class GCCTradingModule:
         self._write_decision_log(result)
 
         # S45: KNN经验卡写入 (每次BUY/SELL决策记录9维特征，供dashboard展示+outcome回填)
-        if final_action in ("BUY", "SELL"):
+        # v0.6: 跳过已交易K线 — traded=True时process_round会改HOLD，但KNN此处已写入导致重复
+        _already_traded = candle_state is not None and candle_state.traded
+        if final_action in ("BUY", "SELL") and not _already_traded:
             try:
                 _knn_feat = _build_knn_features(context, ver_results)
                 _knn_exp = {
@@ -2230,7 +2245,7 @@ class GCCTradingModule:
                 logger.warning("[GCC-TRADE] KNN experience write: %s", _knn_w_e)
 
         # GCC-0265 S4: 知识卡激活回写 — 记录哪些卡参与了决策，闭环因果记忆
-        if final_action in ("BUY", "SELL"):
+        if final_action in ("BUY", "SELL") and not _already_traded:
             try:
                 _used_cards = ctx.extended.get("cards", [])
                 if _used_cards and _KB_BRIDGE is not None:
@@ -3659,7 +3674,7 @@ def gcc_observe(
 # ══════════════════════════════════════════════════════════════
 # GCC-0256 S5: OP剥头皮模块 — RSI(7)均值回归 + 方向门控
 # 独立于 gcc_observe 的轻量5min入口
-# 策略: RSI<25做多 / RSI>75做空, 三方投票方向门控, $500限额
+# 策略: 现货只做多 RSI<25买入, TP/SL/RSI>70/超时卖出, $500限额
 # ══════════════════════════════════════════════════════════════
 
 _SCALP_STATE_FILE = _STATE_DIR / "gcc_scalp_state.json"
@@ -3940,31 +3955,21 @@ def gcc_scalp_observe(
         should_exit = False
         exit_reason = ""
 
-        if state["direction"] == "BUY":
-            if current_price >= state["tp_price"]:
-                should_exit, exit_reason = True, "TP"
-            elif current_price <= state["sl_price"]:
-                should_exit, exit_reason = True, "SL"
-            elif rsi > _SCALP_RSI_EXIT_HIGH:
-                should_exit, exit_reason = True, "RSI_EXIT"
-        else:  # SELL
-            if current_price <= state["tp_price"]:
-                should_exit, exit_reason = True, "TP"
-            elif current_price >= state["sl_price"]:
-                should_exit, exit_reason = True, "SL"
-            elif rsi < _SCALP_RSI_EXIT_LOW:
-                should_exit, exit_reason = True, "RSI_EXIT"
+        # 现货只能BUY→SELL (direction永远是BUY)
+        if current_price >= state["tp_price"]:
+            should_exit, exit_reason = True, "TP"
+        elif current_price <= state["sl_price"]:
+            should_exit, exit_reason = True, "SL"
+        elif rsi > _SCALP_RSI_EXIT_HIGH:
+            should_exit, exit_reason = True, "RSI_EXIT"
 
         if state["bars_held"] >= _SCALP_MAX_HOLD_BARS:
             should_exit, exit_reason = True, "TIMEOUT"
 
         if should_exit:
-            # 计算P&L
+            # 计算P&L (现货BUY→SELL)
             entry_p = state["entry_price"]
-            if state["direction"] == "BUY":
-                raw_pnl_pct = (current_price - entry_p) / entry_p
-            else:
-                raw_pnl_pct = (entry_p - current_price) / entry_p
+            raw_pnl_pct = (current_price - entry_p) / entry_p
             fee_pct = 0.006  # taker市价单来回~0.60%
             net_pnl_pct = raw_pnl_pct - fee_pct
             net_pnl_usd = net_pnl_pct * _SCALP_MAX_POSITION_USD
@@ -4012,16 +4017,15 @@ def gcc_scalp_observe(
                 exit_reason, net_pnl_usd, net_pnl_pct * 100,
             )
 
-            # 写平仓pending_order (SELL平多 / BUY平空)
-            close_action = "SELL" if state["direction"] == "BUY" else "BUY"
-            _scalp_write_pending(symbol, close_action, current_price, state["quantity"],
+            # 写平仓pending_order (现货: 卖出持仓)
+            _scalp_write_pending(symbol, "SELL", current_price, state["quantity"],
                                  f"scalp_exit_{exit_reason}")
 
             # 重置状态
             state = _scalp_default_state()
             state["cooldown"] = _SCALP_COOLDOWN_BARS
             _save_scalp_state(state)
-            return {"action": close_action, "reason": exit_reason,
+            return {"action": "SELL", "reason": exit_reason,
                     "pnl_usd": net_pnl_usd}
 
         _save_scalp_state(state)
@@ -4051,14 +4055,10 @@ def gcc_scalp_observe(
                         symbol, signal, gate_direction)
             return None
 
-    # 计算止盈止损
+    # 计算止盈止损 (现货: 只做多)
     quantity = _SCALP_MAX_POSITION_USD / current_price
-    if signal == "BUY":
-        tp_price = current_price + atr
-        sl_price = current_price - atr
-    else:
-        tp_price = current_price - atr
-        sl_price = current_price + atr
+    tp_price = current_price + atr
+    sl_price = current_price - atr
 
     now_ts = datetime.now(_NY_TZ)
 
