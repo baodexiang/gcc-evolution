@@ -11,7 +11,7 @@ TEMPLATE = SCRIPT_DIR / ".GCC" / "gcc_dashboard.html"
 
 # ── Dashboard 格式锁 (2026-03-07 确认为最佳格式) ──────────────────────────
 # 修改模板前必须经用户明确同意，确认后更新此 hash
-TEMPLATE_HASH_LOCK = "adc2b746f2ea5f539e54d77f539464964704f3cdf6bce88d4913416de07dfa8b"
+TEMPLATE_HASH_LOCK = "639d2204f550a57514623f5bd2643e106dcc88aa57f9dd07ea71992283bd5024"
 
 if not TEMPLATE.exists():
     print(f"错误：找不到 {TEMPLATE}")
@@ -200,6 +200,7 @@ def add_task(t):
         'status': t.get('status', 'pending'),
         'priority': _norm_priority(t.get('priority')),
         'key_id': t.get('key_id') or t.get('key') or t.get('anchor_key', ''),
+        'key': t.get('key') or t.get('key_id') or t.get('anchor_key', ''),
         'updated_at': (t.get('updated_at') or t.get('created_at') or '')[:10],
         'current_step': (t.get('current_step') or t.get('instructions') or t.get('context') or '')[:100],
         'source': t.get('source', ''),
