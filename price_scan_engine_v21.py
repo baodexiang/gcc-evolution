@@ -10157,15 +10157,32 @@ class PriceScanEngine:
         # GCC-0021 S2: ADX(14)趋势强度门控 — 用户要求取消
 
         # ── 1. Hoffman 15m ──
+        # [MODIFIED 2026-03-15] 15min K线每4根合成1根1H, 适配Hoffman原始1H参数
+        # 原始: 直接传bars_15m → EMA(5/13/21/34/55)看15min视角太短
+        # 改后: 合成1H bars → EMA参数等效回原始设计
         if _rob_hoffman_available:
             try:
+                # 合成1H K线 (每4根15min = 1根1H)
+                _hoff_bars = []
+                for _hi in range(0, len(bars_15m) - 3, 4):
+                    _b1, _b2, _b3, _b4 = bars_15m[_hi], bars_15m[_hi+1], bars_15m[_hi+2], bars_15m[_hi+3]
+                    _hoff_bars.append({
+                        "open": _b1["open"],
+                        "high": max(_b1["high"], _b2["high"], _b3["high"], _b4["high"]),
+                        "low": min(_b1["low"], _b2["low"], _b3["low"], _b4["low"]),
+                        "close": _b4["close"],
+                        "volume": sum(b.get("volume", 0) for b in [_b1, _b2, _b3, _b4]),
+                    })
+                if len(_hoff_bars) < 10:
+                    _hoff_bars = bars_15m  # fallback: 不够合成就用原始
+
                 plugin = get_rob_hoffman_plugin()
                 result = plugin.process_for_scan(
                     symbol=symbol,
-                    ohlcv_bars=bars_15m,
+                    ohlcv_bars=_hoff_bars,
                     current_trend=current_trend,
                     pos_in_channel=pos_in_channel,
-                    position_units=0,  # 信号不做仓位判断
+                    position_units=0,
                 )
                 if plugin.should_activate_for_scan(result):
                     action = plugin.get_action_for_scan(result)
