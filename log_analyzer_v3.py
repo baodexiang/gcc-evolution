@@ -681,6 +681,23 @@ class LogicChecker:
             r"双底双顶.*跳过x4|跳过x4过滤.*双底|v3\.620.*跳过x4"
         ),
 
+        # === B1/B2/B3 通道错误追踪 ===
+        "b1_error": re.compile(
+            r"\[B1\].*(?:ERROR|失败|异常|error|fail)",
+            re.I
+        ),
+        "b2_error": re.compile(
+            r"\[B2\].*(?:ERROR|失败|异常|error|fail)",
+            re.I
+        ),
+        "b3_error": re.compile(
+            r"\[B3\].*(?:ERROR|失败|异常|error|fail)",
+            re.I
+        ),
+        "b1_blocked": re.compile(
+            r"\[BLOCKED\]\[非B1\]"
+        ),
+
         # === P1-3: API/网络错误追踪 ===
         "api_3commas_error": re.compile(
             r"3[Cc]ommas.*(?:error|fail|timeout|exception|refused|Error|异常|超时)|"
@@ -724,6 +741,11 @@ class LogicChecker:
             "api_errors": 0,
             "order_errors": 0,
             "api_error_details": [],
+            "b1_errors": 0,
+            "b2_errors": 0,
+            "b3_errors": 0,
+            "b1_blocked": 0,
+            "b_error_details": [],
         }
 
         for line in log_lines:
@@ -858,6 +880,27 @@ class LogicChecker:
                     line.strip()[:200],
                     "检查API连接和账户状态"
                 )
+
+            # 10. B1/B2/B3 通道错误
+            for _bk, _br in (("b1_error", "B1"), ("b2_error", "B2"), ("b3_error", "B3")):
+                if self.PATTERNS[_bk].search(line):
+                    results[f"{_br.lower()}_errors"] += 1
+                    ts_m = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})', line)
+                    results["b_error_details"].append({
+                        "time": ts_m.group(1) if ts_m else "",
+                        "channel": _br,
+                        "symbol": symbol,
+                        "line": line.strip()[:150],
+                    })
+                    detector.add_issue(
+                        "CRITICAL", f"{_br}_CHANNEL_ERROR", symbol,
+                        f"[{_br}] 通道错误: {line.strip()[:100]}",
+                        line.strip()[:200],
+                        f"检查{_br}通道执行路径"
+                    )
+                    break
+            if self.PATTERNS["b1_blocked"].search(line):
+                results["b1_blocked"] += 1
 
         detector.stats["logic_check_results"] = results
         return results
@@ -6476,6 +6519,36 @@ class ReportGenerator:
                 lines.append(f"  - [{detail['time']}] {detail['symbol']} {detail['type']}: {detail['line'][:80]}")
             if api_errors + order_errors > 0:
                 lines.append(f"- **警告**: {api_errors + order_errors}次错误可能导致信号丢失!")
+            lines.append("")
+
+        # === 2d-2. B1/B2/B3 通道错误 ===
+        _b1e = logic_result.get("b1_errors", 0)
+        _b2e = logic_result.get("b2_errors", 0)
+        _b3e = logic_result.get("b3_errors", 0)
+        _b1blk = logic_result.get("b1_blocked", 0)
+        if _b1e + _b2e + _b3e + _b1blk > 0:
+            lines.extend([
+                "",
+                "### B1/B2/B3 通道错误",
+                "",
+                f"- B1(主决策): {_b1e}次错误" + (f" + {_b1blk}次非B1拦截" if _b1blk else ""),
+                f"- B2(TSLA期权): {_b2e}次错误",
+                f"- B3(BTC短线): {_b3e}次错误",
+            ])
+            for _bd in logic_result.get("b_error_details", [])[:8]:
+                lines.append(f"  - [{_bd['time']}] [{_bd['channel']}] {_bd['symbol']} {_bd['line'][:80]}")
+            # 交叉对比key009
+            try:
+                _k9_path = Path("state/key009_audit.latest.json")
+                if _k9_path.exists():
+                    _k9_data = json.loads(_k9_path.read_text(encoding="utf-8"))
+                    _k9_raw = _k9_data.get("24h", {}).get("raw_error_count", 0)
+                    _k9_fixed = sum(1 for i in _k9_data.get("24h", {}).get("issues", [])
+                                    if i.get("task") == "LOG-ERROR" and i.get("fixed"))
+                    if _k9_raw > 0:
+                        lines.append(f"- KEY-009交叉: 原始错误{_k9_raw}条, 已标记修复{_k9_fixed}条")
+            except Exception:
+                pass
             lines.append("")
 
         # === 2e. 外挂盈亏归因 (P0-3) ===
