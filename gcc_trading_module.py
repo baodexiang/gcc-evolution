@@ -3970,7 +3970,7 @@ def gcc_scalp_observe(
             # 计算P&L (现货BUY→SELL)
             entry_p = state["entry_price"]
             raw_pnl_pct = (current_price - entry_p) / entry_p
-            fee_pct = 0.006  # taker市价单来回~0.60%
+            fee_pct = 0.0025  # VIP1 taker来回~0.25% (0.125%×2)
             net_pnl_pct = raw_pnl_pct - fee_pct
             net_pnl_usd = net_pnl_pct * _SCALP_MAX_POSITION_USD
 
@@ -4122,9 +4122,10 @@ def _scalp_write_pending(symbol: str, action: str, price: float,
         "max_usd":   _SCALP_MAX_POSITION_USD,
     }
     pending_path = _STATE_DIR / f"gcc_pending_order_{symbol}.json"
+    is_exit = "scalp_exit" in reason
     try:
-        # 防止覆盖未消费的订单
-        if pending_path.exists():
+        # 防止覆盖未消费的订单 (平仓指令优先级最高，必须覆盖)
+        if pending_path.exists() and not is_exit:
             try:
                 _existing = json.loads(pending_path.read_text(encoding="utf-8"))
                 if not _existing.get("consumed", True):

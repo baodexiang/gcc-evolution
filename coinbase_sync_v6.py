@@ -238,11 +238,25 @@ def place_order(product_id: str, side: str, quote_size: float = None,
 
     result = api_request("POST", "/api/v3/brokerage/orders", body=payload)
     if result:
-        order_id = result.get("order_id", result.get("success_response", {}).get("order_id", ""))
+        # Coinbase API: success字段+success_response才是真正成功
+        api_success = result.get("success", False)
+        success_resp = result.get("success_response") or {}
+        order_id = success_resp.get("order_id", result.get("order_id", ""))
+        if api_success and order_id:
+            return {
+                "success": True,
+                "order_id": order_id,
+                "client_order_id": client_order_id,
+                "product_id": product_id,
+                "side": side,
+                "raw": result,
+            }
+        # API返回了响应但下单失败
+        error_resp = result.get("error_response") or {}
+        error_msg = error_resp.get("error", error_resp.get("message", str(result)))
         return {
-            "success": True,
-            "order_id": order_id,
-            "client_order_id": client_order_id,
+            "success": False,
+            "error": error_msg,
             "product_id": product_id,
             "side": side,
             "raw": result,
