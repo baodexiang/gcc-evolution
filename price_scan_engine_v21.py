@@ -10154,52 +10154,8 @@ class PriceScanEngine:
 
         pushed = 0
 
-        # ── GCC-0021 S2: ADX(14) 趋势强度门控 ──
-        # ADX<20 = 震荡市, 抑制所有15min信号(减少20-30%低质量信号)
-        _adx_gate_pass = True
-        _adx_conf_bonus = 0.0
-        try:
-            import numpy as _adx_np
-            _adx_closes = _adx_np.array([float(b["close"]) for b in bars_30m])
-            _adx_highs = _adx_np.array([float(b["high"]) for b in bars_30m])
-            _adx_lows = _adx_np.array([float(b["low"]) for b in bars_30m])
-            if len(_adx_closes) >= 28:  # ADX(14)需要至少28根
-                # True Range
-                _tr_h_l = _adx_highs[1:] - _adx_lows[1:]
-                _tr_h_c = _adx_np.abs(_adx_highs[1:] - _adx_closes[:-1])
-                _tr_l_c = _adx_np.abs(_adx_lows[1:] - _adx_closes[:-1])
-                _tr = _adx_np.maximum(_tr_h_l, _adx_np.maximum(_tr_h_c, _tr_l_c))
-                # +DM / -DM
-                _up_move = _adx_highs[1:] - _adx_highs[:-1]
-                _dn_move = _adx_lows[:-1] - _adx_lows[1:]
-                _plus_dm = _adx_np.where((_up_move > _dn_move) & (_up_move > 0), _up_move, 0)
-                _minus_dm = _adx_np.where((_dn_move > _up_move) & (_dn_move > 0), _dn_move, 0)
-                # Wilder smooth (14)
-                _period = 14
-                _atr14 = _adx_np.mean(_tr[:_period])
-                _plus_di14 = _adx_np.mean(_plus_dm[:_period])
-                _minus_di14 = _adx_np.mean(_minus_dm[:_period])
-                for _i in range(_period, len(_tr)):
-                    _atr14 = (_atr14 * (_period - 1) + _tr[_i]) / _period
-                    _plus_di14 = (_plus_di14 * (_period - 1) + _plus_dm[_i]) / _period
-                    _minus_di14 = (_minus_di14 * (_period - 1) + _minus_dm[_i]) / _period
-                _plus_di = (_plus_di14 / _atr14 * 100) if _atr14 > 0 else 0
-                _minus_di = (_minus_di14 / _atr14 * 100) if _atr14 > 0 else 0
-                _dx = abs(_plus_di - _minus_di) / (_plus_di + _minus_di) * 100 if (_plus_di + _minus_di) > 0 else 0
-                # ADX = DX的14期EMA近似
-                _adx_value = _dx  # 简化: 用最新DX代替完整ADX平滑
-
-                if _adx_value < 20:
-                    _adx_gate_pass = False
-                    logger.info(f"[ADX-GATE] {symbol} ADX={_adx_value:.1f}<20 震荡市 → 抑制信号")
-                elif _adx_value > 25:
-                    _adx_conf_bonus = 0.05
-                    logger.debug(f"[ADX-GATE] {symbol} ADX={_adx_value:.1f}>25 趋势强 → conf+0.05")
-        except Exception as _adx_e:
-            pass  # ADX计算异常不拦截
-
-        if not _adx_gate_pass:
-            return  # 震荡市不推任何信号
+        # [DISABLED 2026-03-15] ADX门控已取消
+        # GCC-0021 S2: ADX(14)趋势强度门控 — 用户要求取消
 
         # ── 1. Hoffman 15m ──
         if _rob_hoffman_available:
@@ -10215,7 +10171,7 @@ class PriceScanEngine:
                 if plugin.should_activate_for_scan(result):
                     action = plugin.get_action_for_scan(result)
                     if action in ("BUY", "SELL"):
-                        _gcc_push_15m(main_symbol, "Hoffman_15m", action, min(0.7, result.confidence + _adx_conf_bonus))
+                        _gcc_push_15m(main_symbol, "Hoffman_15m", action, min(0.7, result.confidence))
                         pushed += 1
                         logger.info(f"[S11] {symbol} Hoffman_15m → {action} (conf={result.confidence:.2f})")
             except Exception as e:
@@ -10272,11 +10228,11 @@ class PriceScanEngine:
                 ema21 = _ema(closes, 21)
                 # 交叉检测: 前一根 vs 当前根
                 if ema9[-2] <= ema21[-2] and ema9[-1] > ema21[-1]:
-                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "BUY", 0.6 + _adx_conf_bonus)
+                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "BUY", 0.6)
                     pushed += 1
                     logger.info(f"[GCC-0259] {symbol} EMA9×21金叉 → BUY")
                 elif ema9[-2] >= ema21[-2] and ema9[-1] < ema21[-1]:
-                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "SELL", 0.6 + _adx_conf_bonus)
+                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "SELL", 0.6)
                     pushed += 1
                     logger.info(f"[GCC-0259] {symbol} EMA9×21死叉 → SELL")
 
