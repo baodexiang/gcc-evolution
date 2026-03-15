@@ -54346,6 +54346,79 @@ if __name__ == "__main__":
     except Exception as _evo_boot_err:
         print(f"[BOOT][WARN] gcc-evo进化循环启动失败: {_evo_boot_err}")
 
+    # GCC-0017 S0: 手工交易检测后台线程 (每5分钟对比Schwab持仓)
+    try:
+        import threading as _manual_threading
+
+        def _manual_trade_detector():
+            import time as _mt_time
+            _mt_time.sleep(180)  # 启动延迟3分钟
+            _MT_INTERVAL = 300  # 5分钟
+            _last_positions = {}  # {symbol: qty}
+            log_to_server("[HUMAN-DETECT] 手工交易检测线程启动 (每5分钟)")
+            while True:
+                try:
+                    from schwab.client import Client as _mt_Client
+                    from schwab_data_provider import get_provider as _mt_gp
+                    _mt_provider = _mt_gp()
+                    _mt_client = _mt_provider._get_client()
+                    _mt_resp = _mt_client.get_accounts(fields=[_mt_Client.Account.Fields.POSITIONS])
+                    if _mt_resp.status_code == 200:
+                        _mt_accts = _mt_resp.json()
+                        if not isinstance(_mt_accts, list):
+                            _mt_accts = [_mt_accts]
+                        _current_positions = {}
+                        for _mt_acct in _mt_accts:
+                            _mt_sa = _mt_acct.get("securitiesAccount", _mt_acct)
+                            for _mt_p in _mt_sa.get("positions", []):
+                                _mt_inst = _mt_p.get("instrument", {})
+                                if _mt_inst.get("assetType") == "EQUITY":
+                                    _mt_sym = _mt_inst.get("symbol", "")
+                                    _mt_qty = _mt_p.get("longQuantity", 0)
+                                    if _mt_qty > 0:
+                                        _current_positions[_mt_sym] = _mt_qty
+                        # 对比变化
+                        if _last_positions:
+                            for _mt_sym in set(list(_last_positions.keys()) + list(_current_positions.keys())):
+                                _old = _last_positions.get(_mt_sym, 0)
+                                _new = _current_positions.get(_mt_sym, 0)
+                                if _old != _new and _mt_sym in symbol_state:
+                                    _internal = symbol_state[_mt_sym].get("position_units", 0)
+                                    # 内部state没变但Schwab变了 = 手工操作
+                                    _action = "BUY" if _new > _old else "SELL"
+                                    _delta = abs(_new - _old)
+                                    log_to_server(
+                                        f"[HUMAN-DETECT] {_mt_sym} 手工{_action}检测: "
+                                        f"Schwab {_old}→{_new} (内部state={_internal})"
+                                    )
+                                    # 写经验卡
+                                    try:
+                                        from gcc_trading_module import _write_knn_experience_dict
+                                        _write_knn_experience_dict({
+                                            "symbol": _mt_sym,
+                                            "action": _action,
+                                            "features": [0, 0, 0, 0, 0],
+                                            "outcome": None,
+                                            "ts": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+                                            "price": 0,
+                                            "ref_price": 0,
+                                            "strongest_source": "human_manual",
+                                            "source": "human_manual",
+                                        })
+                                        log_to_server(f"[HUMAN-DETECT] {_mt_sym} {_action} 经验卡已写入(human_manual)")
+                                    except Exception as _knn_e:
+                                        log_to_server(f"[HUMAN-DETECT] 经验卡写入失败: {_knn_e}")
+                        _last_positions = _current_positions
+                except Exception as _mt_e:
+                    pass  # Schwab API偶尔超时,静默
+                _mt_time.sleep(_MT_INTERVAL)
+
+        _manual_thread = _manual_threading.Thread(target=_manual_trade_detector, daemon=True, name="Manual-Detect")
+        _manual_thread.start()
+        print("[BOOT] 手工交易检测线程已启动 (每5分钟对比Schwab持仓)")
+    except Exception as _manual_boot_err:
+        print(f"[BOOT][WARN] 手工交易检测线程启动失败: {_manual_boot_err}")
+
     # v3.681: GCC-TM pending_order 后台消费线程
     # 解决: scan_engine写pending_order但llm_decide()依赖TV webhook消费，
     #       美股webhook不稳定导致pending_order积压不执行
