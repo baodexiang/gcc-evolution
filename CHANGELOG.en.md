@@ -4,6 +4,16 @@ All public release notes for the opensource package are recorded here. The proje
 
 ---
 
+## [5.420] - 2026-03-15
+
+### Added
+
+- GCC-0270: Card lifecycle evolution system — card_bridge.py in opensource, outcome backfill, prune/skills scheduling, B1 channel top3+random2 consumption
+
+### Changed
+
+- unified version bump to `5.420`
+
 ## [5.410] - 2026-03-14
 
 ### Added

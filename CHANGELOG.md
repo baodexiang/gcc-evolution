@@ -4,6 +4,24 @@
 
 ---
 
+## [5.420] - 2026-03-15
+
+### Added
+
+- GCC-0270: 知识卡闭环进化系统 — 卡片从提取到淘汰的完整生命周期
+  - `card_bridge.py` 纳入 opensource (原仅在私有仓)
+  - KNN经验记录新增 `card_ids` 字段，关联交易决策与知识卡
+  - `_backfill_outcome()` 回填交易结果时同步调用 `card_bridge.record_outcome()` 给卡片打分
+  - 每日8AM蒸馏后追加 `prune_deprecated()` 淘汰正确率<30%的卡 + `distill_to_skills()` 高分卡蒸馏为skill
+  - B1通道每30分钟读取 top3(skill/causal) + 随机2张(探索) = 5张卡片参与决策
+- 新增7本交易书籍知识卡 (183张，总计1170张): Chart Patterns ML, Wyckoff Methodology, Wyckoff 2.0 Structures, Ultimate Price Action, Successful Breakout, Wyckoff Integration, 量价时空完整版
+
+### Changed
+
+- 版本号统一升级到 `5.420`
+- 知识卡按书名归类到子目录: `skill/cards/{书名}/CARD-*.json`
+- `INDEX.md` 更新卡片总数 987→1170，新增书籍索引和主题查找表
+
 ## [5.410] - 2026-03-14
 
 ### Added

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gcc-evo v5.410 — GCC Evolution Engine with Visual Dashboard"""
+"""gcc-evo v5.420 — GCC Evolution Engine with Visual Dashboard"""
 from __future__ import annotations
 
 import json
@@ -35,7 +35,7 @@ if _PROJECT_ROOT not in sys.path:
 
 KEYS_FILE = Path(".gcc/keys.yaml")
 
-HELP_TEXT = """  GCC v5.410 — Active Evolution Engine
+HELP_TEXT = """  GCC v5.420 — Active Evolution Engine
   ═══════════════════════════════════════════════════
 
   Daily Use:
@@ -6303,6 +6303,56 @@ def card_distill():
             if v["status"] == "flagged":
                 click.echo(f"      {cid}: {v['title'][:35]} rate={v['correct_rate']:.0%}")
     click.echo()
+
+
+@cmd_card.command("prune")
+def card_prune():
+    """GCC-0270: 淘汰低正确率卡片 (<30%且样本>=5)。"""
+    from gcc_evolution.card_bridge import CardBridge
+    bridge = CardBridge()
+    bridge.load_index()
+    result = bridge.prune_deprecated()
+    click.echo(f"\n  ✦ Prune complete: checked={result['total_checked']} deprecated={result['deprecated']}")
+    for d in result.get("details", []):
+        click.echo(f"    ❌ {d['card_id']}: rate={d['correct_rate']:.0%} samples={d['samples']}")
+    click.echo()
+
+
+@cmd_card.command("skills")
+def card_skills():
+    """GCC-0270: 高分卡蒸馏为可复用skill (>60%且样本>=10)。"""
+    from gcc_evolution.card_bridge import CardBridge
+    bridge = CardBridge()
+    bridge.load_index()
+    result = bridge.distill_to_skills()
+    click.echo(f"\n  ✦ Skill distillation: new={result.get('new_skills', 0)} distilled_cards={result.get('distilled_cards', 0)}")
+    for sk in result.get("skills", []):
+        click.echo(f"    ⭐ {sk.get('skill_id', '')}: {sk.get('name', '')[:40]} rate={sk.get('correct_rate', 0):.0%}")
+    click.echo()
+
+
+@cmd_card.command("lifecycle")
+def card_lifecycle():
+    """GCC-0270: 完整生命周期一键执行 (distill → prune → skills)。"""
+    from gcc_evolution.card_bridge import CardBridge
+    bridge = CardBridge()
+    bridge.load_index()
+    click.echo(f"\n  ✦ Card Lifecycle — {len(bridge._cards)} cards")
+
+    # Step 1: distill
+    report = bridge.distill()
+    validated = sum(1 for v in report.values() if v["status"] == "validated")
+    flagged = sum(1 for v in report.values() if v["status"] == "flagged")
+    click.echo(f"    [1/3] Distill: validated={validated} flagged={flagged}")
+
+    # Step 2: prune
+    prune_r = bridge.prune_deprecated()
+    click.echo(f"    [2/3] Prune: deprecated={prune_r['deprecated']}")
+
+    # Step 3: skills
+    skill_r = bridge.distill_to_skills()
+    click.echo(f"    [3/3] Skills: new={skill_r.get('new_skills', 0)}")
+    click.echo(f"\n  ✦ Lifecycle complete.\n")
 
 
 @cmd_card.command("sync")

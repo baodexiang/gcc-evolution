@@ -1,4 +1,4 @@
-﻿# gcc-evo v5.410
+﻿# gcc-evo v5.420
 
 **AI Self-Evolution Engine** - persistent memory, retrieval, distillation, and governed orchestration for LLM agents.
 
