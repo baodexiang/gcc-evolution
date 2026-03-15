@@ -54244,6 +54244,34 @@ if __name__ == "__main__":
     except Exception as _k010_boot_err:
         print(f"[BOOT][WARN] KEY-010审计后台线程启动失败: {_k010_boot_err}")
 
+    # v3.660: gcc-evo 进化循环后台线程 (知识卡蒸馏+经验卡淘汰+规则更新)
+    try:
+        import threading as _evo_threading
+
+        def _gcc_evo_loop():
+            import time as _evo_time
+            import subprocess as _evo_sp
+            _evo_time.sleep(300)  # 启动延迟5分钟
+            _EVO_INTERVAL = 1800  # 30分钟
+            log_to_server("[GCC-EVO] 进化循环后台线程启动 (每30分钟)")
+            while True:
+                try:
+                    _evo_sp.run(
+                        ["python", ".GCC/gcc_evo.py", "loop", "-k", "KEY-011", "--once"],
+                        cwd=str(os.path.dirname(os.path.abspath(__file__))),
+                        timeout=300, capture_output=True,
+                    )
+                    log_to_server("[GCC-EVO] 进化循环完成")
+                except Exception as _evo_e:
+                    log_to_server(f"[GCC-EVO] 进化循环失败: {_evo_e}")
+                _evo_time.sleep(_EVO_INTERVAL)
+
+        _evo_thread = _evo_threading.Thread(target=_gcc_evo_loop, daemon=True, name="GCC-Evo-Loop")
+        _evo_thread.start()
+        print("[BOOT] gcc-evo进化循环后台线程已启动 (每30分钟: 蒸馏+淘汰+规则)")
+    except Exception as _evo_boot_err:
+        print(f"[BOOT][WARN] gcc-evo进化循环启动失败: {_evo_boot_err}")
+
     # v3.681: GCC-TM pending_order 后台消费线程
     # 解决: scan_engine写pending_order但llm_decide()依赖TV webhook消费，
     #       美股webhook不稳定导致pending_order积压不执行
