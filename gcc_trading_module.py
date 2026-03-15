@@ -332,10 +332,17 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
                 if _bv_sig in ("BUY", "SELL"):
                     bv_bias = _bv_sig
                     bv_pattern = _bv_pat
-                    # 推入信号池 (持久信号, 持续参与整根4H K线的8轮投票)
-                    gcc_push_signal(symbol, "BrooksVision_4H", _bv_sig,
-                                    min(0.95, max(0.3, _bv_conf / 100.0)),
-                                    persistent=True)
+                    # [MODIFIED 2026-03-15] 仅高胜率形态入场, 其余观察模式
+                    # BREAKOUT 70.7% / BEAR_FLAG 66.7% / MTR 64.5%
+                    # BROAD_CHANNEL 44.2% / DOUBLE_BOTTOM 49.7% → 不推信号
+                    _BV_ALLOWED_PATTERNS = {"BREAKOUT", "BEAR_FLAG", "MTR_BUY", "MTR_SELL", "BULL_FLAG"}
+                    if _bv_pat in _BV_ALLOWED_PATTERNS:
+                        gcc_push_signal(symbol, "BrooksVision_4H", _bv_sig,
+                                        min(0.95, max(0.3, _bv_conf / 100.0)),
+                                        persistent=True)
+                    else:
+                        logger.info("[GCC-TM] %s BrooksVision %s [%s] → 观察模式(低胜率形态不推信号)",
+                                    symbol, _bv_sig, _bv_pat)
                     break
         logger.info("[GCC-TM] %s BrooksVision→信号池: %s [%s]", symbol, bv_bias, bv_pattern)
     except ImportError:
@@ -956,12 +963,14 @@ def _load_skills() -> list:
 
 
 def _read_knowledge_cards(symbol: str, vision_bias: str = "", regime: str = "") -> list:
-    """先读skill(蒸馏精华), skill不够3条再补卡(探索新卡)。
+    """GCC-0270: 每30分钟消费卡片。
+    策略: 所有skill + 3top知识卡 + 2随机知识卡 + 3top经验卡 + 2随机经验卡
     返回: [{"card_id": str, "title": str, "direction": "BUY"|"SELL"|"NEUTRAL",
             "confidence": float, "rank_source": str}, ...]
     """
     global _KB_BRIDGE, _KB_CACHE, _KB_CACHE_TS, _KB_INDEX_TS
     import time as _t_kb
+    import random
 
     # 每4小时同步经验卡
     _sync_experience_cards()
@@ -970,116 +979,125 @@ def _read_knowledge_cards(symbol: str, vision_bias: str = "", regime: str = "") 
     if _t_kb.time() - _KB_CACHE_TS < _KB_CACHE_TTL and cache_key in _KB_CACHE:
         return _KB_CACHE[cache_key]
 
-    top3 = []
+    cards_out = []
+    _used_ids = set()
 
-    # ── 第1优先: 已蒸馏的skill (快, 高权重) ──
+    # ── Slot 0: 所有蒸馏的skill (全量, 不限数量) ──
     skills = _load_skills()
     if skills:
-        # 过滤: 品种匹配或通用skill
         matched = []
         for sk in skills:
             sk_syms = sk.get("symbols", [])
-            # 经验卡skill按品种匹配, 知识卡skill通用
             if sk_syms and symbol not in sk_syms:
                 continue
             matched.append(sk)
-        # 按正确率排序
         matched.sort(key=lambda s: s.get("correct_rate", 0), reverse=True)
-        for sk in matched[:3]:
-            top3.append({
-                "card_id": sk.get("skill_id", ""),
+        for sk in matched:
+            _sid = sk.get("skill_id", "")
+            cards_out.append({
+                "card_id": _sid,
                 "title": sk.get("name", "")[:60],
                 "direction": sk.get("direction", "NEUTRAL"),
                 "confidence": sk.get("correct_rate", 0.5),
                 "rank_source": "skill",
             })
+            _used_ids.add(_sid)
 
-    # ── 第2优先: 因果排名卡 + 随机探索未验证卡 ──
-    if len(top3) < 3:
-        try:
-            if _KB_BRIDGE is None or _should_reload_kb_index():
-                from gcc_evolution.card_bridge import CardBridge
-                _KB_BRIDGE = CardBridge()
-                _n = _KB_BRIDGE.load_index()
-                _KB_INDEX_TS = _t_kb.time()
-                _KB_CACHE.clear()
-                logger.info("[GCC-TM][KB] 知识卡索引重载: %d张", _n)
+    # ── 准备 card_bridge 查询 ──
+    try:
+        if _KB_BRIDGE is None or _should_reload_kb_index():
+            from gcc_evolution.card_bridge import CardBridge
+            _KB_BRIDGE = CardBridge()
+            _n = _KB_BRIDGE.load_index()
+            _KB_INDEX_TS = _t_kb.time()
+            _KB_CACHE.clear()
+            logger.info("[GCC-TM][KB] 知识卡索引重载: %d张", _n)
 
-            # 已蒸馏/已淘汰的卡跳过
-            _distilled_file = _STATE_DIR / "card_distilled.json"
-            _distilled = set()
-            if _distilled_file.exists():
-                try:
-                    _distilled = set(json.loads(_distilled_file.read_text(encoding="utf-8")))
-                except Exception:
-                    pass
-            _dep_file = _STATE_DIR / "card_deprecated.json"
-            _deprecated = set()
-            if _dep_file.exists():
-                try:
-                    _deprecated = set(json.loads(_dep_file.read_text(encoding="utf-8")))
-                except Exception:
-                    pass
-            _skip = _distilled | _deprecated
+        # 已蒸馏/已淘汰的卡跳过
+        _distilled_file = _STATE_DIR / "card_distilled.json"
+        _distilled = set()
+        if _distilled_file.exists():
+            try:
+                _distilled = set(json.loads(_distilled_file.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+        _dep_file = _STATE_DIR / "card_deprecated.json"
+        _deprecated = set()
+        if _dep_file.exists():
+            try:
+                _deprecated = set(json.loads(_dep_file.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+        _skip = _distilled | _deprecated | _used_ids
 
-            ctx = {}
-            if vision_bias in ("BUY", "SELL"):
-                ctx["trend"] = "UP" if vision_bias == "BUY" else "DOWN"
-            if regime:
-                ctx["regime"] = regime
+        ctx = {}
+        if vision_bias in ("BUY", "SELL"):
+            ctx["trend"] = "UP" if vision_bias == "BUY" else "DOWN"
+        if regime:
+            ctx["regime"] = regime
 
-            results = _KB_BRIDGE.query_contextual(
-                card_type="RULE", context=ctx if ctx else None, min_samples=1
-            )
+        def _card_to_entry(card, source_tag="static"):
+            cid = card.get("card_id", "")
+            direction = "NEUTRAL"
+            rules = card.get("rules", [])
+            if rules:
+                rt = str(rules[0].get("then", "") if isinstance(rules[0], dict) else rules[0]).upper()
+                if any(w in rt for w in ("买", "BUY", "做多", "LONG", "BULLISH")):
+                    direction = "BUY"
+                elif any(w in rt for w in ("卖", "SELL", "做空", "SHORT", "BEARISH")):
+                    direction = "SELL"
+            return {
+                "card_id": cid, "title": card.get("title", "")[:60],
+                "direction": direction, "confidence": card.get("confidence", 0.5),
+                "rank_source": source_tag,
+            }
 
-            def _card_to_entry(card):
-                cid = card.get("card_id", "")
-                direction = "NEUTRAL"
-                rules = card.get("rules", [])
-                if rules:
-                    rt = str(rules[0].get("then", "") if isinstance(rules[0], dict) else rules[0]).upper()
-                    if any(w in rt for w in ("买", "BUY", "做多", "LONG", "BULLISH")):
-                        direction = "BUY"
-                    elif any(w in rt for w in ("卖", "SELL", "做空", "SHORT", "BEARISH")):
-                        direction = "SELL"
-                return {
-                    "card_id": cid, "title": card.get("title", "")[:60],
-                    "direction": direction, "confidence": card.get("confidence", 0.5),
-                    "rank_source": card.get("rank_source", "static"),
-                }
+        def _pick_top_and_random(results, top_n, rand_n, source_tag):
+            """从结果中选top_n个causal + rand_n个随机(不限是否用过,只排除top)。"""
+            picked = []
+            _top_ids = set()
+            # top: causal排名最高
+            causal = [c for c in results
+                      if c.get("rank_source") == "causal"
+                      and c.get("card_id", "") not in _skip]
+            for c in causal[:top_n]:
+                entry = _card_to_entry(c, f"{source_tag}_causal")
+                picked.append(entry)
+                _cid = c.get("card_id", "")
+                _skip.add(_cid)
+                _top_ids.add(_cid)
+            # random: 任意卡(不限是否用过), 只排除已选的top和skip
+            _rand_pool = [c for c in results
+                          if c.get("card_id", "") not in _skip
+                          and c.get("card_id", "") not in _top_ids]
+            if _rand_pool:
+                samples = random.sample(_rand_pool, min(rand_n, len(_rand_pool)))
+                for c in samples:
+                    entry = _card_to_entry(c, f"{source_tag}_explore")
+                    picked.append(entry)
+                    _skip.add(c.get("card_id", ""))
+            return picked
 
-            need = 3 - len(top3)
+        # ── Slot 1: 知识卡 (3 top + 2 random) ──
+        knowledge_results = _KB_BRIDGE.query_contextual(
+            card_type="RULE", context=ctx if ctx else None, min_samples=1
+        )
+        cards_out.extend(_pick_top_and_random(knowledge_results, 3, 2, "knowledge"))
 
-            # Slot 2: 因果排名最高的已验证卡 (最多1张)
-            for card in results:
-                if need <= 0:
-                    break
-                cid = card.get("card_id", "")
-                if cid in _skip:
-                    continue
-                if card.get("rank_source") == "causal":
-                    top3.append(_card_to_entry(card))
-                    need -= 1
-                    break  # 最多1张因果卡
+        # ── Slot 2: 经验卡 (3 top + 2 random) ──
+        # 经验卡以 EXP_TM_ 前缀区分
+        exp_results = _KB_BRIDGE.query_contextual(
+            card_type=None, context=ctx if ctx else None, min_samples=1
+        )
+        exp_only = [c for c in exp_results if str(c.get("card_id", "")).startswith("EXP_TM_")]
+        cards_out.extend(_pick_top_and_random(exp_only, 3, 2, "experience"))
 
-            # Slot 3: 随机未激活卡 (探索, 确保每张卡都有验证机会)
-            if need > 0:
-                import random
-                # 找出所有未被激活过的卡(rank_source=static且不在skip里)
-                unactivated = [c for c in results
-                               if c.get("rank_source") == "static"
-                               and c.get("card_id", "") not in _skip
-                               and c.get("card_id", "") not in {e["card_id"] for e in top3}]
-                if unactivated:
-                    picks = random.sample(unactivated, min(need, len(unactivated)))
-                    for card in picks:
-                        top3.append(_card_to_entry(card))
-        except Exception as e:
-            logger.debug("[GCC-TRADE] _read_knowledge_cards %s: %s", symbol, e)
+    except Exception as e:
+        logger.debug("[GCC-TRADE] _read_knowledge_cards %s: %s", symbol, e)
 
-    _KB_CACHE[cache_key] = top3
+    _KB_CACHE[cache_key] = cards_out
     _KB_CACHE_TS = _t_kb.time()
-    return top3
+    return cards_out
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2256,6 +2274,7 @@ class GCCTradingModule:
         if final_action in ("BUY", "SELL") and not _already_traded:
             try:
                 _knn_feat = _build_knn_features(context, ver_results)
+                _used_card_ids = [c.get("card_id", "") for c in ctx.extended.get("cards", []) if c.get("card_id")]
                 _knn_exp = {
                     "symbol": self.symbol,
                     "action": final_action,
@@ -2267,6 +2286,7 @@ class GCCTradingModule:
                     "strongest_source": signal_pool_data.get("strongest", "") if signal_pool_data else "",
                     "vote_detail": signal_pool_data.get("vote_detail", {}) if signal_pool_data else {},
                     "signals_count": signal_pool_data.get("total", 0) if signal_pool_data else 0,
+                    "card_ids": _used_card_ids,
                 }
                 _write_knn_experience_dict(_knn_exp)
             except Exception as _knn_w_e:
@@ -2757,12 +2777,14 @@ def _backfill_outcome(symbol: str, current_price: float,
                 if ref > 0:
                     move = (current_price - ref) / ref
                     action = rec.get("action", "HOLD")
+                    _rec_cards = rec.get("card_ids", [])
                     if move > 0.005:
                         rec["outcome"] = (action == "BUY")
                         fill_count += 1
                         filled_records.append({
                             "price": ref, "action": action,
                             "outcome": rec["outcome"],
+                            "card_ids": _rec_cards,
                         })
                     elif move < -0.005:
                         rec["outcome"] = (action == "SELL")
@@ -2770,6 +2792,7 @@ def _backfill_outcome(symbol: str, current_price: float,
                         filled_records.append({
                             "price": ref, "action": action,
                             "outcome": rec["outcome"],
+                            "card_ids": _rec_cards,
                         })
                     # |move| <= 0.5% → 保持 None（neutral，不算）
             updated.append(json.dumps(rec, ensure_ascii=False))
@@ -2777,6 +2800,24 @@ def _backfill_outcome(symbol: str, current_price: float,
         _atomic_write(_KNN_EXP_FILE, "\n".join(updated) + "\n")
         if fill_count:
             logger.info("[GCC-TRADE] backfill %s: %d outcomes filled", symbol, fill_count)
+
+        # GCC-0270: 同步回填知识卡 outcome — 闭环因果记忆
+        if filled_records and _KB_BRIDGE is not None:
+            _card_fill_count = 0
+            for _fr in filled_records:
+                # 从原始记录中找 card_ids
+                _fr_card_ids = _fr.get("card_ids", [])
+                for _cid in _fr_card_ids:
+                    try:
+                        _KB_BRIDGE.record_outcome(
+                            card_id=_cid, rule_index=0,
+                            symbol=symbol, correct=_fr["outcome"],
+                        )
+                        _card_fill_count += 1
+                    except Exception:
+                        pass
+            if _card_fill_count:
+                logger.info("[GCC-TRADE] backfill cards %s: %d card outcomes", symbol, _card_fill_count)
     except Exception as e:
         logger.warning("[GCC-TRADE] backfill_outcome %s: %s", symbol, e)
     return filled_records
