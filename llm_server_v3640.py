@@ -39971,8 +39971,8 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
     if final_action not in ["BUY", "SELL"]:
         return False
 
-    # GCC-0256 S4: TSLA信号走期权通道 (不走股票)
-    TSLA_OPTIONS_ENABLED = True  # 实盘已开启
+    # TSLA期权通道: 双通道(任意来源+GCC-TM都可触发)
+    TSLA_OPTIONS_ENABLED = True
     if symbol == "TSLA":
         if TSLA_OPTIONS_ENABLED:
             try:
@@ -39980,16 +39980,14 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
                 _qqq_result = _qqq_execute(final_action, dry_run=False)
                 _opt_info = _qqq_result.get('option', {})
                 log_to_server(
-                    f"[TSLA_OPT] {final_action} → "
+                    f"[TSLA_OPT] {source} {final_action} → "
                     f"success={_qqq_result.get('success')} "
                     f"type={_opt_info.get('type', 'N/A')} strike={_opt_info.get('strike', 'N/A')}"
                 )
-                _qqq_action = _qqq_result.get('action', final_action)
                 try:
                     send_email_notification(
-                        f"[TSLA期权] L1 {final_action} → {_qqq_action}",
-                        f"来源: L1主循环\n方向: {final_action}\n"
-                        f"结果: {_qqq_action}\n"
+                        f"[TSLA期权] {source} {final_action}",
+                        f"来源: {source}\n方向: {final_action}\n"
                         f"合约: {_opt_info.get('type','N/A')} {_opt_info.get('strike','N/A')} "
                         f"x{_opt_info.get('contracts','N/A')}\n"
                         f"成功: {_qqq_result.get('success')}"
@@ -40000,14 +39998,8 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
             except Exception as _qqq_e:
                 log_to_server(f"[TSLA_OPT][ERROR] {final_action}: {_qqq_e}")
                 return False
-        else:
-            log_to_server(
-                f"[TSLA_OPT][观察] {final_action} signal_type={signal_type} "
-                f"→ 期权通道未开启，仅记录"
-            )
-            return None
 
-    # v3.660: GCC-TM全量独占 — 所有美股只允许gcc_tm下单(TSLA期权通道已在上方处理)
+    # v3.660: GCC-TM全量独占 — 所有美股只允许gcc_tm下单
     if source not in ("gcc_tm",):
         log_to_server(
             f"[GCC_TM_ONLY] {symbol} {final_action} "
