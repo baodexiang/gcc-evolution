@@ -43082,7 +43082,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                 # 现货卖出保护: SELL只允许平仓(reason必须含scalp_exit)
                 _scalp_reason = _gcc_order.get("reason", "")
                 if "scalp_exit" not in _scalp_reason:
-                    log_to_server(f"[B3][BTC-SCALP][BLOCKED] {symbol} SELL拦截 — reason未确认平仓: {_scalp_reason}")
+                    log_to_server(f"[S3][BB-LEGACY][BLOCKED] {symbol} SELL拦截 — reason未确认平仓: {_scalp_reason}")
                     send_ok = False
                     _scalp_res = {"success": False, "error": "现货SELL必须是scalp_exit平仓"}
                 else:
@@ -43099,7 +43099,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             send_ok = _scalp_res.get("success", False)
             _order_type = "LIMIT" if _scalp_limit or _gcc_act == "SELL" else "MARKET"
             log_to_server(
-                f"[B3][BTC-SCALP] {symbol} {_gcc_act} {_order_type}: "
+                f"[S3][BB-LEGACY] {symbol} {_gcc_act} {_order_type}: "
                 f"qty={_scalp_qty:.8f} price=${_gcc_cur_price:.2f} "
                 f"limit={_scalp_limit or 'N/A'} "
                 f"success={send_ok} order_id={_scalp_res.get('order_id','')}"
@@ -43118,7 +43118,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                 except Exception:
                     pass
         except Exception as _scalp_e:
-            log_to_server(f"[B3][BTC-SCALP][ERROR] {symbol} Coinbase: {_scalp_e}")
+            log_to_server(f"[S3][BB-LEGACY][ERROR] {symbol} Coinbase: {_scalp_e}")
     else:
         try:
             send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol, source="gcc_tm")
@@ -55369,6 +55369,63 @@ def _autosave_worker():
                                         log_to_server(f"[KEY-009][DAILY] 日报邮件已发送 ({_k9_today})")
                                 except Exception as _e_k9d:
                                     log_to_server(f"[KEY-009][DAILY] 日报异常: {_e_k9d}")
+
+                                # --- 交叉对比邮件: log_analyzer vs key009 ---
+                                try:
+                                    _xc_lines = [f"错误交叉对比报告 — {_k9_today}\n"]
+                                    # 1. key009 一手数据
+                                    _xc_k9_raw = _k9_daily.get("raw_error_count", 0)
+                                    _xc_k9_issues = [i for i in _k9_daily.get("issues", [])
+                                                     if i.get("task") == "LOG-ERROR"]
+                                    _xc_k9_fixed = sum(1 for i in _xc_k9_issues if i.get("fixed"))
+                                    _xc_k9_open = len(_xc_k9_issues) - _xc_k9_fixed
+                                    _xc_lines.append(f"[KEY-009] 原始错误: {_xc_k9_raw}条, "
+                                                     f"聚合后: {len(_xc_k9_issues)}类 "
+                                                     f"(未修复: {_xc_k9_open}, 已修复: {_xc_k9_fixed})")
+                                    for _xi in _xc_k9_issues:
+                                        _xf = " [FIXED]" if _xi.get("fixed") else ""
+                                        _xc_lines.append(f"  {_xi.get('msg', '')[:120]}{_xf}")
+                                    # 2. log_analyzer B1/B2/B3 扫描
+                                    _xc_lines.append("")
+                                    try:
+                                        from log_analyzer_v3 import MainLogicChecker
+                                        import glob as _xc_glob
+                                        _xc_checker = MainLogicChecker()
+                                        _xc_log_lines = []
+                                        for _xc_lp in ["logs/server.log", "logs/price_scan_engine.log"]:
+                                            _xc_p = ROOT / _xc_lp
+                                            if _xc_p.exists():
+                                                _xc_log_lines.extend(_xc_p.read_text(encoding="utf-8", errors="ignore").splitlines()[-3000:])
+                                        from log_analyzer_v3 import IssueDetector
+                                        _xc_det = IssueDetector()
+                                        _xc_res = _xc_checker.check(_xc_log_lines, _xc_det)
+                                        _xc_b1 = _xc_res.get("b1_errors", 0)
+                                        _xc_b2 = _xc_res.get("b2_errors", 0)
+                                        _xc_b3 = _xc_res.get("b3_errors", 0)
+                                        _xc_blk = _xc_res.get("b1_blocked", 0)
+                                        _xc_lines.append(f"[log_analyzer] B1错误: {_xc_b1}, B2: {_xc_b2}, B3: {_xc_b3}, 非B1拦截: {_xc_blk}")
+                                        for _xbd in _xc_res.get("b_error_details", [])[:5]:
+                                            _xc_lines.append(f"  [{_xbd['channel']}] {_xbd['symbol']} {_xbd['line'][:80]}")
+                                    except Exception as _xc_la_e:
+                                        _xc_lines.append(f"[log_analyzer] 扫描失败: {_xc_la_e}")
+                                    # 3. 差异点
+                                    _xc_lines.append("")
+                                    if _xc_k9_open == 0 and _xc_b1 + _xc_b2 + _xc_b3 == 0:
+                                        _xc_lines.append("✅ 两边一致: 无未修复错误")
+                                    else:
+                                        _xc_lines.append("⚠️ 需关注:")
+                                        if _xc_k9_open > 0:
+                                            _xc_lines.append(f"  - key009有{_xc_k9_open}类未修复错误")
+                                        if _xc_b1 + _xc_b2 + _xc_b3 > 0:
+                                            _xc_lines.append(f"  - log_analyzer检到B通道错误: B1={_xc_b1} B2={_xc_b2} B3={_xc_b3}")
+                                    _xc_body = "\n".join(_xc_lines)
+                                    if EMAIL_ENABLED:
+                                        send_email_notification(
+                                            f"[错误对比] {_k9_today} — K9={_xc_k9_open}未修复 LA=B1:{_xc_b1}/B2:{_xc_b2}/B3:{_xc_b3}",
+                                            _xc_body)
+                                        log_to_server(f"[KEY-009][CROSSCHECK] 交叉对比邮件已发送")
+                                except Exception as _xc_e:
+                                    log_to_server(f"[KEY-009][CROSSCHECK] 对比邮件异常: {_xc_e}")
 
                         # --- Weekly邮件: 周日8AM运行7天汇总 ---
                         if _k9_is_8am and _ny_k9.weekday() == 6:  # Sunday
