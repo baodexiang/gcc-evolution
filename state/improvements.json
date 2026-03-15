@@ -25,10 +25,13 @@
     },
     "KEY-003": {
       "title": "股票价值分析模块MVP",
-      "status": "TESTING",
-      "phase": "T01-T10全完成,后5名限买1次/天+仓位上限4",
+      "status": "IN_PROGRESS",
+      "phase": "Phase2: Comps机构级评分升级(GCC-0002~0007) — Schwab/Coinbase优质数据源+Financial Plugin方法论",
       "observations": [
-        "BUY拦截=0(今日无股票BUY信号触发,非故障)"
+        "BUY拦截=0(今日无股票BUY信号触发,非故障)",
+        "Schwab已有profitability/balance/cashflow评分但composite未使用(权重=0)",
+        "加密货币只有momentum评分,无基本面维度",
+        "已安装anthropics/financial-services-plugins(comps+DCF方法论)"
       ],
       "sub_items": []
     },

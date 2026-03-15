@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .api_contract import build_single_symbol_response
 from .batch_jobs import BatchJobStore
@@ -19,6 +19,8 @@ from .data_fetcher import (
     mark_degraded,
 )
 from .engine import analyze_value_profile
+from .dcf_model import compute_dcf, DCFResult
+from .peer_ranking import compute_peer_ranking
 from .momentum import compute_momentum_layer
 from .quality import evaluate_quality_layer
 from .validation import acceptance_gate, compute_ic, summarize_ic
@@ -519,6 +521,24 @@ def _build_symbol_payload_from_profile(
         "confidence_score": profile.get("confidence_score", 0.0),
     }
     payload["raw_metrics"] = profile.get("raw_metrics", {})
+
+    # GCC-0003: DCF简化内在价值估算
+    raw = profile.get("raw_metrics", {})
+    if raw and not symbol.endswith("USDC") and not symbol.endswith("USDT"):
+        dcf = compute_dcf(raw)
+        if dcf is not None:
+            payload["dcf"] = {
+                "intrinsic_value": dcf.intrinsic_value,
+                "market_cap": dcf.market_cap,
+                "discount_pct": dcf.discount_pct,
+                "dcf_score": dcf.dcf_score,
+                "wacc": dcf.wacc,
+                "fcf_current": dcf.fcf_current,
+                "fcf_growth": dcf.fcf_growth,
+                "terminal_value": dcf.terminal_value,
+                "sanity_flags": dcf.sanity_flags,
+            }
+
     return payload
 
 
@@ -569,6 +589,7 @@ def run_batch_query(
 
     outputs: List[Dict[str, Any]] = []
     profiles: Dict[str, Dict[str, Any]] = {}
+    peer_result: Optional[Dict[str, Any]] = None
     failed = 0
 
     for symbol in symbols:
@@ -580,7 +601,29 @@ def run_batch_query(
 
     if source in {"openbb", "live"} and profiles:
         _cross_section_impute_profiles(symbols=[s for s in symbols if s in profiles], profiles=profiles)
-        _apply_sector_neutral_adjustment(symbols=[s for s in symbols if s in profiles], profiles=profiles)
+        # GCC-0003: 在peer ranking前计算DCF, 注入raw_metrics供peer ranking排名
+        for sym in symbols:
+            if sym not in profiles or sym.endswith("USDC") or sym.endswith("USDT"):
+                continue
+            raw = profiles[sym].get("raw_metrics", {})
+            if raw:
+                dcf = compute_dcf(raw)
+                if dcf is not None:
+                    raw["dcf_discount_pct"] = dcf.discount_pct
+                    raw["dcf_intrinsic_value"] = dcf.intrinsic_value
+                    raw["dcf_sanity_flags"] = dcf.sanity_flags
+                    # 初始化dcf_scores桶(peer_ranking会填充)
+                    profiles[sym].setdefault("dcf_scores", {})
+                    profiles[sym]["dcf_scores"]["dcf_discount_pct"] = dcf.dcf_score
+        # GCC-0002: Peer-relative percentile ranking (replaces sector-neutral z-score)
+        # comps方法论: 在peer group内百分位排名, 替代绝对线性阈值评分
+        valid_syms = [s for s in symbols if s in profiles]
+        peer_result = compute_peer_ranking(valid_syms, profiles)
+        _log_key003(
+            f"[KEY-003][PEER-RANK] equity_metrics={len(peer_result['equity_stats'])} "
+            f"crypto_metrics={len(peer_result['crypto_stats'])} "
+            f"ranked_symbols={len(peer_result['peer_ranks'])}"
+        )
 
     for symbol in symbols:
         if symbol not in profiles:
@@ -607,6 +650,13 @@ def run_batch_query(
         "strict_live": strict_live,
         "results": outputs,
     }
+    # GCC-0002: 附加peer统计和排名到输出
+    if peer_result is not None:
+        snapshot["peer_stats"] = {
+            "equity": peer_result.get("equity_stats", {}),
+            "crypto": peer_result.get("crypto_stats", {}),
+        }
+        snapshot["peer_ranks"] = peer_result.get("peer_ranks", {})
     LATEST_FILE.parent.mkdir(parents=True, exist_ok=True)
     LATEST_FILE.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -642,7 +692,8 @@ def run_calibration(
 
     if source in {"openbb", "live"} and profiles:
         _cross_section_impute_profiles(symbols=[s for s in symbols if s in profiles], profiles=profiles)
-        _apply_sector_neutral_adjustment(symbols=[s for s in symbols if s in profiles], profiles=profiles)
+        # GCC-0002: calibration也用peer ranking
+        compute_peer_ranking([s for s in symbols if s in profiles], profiles)
 
     rows: List[Dict[str, Any]] = []
     for symbol in symbols:
