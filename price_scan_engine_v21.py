@@ -7632,7 +7632,7 @@ class PriceScanEngine:
                                 )
 
                         logger.info("=" * 70)
-                        logger.info(f"[移动止损] {symbol} SELL 触发!")
+                        logger.info(f"[S2][移动止损] {symbol} SELL 触发!")
                         logger.info(f"  trailing_high: {trailing_high:.2f}")
                         logger.info(f"  入场价: {entry_price:.2f}")
                         logger.info(f"  当前价: {current_price:.2f}")
@@ -7845,7 +7845,7 @@ class PriceScanEngine:
                             return
 
                         logger.info("=" * 70)
-                        logger.info(f"[移动止盈] {symbol} BUY 触发!")
+                        logger.info(f"[S2][移动止盈] {symbol} BUY 触发!")
                         logger.info(f"  trailing_low: {trailing_low:.2f}")
                         logger.info(f"  当前价: {current_price:.2f}")
                         _th_label = f"ATR阈值: {effective_threshold*100:.2f}% (ATR=${atr_value:.2f} x{atr_multiplier})"

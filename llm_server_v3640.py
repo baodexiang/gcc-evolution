@@ -48094,8 +48094,8 @@ def llm_decide():
         else:
             send_ok = False
             executed_qty = 0.0
-            print(f"[v3.650] L1参考信号: {symbol} {final_action} @ {last_close:.4f} (不下单)")
-            log_to_server(f"[v3.650] L1参考: {symbol} {final_action} price={last_close:.4f}")
+            print(f"[S1][L1参考] {symbol} {final_action} @ {last_close:.4f} (不下单)")
+            log_to_server(f"[S1][L1参考] {symbol} {final_action} price={last_close:.4f}")
             _log_observe_signal("S1", symbol, final_action, last_close, "L1_reference")
 
         # IRS-008 v5.340: 推理轨迹记录 — 每次决策后记录完整推理路径
@@ -52082,7 +52082,7 @@ def handle_p0_signal():
         # 检查是否重复信号
         if cache_key in _p0_signal_cache:
             elapsed = current_time - _p0_signal_cache[cache_key]
-            log_to_server(f"[P0] 去重: {symbol} {signal} 在{elapsed:.1f}秒前已处理，跳过")
+            log_to_server(f"[S2][P0] 去重: {symbol} {signal} 在{elapsed:.1f}秒前已处理，跳过")
             return jsonify({
                 "success": False,
                 "symbol": symbol,
@@ -52128,17 +52128,17 @@ def handle_p0_signal():
         asset_type = data.get("type", "crypto" if is_crypto else "stock")
         is_crypto = (asset_type == "crypto")
         
-        log_to_server(f"[P0] {symbol} 资产类型: {'加密货币' if is_crypto else '美股'} 仓位:{position_units}")
+        log_to_server(f"[S2][P0] {symbol} 资产类型: {'加密货币' if is_crypto else '美股'} 仓位:{position_units}")
 
         # v3.499: 剥头皮每日偏向检查 — v3.670: 已取消，所有P0信号放行
         # scalp_allowed, scalp_reason = check_scalp_signal_allowed(symbol, signal, signal_type)
-        log_to_server(f"[P0][偏向检查已取消] {symbol} {signal} {signal_type}")
+        log_to_server(f"[S2][P0][偏向检查已取消] {symbol} {signal} {signal_type}")
 
         # GCC-0194: N-Gate/HOLD_BAND/signal_gate/FilterChain 已在扫描引擎统一过滤
 
         # v21.18: P0每日同方向发送限次 — v3.670: 已取消，不再限次
         # 原逻辑: 最多3次/品种/方向，现在放行所有
-        log_to_server(f"[P0] {symbol} {signal} {signal_type} (每日限次已取消)")
+        log_to_server(f"[S2][P0] {symbol} {signal} {signal_type} (每日限次已取消)")
 
         # 执行交易
         executed = False
@@ -52153,17 +52153,17 @@ def handle_p0_signal():
 
             if is_scalping and available_slots < 2:
                 reason = f"剥头皮需2空位({available_slots}/2)，跳过买入"
-                log_to_server(f"[P0] {symbol} {reason}")
+                log_to_server(f"[S2][P0] {symbol} {reason}")
             elif position_units >= _p0_max:
                 reason = f"满仓({position_units}/{_p0_max})，跳过买入"
-                log_to_server(f"[P0] {symbol} {reason}")
+                log_to_server(f"[S2][P0] {symbol} {reason}")
             else:
                 # P0-B Baseline Gate（仓位2/3买入结构验证）
                 try:
                     from baseline_gate import baseline_gate as _bl_gate
                     _bl_ok, _bl_msg = _bl_gate(price, "buy", position_units, symbol)
                     if _bl_msg:
-                        log_to_server(f"[P0][BASELINE] {symbol} BUY {_bl_msg}")
+                        log_to_server(f"[S2][P0][BASELINE] {symbol} BUY {_bl_msg}")
                     if not _bl_ok:
                         reason = f"基准K线拦截: {_bl_msg}"
                 except ImportError:
@@ -52224,7 +52224,7 @@ def handle_p0_signal():
                                     symbol_state[symbol]["open_buys"] = []
                                 symbol_state[symbol]["open_buys"].append(price)
                                 _save_state_to_disk()
-                                log_to_server(f"[P0] {symbol} BUY仓位更新: {old_position} → {symbol_state[symbol]['position_units']}")
+                                log_to_server(f"[S2][P0] {symbol} BUY仓位更新: {old_position} → {symbol_state[symbol]['position_units']}")
 
                                 # v3.640: 记录交易到trade_history.json
                                 try:
@@ -52252,9 +52252,9 @@ def handle_p0_signal():
                                     }
                                     _append_trade_record(trade_rec)
                                     portfolio_breaker_record_trade("BUY")  # v3.654
-                                    log_to_server(f"[P0] {symbol} BUY交易记录已写入")
+                                    log_to_server(f"[S2][P0] {symbol} BUY交易记录已写入")
                                 except Exception as e:
-                                    log_to_server(f"[P0] {symbol} BUY交易记录写入失败: {e}")
+                                    log_to_server(f"[S2][P0] {symbol} BUY交易记录写入失败: {e}")
 
                                 # v2.983: 发送邮件通知
                                 # v3.502: Chandelier+ZLSMA由P0扫描引擎发送邮件，避免重复
@@ -52288,20 +52288,20 @@ def handle_p0_signal():
                                 reason = "P0买入被门控拦截" if send_ok is None else "P0买入发送失败"
                     except Exception as e:
                         reason = f"P0买入执行失败: {e}"
-                        log_to_server(f"[P0] {symbol} {reason}")
+                        log_to_server(f"[S2][P0] {symbol} {reason}")
                     
         elif signal == "SELL":
             # v3.641: 统一仓位检查（美股+加密货币），空仓不发卖出请求
             if position_units <= 0:
                 reason = f"无仓位({position_units})，跳过卖出"
-                log_to_server(f"[P0] {symbol} {reason}")
+                log_to_server(f"[S2][P0] {symbol} {reason}")
             else:
                 # P0-B Baseline Gate（仓位3/4卖出结构验证）
                 try:
                     from baseline_gate import baseline_gate as _bl_gate
                     _bl_ok, _bl_msg = _bl_gate(price, "sell", position_units, symbol)
                     if _bl_msg:
-                        log_to_server(f"[P0][BASELINE] {symbol} SELL {_bl_msg}")
+                        log_to_server(f"[S2][P0][BASELINE] {symbol} SELL {_bl_msg}")
                     if not _bl_ok:
                         reason = f"基准K线拦截: {_bl_msg}"
                 except ImportError:
@@ -52361,7 +52361,7 @@ def handle_p0_signal():
                                 if symbol_state[symbol].get("open_buys"):
                                     symbol_state[symbol]["open_buys"].pop(0)  # v3.560 P1-2: FIFO
                                 _save_state_to_disk()
-                                log_to_server(f"[P0] {symbol} SELL仓位更新: {old_position} → {symbol_state[symbol]['position_units']}")
+                                log_to_server(f"[S2][P0] {symbol} SELL仓位更新: {old_position} → {symbol_state[symbol]['position_units']}")
 
                                 # v3.640: 记录交易到trade_history.json
                                 try:
@@ -52389,9 +52389,9 @@ def handle_p0_signal():
                                     }
                                     _append_trade_record(trade_rec)
                                     portfolio_breaker_record_trade("SELL")  # v3.654
-                                    log_to_server(f"[P0] {symbol} SELL交易记录已写入")
+                                    log_to_server(f"[S2][P0] {symbol} SELL交易记录已写入")
                                 except Exception as e:
-                                    log_to_server(f"[P0] {symbol} SELL交易记录写入失败: {e}")
+                                    log_to_server(f"[S2][P0] {symbol} SELL交易记录写入失败: {e}")
 
                                 # v2.983: 发送邮件通知
                                 # v3.502: Chandelier+ZLSMA由P0扫描引擎发送邮件，避免重复
@@ -52425,7 +52425,7 @@ def handle_p0_signal():
                                 reason = "P0卖出被门控拦截" if send_ok is None else "P0卖出发送失败"
                     except Exception as e:
                         reason = f"P0卖出执行失败: {e}"
-                        log_to_server(f"[P0] {symbol} {reason}")
+                        log_to_server(f"[S2][P0] {symbol} {reason}")
         else:
             reason = f"未知信号: {signal}"
         
@@ -52443,9 +52443,9 @@ def handle_p0_signal():
         return jsonify(result)
         
     except Exception as e:
-        log_to_server(f"[P0] 端点异常: {e}")
+        log_to_server(f"[S2][P0] 端点异常: {e}")
         import traceback
-        log_to_server(f"[P0] traceback: {traceback.format_exc()}")
+        log_to_server(f"[S2][P0] traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 
