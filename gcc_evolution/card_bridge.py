@@ -179,6 +179,9 @@ class CardBridge:
           query()     → 返回所有confidence>=阈值的卡, 按静态confidence排序
           contextual  → 读历史激活+结果, 按"当前情境下的实际正确率"排序
 
+        GCC-0270: 同时返回仅存在于因果记忆中的经验卡(EXP_TM_*),
+                  它们不在JSON文件索引中, 但有激活历史。
+
         context: {"trend": "UP", "regime": "bull", ...}
         min_samples: 至少N次同情境激活才参与排名(防小样本)
 
@@ -200,11 +203,30 @@ class CardBridge:
                 pass
         if _deprecated:
             candidates = [c for c in candidates if c["card_id"] not in _deprecated]
-        if not candidates:
-            return []
 
         # 2. 加载因果记忆
         causal = self._load_causal_memory(context)
+
+        # GCC-0270: 补充经验卡 — 仅存在于因果记忆中的 EXP_TM_* 卡
+        _existing_ids = {c["card_id"] for c in candidates}
+        for cid, mem in causal.items():
+            if cid.startswith("EXP_TM_") and cid not in _existing_ids and cid not in _deprecated:
+                # 从card_id解析品种和方向: EXP_TM_BTCUSDC_BUY
+                parts = cid.replace("EXP_TM_", "").rsplit("_", 1)
+                _sym = parts[0] if len(parts) == 2 else cid
+                _act = parts[1] if len(parts) == 2 else "NEUTRAL"
+                candidates.append({
+                    "card_id": cid,
+                    "title": f"{_sym} {_act} 实战经验",
+                    "rules": [],
+                    "confidence": mem["correct"] / mem["total"] if mem["total"] > 0 else 0.5,
+                    "quality": "experience",
+                    "module": "",
+                })
+                _existing_ids.add(cid)
+
+        if not candidates:
+            return []
 
         # 3. 给每张卡打因果分
         for card in candidates:
