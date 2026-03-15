@@ -10121,23 +10121,24 @@ class PriceScanEngine:
     # GCC-0258 S11: 15min多周期外挂扫描 — 填充GCC-TM信号池
     # 复用现有外挂(Hoffman/缠论/SuperTrend), 喂15min K线产生高频信号
     # ═══════════════════════════════════════════════════════════
-    def _scan_plugins_15m(self, symbol: str, market_type: str = "crypto"):
+    def _scan_plugins_30m(self, symbol: str, market_type: str = "crypto"):
         """
-        GCC-0258 S11: 15min子周期外挂扫描, 信号推入GCC-TM信号池。
-        不影响现有4H外挂逻辑和主程序交易路径。
+        GCC-0021: 30min间隔外挂扫描, 15min K线, 信号推入GCC-TM信号池。
         每30分钟调用一次, 15min K线每次有2根新数据。
+        活跃外挂: Hoffman_30m + EMA_Cross_30m (+ BrooksVision_4H persistent)
+        ADX(14)门控: <20震荡市抑制所有信号
         """
         try:
-            from gcc_trading_module import gcc_push_signal as _gcc_push_15m
+            from gcc_trading_module import gcc_push_signal as _gcc_push_30m
         except ImportError:
             return
 
         main_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
 
-        # ── 获取15min K线 ──
-        bars_15m = YFinanceDataFetcher.get_15m_ohlcv(symbol, 60)  # 60根=15小时
-        if not bars_15m or len(bars_15m) < 30:
-            logger.debug(f"[S11] {symbol} 15m K线不足({len(bars_15m) if bars_15m else 0}根), 跳过")
+        # ── 获取15min K线 (调用间隔30min, K线粒度15min) ──
+        bars_30m = YFinanceDataFetcher.get_15m_ohlcv(symbol, 60)  # 60根=15小时
+        if not bars_30m or len(bars_30m) < 30:
+            logger.debug(f"[S11] {symbol} 15m K线不足({len(bars_30m) if bars_30m else 0}根), 跳过")
             return
 
         # 趋势信息(大周期, 用于过滤)
@@ -10159,9 +10160,9 @@ class PriceScanEngine:
         _adx_conf_bonus = 0.0
         try:
             import numpy as _adx_np
-            _adx_closes = _adx_np.array([float(b["close"]) for b in bars_15m])
-            _adx_highs = _adx_np.array([float(b["high"]) for b in bars_15m])
-            _adx_lows = _adx_np.array([float(b["low"]) for b in bars_15m])
+            _adx_closes = _adx_np.array([float(b["close"]) for b in bars_30m])
+            _adx_highs = _adx_np.array([float(b["high"]) for b in bars_30m])
+            _adx_lows = _adx_np.array([float(b["low"]) for b in bars_30m])
             if len(_adx_closes) >= 28:  # ADX(14)需要至少28根
                 # True Range
                 _tr_h_l = _adx_highs[1:] - _adx_lows[1:]
@@ -10190,7 +10191,7 @@ class PriceScanEngine:
 
                 if _adx_value < 20:
                     _adx_gate_pass = False
-                    logger.info(f"[ADX-GATE] {symbol} ADX={_adx_value:.1f}<20 震荡市 → 抑制15min信号")
+                    logger.info(f"[ADX-GATE] {symbol} ADX={_adx_value:.1f}<20 震荡市 → 抑制30min信号")
                 elif _adx_value > 25:
                     _adx_conf_bonus = 0.05
                     logger.debug(f"[ADX-GATE] {symbol} ADX={_adx_value:.1f}>25 趋势强 → conf+0.05")
@@ -10198,27 +10199,27 @@ class PriceScanEngine:
             pass  # ADX计算异常不拦截
 
         if not _adx_gate_pass:
-            return  # 震荡市不推任何15min信号
+            return  # 震荡市不推任何30min信号
 
-        # ── 1. Hoffman 15m ──
+        # ── 1. Hoffman 30m ──
         if _rob_hoffman_available:
             try:
                 plugin = get_rob_hoffman_plugin()
                 result = plugin.process_for_scan(
                     symbol=symbol,
-                    ohlcv_bars=bars_15m,
+                    ohlcv_bars=bars_30m,
                     current_trend=current_trend,
                     pos_in_channel=pos_in_channel,
-                    position_units=0,  # 15m信号不做仓位判断
+                    position_units=0,  # 30m信号不做仓位判断
                 )
                 if plugin.should_activate_for_scan(result):
                     action = plugin.get_action_for_scan(result)
                     if action in ("BUY", "SELL"):
-                        _gcc_push_15m(main_symbol, "Hoffman_15m", action, min(0.7, result.confidence + _adx_conf_bonus))
+                        _gcc_push_30m(main_symbol, "Hoffman_30m", action, min(0.7, result.confidence + _adx_conf_bonus))
                         pushed += 1
-                        logger.info(f"[S11] {symbol} Hoffman_15m → {action} (conf={result.confidence:.2f})")
+                        logger.info(f"[S11] {symbol} Hoffman_30m → {action} (conf={result.confidence:.2f})")
             except Exception as e:
-                logger.debug(f"[S11] {symbol} Hoffman_15m error: {e}")
+                logger.debug(f"[S11] {symbol} Hoffman_30m error: {e}")
 
         # [DISABLED 2026-03-15] ChanBS_15m: 实盘胜率11.8%, 累计亏损-$1,670, 已DOWNGRADED
         # 缠论15min 200根K线不足以形成完整中枢, 一买/一卖本质是逆趋势信号
@@ -10232,13 +10233,13 @@ class PriceScanEngine:
         #     ... (GCC-0021 S1)
 
         # ═══════════════════════════════════════════════════════════
-        # GCC-0259 S1-S4: 技术指标信号 (从15min K线直接计算, 零API成本)
+        # GCC-0259: 技术指标信号 (从30min K线直接计算, 零API成本)
         # ═══════════════════════════════════════════════════════════
         try:
             import numpy as np
-            closes = np.array([float(b["close"]) for b in bars_15m])
-            highs = np.array([float(b["high"]) for b in bars_15m])
-            lows = np.array([float(b["low"]) for b in bars_15m])
+            closes = np.array([float(b["close"]) for b in bars_30m])
+            highs = np.array([float(b["high"]) for b in bars_30m])
+            lows = np.array([float(b["low"]) for b in bars_30m])
             n = len(closes)
 
             if n >= 21:
@@ -10255,8 +10256,8 @@ class PriceScanEngine:
                     rsi = 100.0 if avg_gain > 0 else 50.0
 
                 # S1: RSI — v0.3禁用(均值回归信号, 与趋势跟随系统矛盾)
-                # if rsi < 30: _gcc_push_15m(main_symbol, "RSI_15m", "BUY", 0.55)
-                # elif rsi > 70: _gcc_push_15m(main_symbol, "RSI_15m", "SELL", 0.55)
+                # if rsi < 30: _gcc_push_30m(main_symbol, "RSI_15m", "BUY", 0.55)
+                # elif rsi > 70: _gcc_push_30m(main_symbol, "RSI_15m", "SELL", 0.55)
 
                 # ── S2: EMA9×EMA21 金叉死叉 ──
                 def _ema(arr, period):
@@ -10271,11 +10272,11 @@ class PriceScanEngine:
                 ema21 = _ema(closes, 21)
                 # 交叉检测: 前一根 vs 当前根
                 if ema9[-2] <= ema21[-2] and ema9[-1] > ema21[-1]:
-                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "BUY", 0.6 + _adx_conf_bonus)
+                    _gcc_push_30m(main_symbol, "EMA_Cross_30m", "BUY", 0.6 + _adx_conf_bonus)
                     pushed += 1
                     logger.info(f"[GCC-0259] {symbol} EMA9×21金叉 → BUY")
                 elif ema9[-2] >= ema21[-2] and ema9[-1] < ema21[-1]:
-                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "SELL", 0.6 + _adx_conf_bonus)
+                    _gcc_push_30m(main_symbol, "EMA_Cross_30m", "SELL", 0.6 + _adx_conf_bonus)
                     pushed += 1
                     logger.info(f"[GCC-0259] {symbol} EMA9×21死叉 → SELL")
 
@@ -10291,7 +10292,7 @@ class PriceScanEngine:
             logger.debug(f"[GCC-0259] {symbol} 技术指标信号异常: {_ind_e}")
 
         if pushed > 0:
-            logger.info(f"[S11+0259] {symbol} 15m扫描完成: {pushed}个信号推入GCC-TM信号池")
+            logger.info(f"[S11] {symbol} 30m扫描完成: {pushed}个信号推入GCC-TM信号池")
 
     def _scan_crypto(self):
         """扫描加密货币 - v3.545: P0-Tracking + 剥头皮 + L1外挂"""
@@ -10359,7 +10360,7 @@ class PriceScanEngine:
                     # self._scan_supertrend_av2(symbol)
 
                     # GCC-0258 S11: 15min多周期外挂扫描 (在4H外挂之后, gcc_observe之前)
-                    self._scan_plugins_15m(symbol, market_type="crypto")
+                    self._scan_plugins_30m(symbol, market_type="crypto")
 
                     # GCC-0141: 外挂扫描计时结束
                     _dp.stop(f"plugins_{symbol}")
@@ -10495,7 +10496,7 @@ class PriceScanEngine:
                     # self._scan_supertrend_av2(symbol, market_type="stock")
 
                     # GCC-0258 S11: 15min多周期外挂扫描 (在4H外挂之后, gcc_observe之前)
-                    self._scan_plugins_15m(symbol, market_type="stock")
+                    self._scan_plugins_30m(symbol, market_type="stock")
 
                     # GCC-0141: 外挂扫描计时结束
                     _dp.stop(f"plugins_{symbol}")
