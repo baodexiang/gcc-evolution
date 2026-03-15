@@ -54306,17 +54306,38 @@ if __name__ == "__main__":
             import subprocess as _evo_sp
             _evo_time.sleep(300)  # 启动延迟5分钟
             _EVO_INTERVAL = 1800  # 30分钟
+            _evo_fail_count = 0
+            _EVO_MAX_FAIL = 3    # 连续3次失败发邮件
             log_to_server("[GCC-EVO] 进化循环后台线程启动 (每30分钟)")
             while True:
                 try:
-                    _evo_sp.run(
+                    result = _evo_sp.run(
                         ["python", ".GCC/gcc_evo.py", "loop", "-k", "KEY-011", "--once"],
                         cwd=str(os.path.dirname(os.path.abspath(__file__))),
-                        timeout=300, capture_output=True,
+                        timeout=300, capture_output=True, text=True,
                     )
-                    log_to_server("[GCC-EVO] 进化循环完成")
+                    if result.returncode == 0:
+                        _evo_fail_count = 0
+                        log_to_server("[GCC-EVO] 进化循环完成")
+                    else:
+                        _evo_fail_count += 1
+                        log_to_server(f"[GCC-EVO] 进化循环返回非零({result.returncode}), 连续失败={_evo_fail_count}")
                 except Exception as _evo_e:
-                    log_to_server(f"[GCC-EVO] 进化循环失败: {_evo_e}")
+                    _evo_fail_count += 1
+                    log_to_server(f"[GCC-EVO] 进化循环异常: {_evo_e}, 连续失败={_evo_fail_count}")
+                # GCC-0018 S0: 连续失败3次发邮件
+                if _evo_fail_count >= _EVO_MAX_FAIL:
+                    try:
+                        send_email_notification(
+                            "[GCC-EVO][告警] 进化循环连续失败",
+                            f"gcc-evo loop 连续失败 {_evo_fail_count} 次\n"
+                            f"最近错误: {result.stderr[-200:] if 'result' in dir() and hasattr(result,'stderr') else 'N/A'}\n"
+                            f"请检查 .GCC/gcc_evo.py 和 logs/gcc_evo_loop.log"
+                        )
+                        log_to_server(f"[GCC-EVO] 告警邮件已发送 (连续失败{_evo_fail_count}次)")
+                        _evo_fail_count = 0  # 发完邮件重置, 避免刷屏
+                    except Exception:
+                        pass
                 _evo_time.sleep(_EVO_INTERVAL)
 
         _evo_thread = _evo_threading.Thread(target=_gcc_evo_loop, daemon=True, name="GCC-Evo-Loop")
