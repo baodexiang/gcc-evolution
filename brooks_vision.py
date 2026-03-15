@@ -47,7 +47,8 @@ def _gcc_log(msg: str):
         pass
 
 # GCC-0199: BV形态黑名单 — 准确率持续低于35%的形态直接排除,不进入EXECUTE
-BV_PATTERN_BLACKLIST = {"BEAR_FLAG"}
+# [MODIFIED 2026-03-15] BEAR_FLAG从黑名单移除, 实盘胜率66.7%已纳入白名单
+BV_PATTERN_BLACKLIST = set()  # 原{"BEAR_FLAG"}, 现由GCC-TM白名单统一管理
 
 NY_TZ = ZoneInfo("America/New_York")
 

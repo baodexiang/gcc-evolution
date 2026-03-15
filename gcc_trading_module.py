@@ -335,8 +335,8 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
                     # [MODIFIED 2026-03-15] 仅高胜率形态入场, 其余观察模式
                     # BREAKOUT 70.7% / BEAR_FLAG 66.7% / MTR 64.5%
                     # BROAD_CHANNEL 44.2% / DOUBLE_BOTTOM 49.7% → 不推信号
-                    # BEAR_FLAG已在brooks_vision.py BV_PATTERN_BLACKLIST中拦截, 不会到达此处
-                    _BV_ALLOWED_PATTERNS = {"BREAKOUT", "MTR_BUY", "MTR_SELL", "BULL_FLAG"}
+                    # 4种高胜率形态: BREAKOUT(70.7%) BEAR_FLAG(66.7%) MTR(64.5%) BULL_FLAG(61.0%)
+                    _BV_ALLOWED_PATTERNS = {"BREAKOUT", "BEAR_FLAG", "MTR_BUY", "MTR_SELL", "BULL_FLAG"}
                     if _bv_pat in _BV_ALLOWED_PATTERNS:
                         gcc_push_signal(symbol, "BrooksVision_4H", _bv_sig,
                                         min(0.95, max(0.3, _bv_conf / 100.0)),
