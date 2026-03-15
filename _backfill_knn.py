@@ -14,41 +14,108 @@ SIGNAL_LOG = Path("state/audit/signal_log.jsonl")
 KNN_FILE = Path("state/gcc_knn_experience.jsonl")
 PROGRESS_FILE = Path("state/_knn_backfill_progress.json")
 
-# 加密品种映射 (内部→yfinance)
-CRYPTO_YF_MAP = {
-    "BTCUSDC": "BTC-USD", "ETHUSDC": "ETH-USD",
-    "SOLUSDC": "SOL-USD", "ZECUSDC": "ZEC-USD",
+# 加密品种
+CRYPTO_SYMBOLS = {"BTCUSDC", "ETHUSDC", "SOLUSDC", "ZECUSDC", "OPUSDC"}
+
+# Coinbase product ID映射
+COINBASE_PRODUCT_MAP = {
+    "BTCUSDC": "BTC-USDC", "ETHUSDC": "ETH-USDC",
+    "SOLUSDC": "SOL-USDC", "ZECUSDC": "ZEC-USDC", "OPUSDC": "OP-USDC",
 }
 
 # 价格缓存 (避免重复拉同品种同日)
 _price_cache = {}  # key="SYMBOL_YYYYMMDD_HH" → price
 
 
-def _get_price_at(symbol: str, target_ts: datetime) -> float:
-    """拉取指定时间点的价格 (±1小时精度)"""
-    cache_key = f"{symbol}_{target_ts.strftime('%Y%m%d_%H')}"
-    if cache_key in _price_cache:
-        return _price_cache[cache_key]
+def _get_price_coinbase(symbol: str, target_ts: datetime) -> float:
+    """Coinbase API拉历史K线价格"""
+    try:
+        from coinbase_data_provider import _public_get, _coin_product_id
+        product_id = COINBASE_PRODUCT_MAP.get(symbol)
+        if not product_id:
+            product_id = _coin_product_id(symbol)
+        if not product_id:
+            return 0.0
+        # 用1小时K线, 拉目标时间前后4小时
+        start_ts = int(target_ts.timestamp()) - 14400
+        end_ts = int(target_ts.timestamp()) + 14400
+        data = _public_get(
+            f"/api/v3/brokerage/market/products/{product_id}/candles"
+            f"?granularity=ONE_HOUR&start={start_ts}&end={end_ts}&limit=20"
+        )
+        if data and "candles" in data:
+            candles = data["candles"]
+            if candles:
+                # 找最接近target_ts的K线
+                target_epoch = target_ts.timestamp()
+                best = min(candles, key=lambda c: abs(int(c.get("start", 0)) - target_epoch))
+                price = float(best.get("close", 0))
+                if price > 0:
+                    return price
+    except Exception:
+        pass
+    return 0.0
 
+
+def _get_price_schwab(symbol: str, target_ts: datetime) -> float:
+    """Schwab API拉历史价格(美股)"""
+    try:
+        from schwab_data_provider import get_provider
+        provider = get_provider()
+        df = provider.get_kline(symbol, interval="1h", bars=50,
+                                 end_date=target_ts.strftime("%Y-%m-%d"))
+        if df is not None and not df.empty and "close" in df.columns:
+            df.index = df.index.tz_localize(None) if df.index.tz is None else df.index.tz_convert(None)
+            target_naive = target_ts.replace(tzinfo=None)
+            diffs = abs(df.index - target_naive)
+            closest_idx = diffs.argmin()
+            price = float(df["close"].iloc[closest_idx])
+            if price > 0:
+                return price
+    except Exception:
+        pass
+    return 0.0
+
+
+def _get_price_yfinance(symbol: str, target_ts: datetime) -> float:
+    """yfinance拉历史价格(fallback)"""
     try:
         import yfinance as yf
-        yf_sym = CRYPTO_YF_MAP.get(symbol, symbol)
-        # 拉目标日期前后1天的小时线
         start = (target_ts - timedelta(hours=6)).strftime("%Y-%m-%d")
         end = (target_ts + timedelta(hours=6)).strftime("%Y-%m-%d")
-        hist = yf.Ticker(yf_sym).history(start=start, end=end, interval="1h")
+        hist = yf.Ticker(symbol).history(start=start, end=end, interval="1h")
         if hist is not None and not hist.empty and "Close" in hist.columns:
-            # 找最接近target_ts的K线
             hist.index = hist.index.tz_localize(None) if hist.index.tz is None else hist.index.tz_convert(None)
             target_naive = target_ts.replace(tzinfo=None)
             diffs = abs(hist.index - target_naive)
             closest_idx = diffs.argmin()
             price = float(hist["Close"].iloc[closest_idx])
-            _price_cache[cache_key] = price
-            return price
+            if price > 0:
+                return price
     except Exception:
         pass
     return 0.0
+
+
+def _get_price_at(symbol: str, target_ts: datetime) -> float:
+    """拉取指定时间点的价格 — 优先链: Coinbase(加密) / Schwab(美股) → yfinance(fallback)"""
+    cache_key = f"{symbol}_{target_ts.strftime('%Y%m%d_%H')}"
+    if cache_key in _price_cache:
+        return _price_cache[cache_key]
+
+    price = 0.0
+    if symbol in CRYPTO_SYMBOLS:
+        # 加密: Coinbase优先
+        price = _get_price_coinbase(symbol, target_ts)
+    else:
+        # 美股: Schwab优先 → yfinance fallback
+        price = _get_price_schwab(symbol, target_ts)
+        if price <= 0:
+            price = _get_price_yfinance(symbol, target_ts)
+
+    if price > 0:
+        _price_cache[cache_key] = price
+    return price
 
 
 def _compute_outcome(direction: str, entry_price: float, future_price: float,
