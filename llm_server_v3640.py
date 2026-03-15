@@ -26130,8 +26130,9 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
         bot_uuid = cfg.get("long_bot_uuid")
         action = "enter_long"
     else:
-        bot_uuid = cfg.get("short_bot_uuid")
-        action = "enter_short"
+        # SELL = 平多仓 (现货不能做空), 用long_bot的close_long
+        bot_uuid = cfg.get("long_bot_uuid")
+        action = "close_long"
 
     if not bot_uuid:
         log_to_server(f"[3Commas] {symbol} 缺少对应 {final_action} bot_uuid，跳过下单。")
@@ -43065,37 +43066,49 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
         except Exception as _ss_e:
             log_to_server(f"[GCC-TM][ERROR] {symbol} SignalStack: {_ss_e}")
     elif _gcc_order.get("source") == "gcc_scalp":
-        # GCC-0256 S5: OP剥头皮 → Coinbase API市价单 (taker费率)
+        # GCC-0256 S5: OP剥头皮 → Coinbase API限价单 (maker费率0.06%)
         # 现货只能先买后卖, SELL必须是平仓(有持仓才能卖)
         try:
             from coinbase_sync_v6 import place_order as _cb_place
             _scalp_product = {"OPUSDC": "OP-USDC"}.get(symbol, f"{symbol[:symbol.index('USD')]}-USDC" if "USD" in symbol else symbol)
-            _scalp_qty = float(_gcc_order.get("quantity", 0))
+            _scalp_qty = round(float(_gcc_order.get("quantity", 0)), 2)  # OP最小单位0.01
             _scalp_max = float(_gcc_order.get("max_usd", 500))
+            _scalp_limit = _gcc_order.get("limit_price")
             if _scalp_qty <= 0:
-                _scalp_qty = _scalp_max / _gcc_cur_price if _gcc_cur_price > 0 else 0
+                _scalp_qty = round(_scalp_max / _gcc_cur_price, 2) if _gcc_cur_price > 0 else 0
             if _gcc_act == "BUY":
-                # 市价买入: 用quote_size(USDC金额), 确保立即成交
-                _scalp_res = _cb_place(_scalp_product, "BUY",
-                                       quote_size=min(_scalp_max, _scalp_qty * _gcc_cur_price))
+                if _scalp_limit:
+                    # 限价买入: base_size(币数量) + limit_price → maker费率
+                    _scalp_res = _cb_place(_scalp_product, "BUY",
+                                           base_size=_scalp_qty, limit_price=_scalp_limit)
+                else:
+                    # 兜底: 无limit_price时用市价
+                    _scalp_res = _cb_place(_scalp_product, "BUY",
+                                           quote_size=min(_scalp_max, _scalp_qty * _gcc_cur_price))
             elif _gcc_act == "SELL":
                 # 现货卖出保护: SELL只允许平仓(reason必须含scalp_exit)
                 _scalp_reason = _gcc_order.get("reason", "")
                 if "scalp_exit" not in _scalp_reason:
-                    # 非平仓SELL一律拦截 — 现货不能做空
                     log_to_server(f"[GCC-SCALP][BLOCKED] {symbol} SELL拦截 — reason未确认平仓: {_scalp_reason}")
                     send_ok = False
                     _scalp_res = {"success": False, "error": "现货SELL必须是scalp_exit平仓"}
                 else:
-                    # 平仓卖出: 用base_size(币数量), 市价确保立即成交
-                    _scalp_res = _cb_place(_scalp_product, "SELL",
-                                           base_size=_scalp_qty)
+                    # 平仓卖出: 限价高挂确保maker + 快速成交
+                    _sell_limit = round(_gcc_cur_price * 1.0005, 4) if _gcc_cur_price > 0 else None
+                    if _sell_limit:
+                        _scalp_res = _cb_place(_scalp_product, "SELL",
+                                               base_size=_scalp_qty, limit_price=_sell_limit)
+                    else:
+                        _scalp_res = _cb_place(_scalp_product, "SELL",
+                                               base_size=_scalp_qty)
             else:
                 _scalp_res = {"success": False, "error": f"未知方向: {_gcc_act}"}
             send_ok = _scalp_res.get("success", False)
+            _order_type = "LIMIT" if _scalp_limit or _gcc_act == "SELL" else "MARKET"
             log_to_server(
-                f"[GCC-SCALP][EXECUTE] {symbol} {_gcc_act}: "
+                f"[GCC-SCALP][EXECUTE] {symbol} {_gcc_act} {_order_type}: "
                 f"qty={_scalp_qty:.2f} price=${_gcc_cur_price:.4f} "
+                f"limit={_scalp_limit or 'N/A'} "
                 f"success={send_ok} order_id={_scalp_res.get('order_id','')}"
             )
             if send_ok:

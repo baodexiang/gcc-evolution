@@ -3681,7 +3681,7 @@ _SCALP_STATE_FILE = _STATE_DIR / "gcc_scalp_state.json"
 _SCALP_TRADES_FILE = _STATE_DIR / "gcc_scalp_trades.jsonl"
 _SCALP_MAX_POSITION_USD = 500      # 最大仓位$500
 _SCALP_RSI_PERIOD = 7
-_SCALP_RSI_OVERSOLD = 25           # 超卖阈值
+_SCALP_RSI_OVERSOLD = 25           # 超卖阈值 (纯RSI策略)
 _SCALP_RSI_OVERBOUGHT = 75        # 超买阈值
 _SCALP_RSI_EXIT_HIGH = 70         # BUY出场RSI
 _SCALP_RSI_EXIT_LOW = 30          # SELL出场RSI
@@ -3689,6 +3689,10 @@ _SCALP_ATR_PERIOD = 3
 _SCALP_MAX_HOLD_BARS = 12         # 最多持仓12根(1h)
 _SCALP_COOLDOWN_BARS = 3          # 冷却3根(15min)
 _SCALP_SYMBOLS = frozenset({"OPUSDC"})  # 剥头皮白名单
+_SCALP_BB_PERIOD = 20              # 布林带周期
+_SCALP_BB_STD = 2.0                # 布林带标准差倍数
+_SCALP_BB_RSI_THRESHOLD = 35      # BB+RSI复合策略RSI阈值
+_SCALP_FEE_PCT = 0.0012            # VIP1 maker限价单来回~0.12% (0.06%×2)
 
 
 def _scalp_calc_rsi(closes: list, period: int = 7) -> float:
@@ -3726,6 +3730,18 @@ def _scalp_calc_atr(highs: list, lows: list, closes: list, period: int = 3) -> f
     return float(_np.mean(tr[-period:]))
 
 
+def _scalp_calc_bb(closes: list, period: int = 20, num_std: float = 2.0) -> tuple:
+    """布林带(20,2)，返回 (lower, mid, upper) 最新值。"""
+    if len(closes) < period:
+        mid = closes[-1] if closes else 0.0
+        return mid * 0.98, mid, mid * 1.02
+    import numpy as _np
+    arr = _np.array(closes[-period:], dtype=float)
+    mid = float(_np.mean(arr))
+    std = float(_np.std(arr, ddof=1))
+    return mid - num_std * std, mid, mid + num_std * std
+
+
 def _scalp_default_state() -> dict:
     """剥头皮状态默认值。"""
     return {
@@ -3739,6 +3755,7 @@ def _scalp_default_state() -> dict:
         "sl_price": 0.0,          # 止损价
         "quantity": 0.0,          # 持仓数量(OP个数)
         "entry_confirmed": False,  # GCC-0256 fix: 执行层确认后才允许出场
+        "entry_strategy": None,   # "RSI" 或 "BB_RSI"
     }
 
 
@@ -3747,9 +3764,11 @@ def _load_scalp_state() -> dict:
     if _SCALP_STATE_FILE.exists():
         try:
             state = json.loads(_SCALP_STATE_FILE.read_text(encoding="utf-8"))
-            # 兼容旧state: 没有entry_confirmed字段的视为已确认(避免误清已有持仓)
+            # 兼容旧state: 补全缺失字段
             if "entry_confirmed" not in state:
                 state["entry_confirmed"] = state.get("in_trade", False)
+            if "entry_strategy" not in state:
+                state["entry_strategy"] = None
             return state
         except Exception:
             pass
@@ -3903,6 +3922,7 @@ def gcc_scalp_observe(
     # ── 计算指标 ──
     rsi = _scalp_calc_rsi(closes, _SCALP_RSI_PERIOD)
     atr = _scalp_calc_atr(highs, lows, closes, _SCALP_ATR_PERIOD)
+    bb_lower, bb_mid, bb_upper = _scalp_calc_bb(closes, _SCALP_BB_PERIOD, _SCALP_BB_STD)
 
     # ── 方向门控: 读取当前K线的三方投票方向 ──
     gate_direction = "HOLD"
@@ -3960,6 +3980,8 @@ def gcc_scalp_observe(
             should_exit, exit_reason = True, "TP"
         elif current_price <= state["sl_price"]:
             should_exit, exit_reason = True, "SL"
+        elif state.get("entry_strategy") == "BB_RSI" and current_price >= bb_mid:
+            should_exit, exit_reason = True, "BB_MID"
         elif rsi > _SCALP_RSI_EXIT_HIGH:
             should_exit, exit_reason = True, "RSI_EXIT"
 
@@ -3970,7 +3992,7 @@ def gcc_scalp_observe(
             # 计算P&L (现货BUY→SELL)
             entry_p = state["entry_price"]
             raw_pnl_pct = (current_price - entry_p) / entry_p
-            fee_pct = 0.0025  # VIP1 taker来回~0.25% (0.125%×2)
+            fee_pct = _SCALP_FEE_PCT  # VIP1 maker限价单来回~0.12%
             net_pnl_pct = raw_pnl_pct - fee_pct
             net_pnl_usd = net_pnl_pct * _SCALP_MAX_POSITION_USD
 
@@ -4035,36 +4057,44 @@ def gcc_scalp_observe(
     if state["cooldown"] > 0:
         return None
 
+    # ── 双策略进场: 纯RSI(<25) 或 BB+RSI(价格≤下轨且RSI<35) ──
     signal = None
+    entry_strategy = None
     if rsi < _SCALP_RSI_OVERSOLD:
-        signal = "BUY"
+        signal, entry_strategy = "BUY", "RSI"
+    elif current_price <= bb_lower and rsi < _SCALP_BB_RSI_THRESHOLD:
+        signal, entry_strategy = "BUY", "BB_RSI"
     elif rsi > _SCALP_RSI_OVERBOUGHT:
         # Coinbase现货不支持做空 — SELL只能平仓,不能开空
-        # 无持仓时RSI超买 → 跳过(不做空)
         logger.debug("[GCC-SCALP] %s RSI=%.1f overbought but 现货不能做空, 跳过", symbol, rsi)
-        signal = None
 
     if signal is None:
         return None
 
     # 方向门控
     if gate_direction not in ("BOTH", signal, "HOLD"):
-        # HOLD时允许双向 (剥头皮品种可能无4H门控)
         if gate_direction != "HOLD":
             logger.info("[GCC-SCALP] %s RSI=%s but gate=%s → blocked",
                         symbol, signal, gate_direction)
             return None
 
-    # 计算止盈止损 (现货: 只做多)
-    quantity = _SCALP_MAX_POSITION_USD / current_price
-    tp_price = current_price + atr
-    sl_price = current_price - atr
+    # 计算限价+止盈止损 (现货: 只做多, 限价单maker费率)
+    quantity = round(_SCALP_MAX_POSITION_USD / current_price, 2)  # OP最小单位0.01
+    # 限价: 比当前价低一点确保maker (BUY挂低于ask)
+    limit_price = round(current_price * 0.9995, 4)  # 低0.05%挂单, OP价格精度4位
+    if entry_strategy == "BB_RSI":
+        tp_price = bb_mid       # BB策略: 回到中轨止盈
+        sl_price = current_price - atr
+    else:
+        tp_price = current_price + atr   # RSI策略: ATR止盈
+        sl_price = current_price - atr
 
     now_ts = datetime.now(_NY_TZ)
+    entry_reason = f"scalp_entry_{entry_strategy}{rsi:.0f}"
 
-    # 写进场pending_order
+    # 写进场pending_order (附带limit_price)
     _scalp_write_pending(symbol, signal, current_price, quantity,
-                         f"scalp_entry_RSI{rsi:.0f}")
+                         entry_reason, limit_price=limit_price)
 
     # 经验卡: 开仓写入 (outcome=None, 平仓时回填)
     try:
@@ -4078,7 +4108,7 @@ def gcc_scalp_observe(
             "ts": now_ts.strftime("%Y-%m-%d %H:%M:%S"),
             "price": current_price,
             "ref_price": current_price,
-            "strongest_source": f"scalp_RSI{rsi:.0f}",
+            "strongest_source": f"scalp_{entry_strategy}{rsi:.0f}",
             "source": "gcc_scalp",
         })
     except Exception:
@@ -4096,18 +4126,22 @@ def gcc_scalp_observe(
         "sl_price": sl_price,
         "quantity": quantity,
         "entry_confirmed": False,
+        "entry_strategy": entry_strategy,
     }
     _save_scalp_state(state)
 
     logger.info(
-        "[GCC-SCALP] %s ENTRY %s @ $%.4f RSI=%.1f TP=$%.4f SL=$%.4f qty=%.2f",
-        symbol, signal, current_price, rsi, tp_price, sl_price, quantity,
+        "[GCC-SCALP] %s ENTRY %s [%s] @ $%.4f (limit=$%.4f) RSI=%.1f TP=$%.4f SL=$%.4f qty=%.2f",
+        symbol, signal, entry_strategy, current_price, limit_price, rsi,
+        tp_price, sl_price, quantity,
     )
-    return {"action": signal, "reason": f"RSI={rsi:.0f}", "price": current_price}
+    return {"action": signal, "reason": f"{entry_strategy}={rsi:.0f}",
+            "price": current_price, "limit_price": limit_price}
 
 
 def _scalp_write_pending(symbol: str, action: str, price: float,
-                         quantity: float, reason: str) -> None:
+                         quantity: float, reason: str,
+                         limit_price: float = None) -> None:
     """写剥头皮pending_order，标记source=gcc_scalp区分正常GCC-TM。"""
     order = {
         "symbol":    symbol,
@@ -4121,6 +4155,8 @@ def _scalp_write_pending(symbol: str, action: str, price: float,
         "processing": False,
         "max_usd":   _SCALP_MAX_POSITION_USD,
     }
+    if limit_price is not None:
+        order["limit_price"] = limit_price
     pending_path = _STATE_DIR / f"gcc_pending_order_{symbol}.json"
     is_exit = "scalp_exit" in reason
     try:
