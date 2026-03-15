@@ -51459,8 +51459,8 @@ def key009_gcctm():
                 if _ece_key not in _ec_seen:
                     _ec_seen.add(_ece_key)
                     _ec_dedup.append(_ece)
-            _ec_errors = _ec_dedup
-            error_classify = _ec_errors[-200:]  # 最多200条
+            _ec_errors = sorted(_ec_dedup, key=lambda e: e.get("ts", ""))
+            error_classify = _ec_errors[-200:]  # 最多200条,时间正序
             key009_gcctm._ec_cache = error_classify
             key009_gcctm._ec_ts = _ec_time.time()
         except Exception:
