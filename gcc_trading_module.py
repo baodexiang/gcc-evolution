@@ -3681,19 +3681,20 @@ def gcc_observe(
 
 _SCALP_STATE_FILE = _STATE_DIR / "gcc_scalp_state.json"
 _SCALP_TRADES_FILE = _STATE_DIR / "gcc_scalp_trades.jsonl"
-_SCALP_MAX_POSITION_USD = 500      # 最大仓位$500
-_SCALP_RSI_PERIOD = 7
-_SCALP_RSI_OVERSOLD = 25           # 超卖阈值 (纯RSI策略)
+_SCALP_MAX_POSITION_USD = 1000     # BTC每次$1000
+_SCALP_RSI_PERIOD = 14             # RSI(14)比RSI(7)更稳定, 减少假信号
+_SCALP_RSI_OVERSOLD = 30           # 超卖阈值 (BB均值回归主策略, RSI辅助)
 _SCALP_RSI_OVERBOUGHT = 75        # 超买阈值
 _SCALP_RSI_EXIT_HIGH = 70         # BUY出场RSI
 _SCALP_RSI_EXIT_LOW = 30          # SELL出场RSI
-_SCALP_ATR_PERIOD = 3
-_SCALP_MAX_HOLD_BARS = 12         # 最多持仓12根(1h)
-_SCALP_COOLDOWN_BARS = 3          # 冷却3根(15min)
-_SCALP_SYMBOLS = frozenset({"OPUSDC"})  # 剥头皮白名单
+_SCALP_ATR_PERIOD = 14             # ATR(14)与RSI周期一致
+_SCALP_MAX_HOLD_BARS = 12         # 最多持仓12根(15min×12=3小时)
+_SCALP_COOLDOWN_BARS = 4          # 冷却4根(15min×4=1小时)
+# v3.660: OPUSDC暂停(现货SELL被拦截), 切换BTC BB均值回归
+_SCALP_SYMBOLS = frozenset({"BTCUSDC"})  # 剥头皮白名单
 _SCALP_BB_PERIOD = 20              # 布林带周期
 _SCALP_BB_STD = 2.0                # 布林带标准差倍数
-_SCALP_BB_RSI_THRESHOLD = 35      # BB+RSI复合策略RSI阈值
+_SCALP_BB_RSI_THRESHOLD = 30      # BB+RSI复合: 价格≤下轨且RSI<30
 _SCALP_FEE_PCT = 0.0012            # VIP1 maker限价单来回~0.12% (0.06%×2)
 
 
@@ -4059,31 +4060,26 @@ def gcc_scalp_observe(
     if state["cooldown"] > 0:
         return None
 
-    # ── 双策略进场: 纯RSI(<25) 或 BB+RSI(价格≤下轨且RSI<35) ──
+    # ── BB均值回归进场 (Buy-Only): 价格触下轨+RSI超卖 ──
+    # v3.660: 关闭纯RSI策略, 只保留BB+RSI (BTC均值回归更可靠)
     signal = None
     entry_strategy = None
-    if rsi < _SCALP_RSI_OVERSOLD:
-        signal, entry_strategy = "BUY", "RSI"
-    elif current_price <= bb_lower and rsi < _SCALP_BB_RSI_THRESHOLD:
+    if current_price <= bb_lower and rsi < _SCALP_BB_RSI_THRESHOLD:
         signal, entry_strategy = "BUY", "BB_RSI"
-    elif rsi > _SCALP_RSI_OVERBOUGHT:
-        # Coinbase现货不支持做空 — SELL只能平仓,不能开空
-        logger.debug("[GCC-SCALP] %s RSI=%.1f overbought but 现货不能做空, 跳过", symbol, rsi)
 
     if signal is None:
         return None
 
-    # 方向门控
-    if gate_direction not in ("BOTH", signal, "HOLD"):
-        if gate_direction != "HOLD":
-            logger.info("[GCC-SCALP] %s RSI=%s but gate=%s → blocked",
-                        symbol, signal, gate_direction)
-            return None
+    # 方向门控: 4H方向=SELL时不做多(避免逆势接飞刀)
+    if gate_direction == "SELL":
+        logger.info("[GCC-SCALP] %s BB+RSI BUY signal but 4H gate=SELL → blocked (不逆势)", symbol)
+        return None
 
     # 计算限价+止盈止损 (现货: 只做多, 限价单maker费率)
-    quantity = round(_SCALP_MAX_POSITION_USD / current_price, 2)  # OP最小单位0.01
+    # BTC精度: 数量精度8位, 价格精度2位
+    quantity = round(_SCALP_MAX_POSITION_USD / current_price, 8)
     # 限价: 比当前价低一点确保maker (BUY挂低于ask)
-    limit_price = round(current_price * 0.9995, 4)  # 低0.05%挂单, OP价格精度4位
+    limit_price = round(current_price * 0.9995, 2)
     if entry_strategy == "BB_RSI":
         tp_price = bb_mid       # BB策略: 回到中轨止盈
         sl_price = current_price - atr

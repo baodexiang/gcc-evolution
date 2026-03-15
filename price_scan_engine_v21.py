@@ -10367,36 +10367,35 @@ class PriceScanEngine:
                 else:
                     logger.debug(f"[v21.7] {symbol} 外挂扫描跳过(TF={_sym_tf}min, 间隔{_scan_interval_tf}s未到)")
 
-                # GCC-0256 S5: OP剥头皮5min调度 (独立于外挂扫描间隔，自带300s节流)
+                # v3.660: BTC BB均值回归 15min调度 (OPUSDC暂停)
                 try:
                     from gcc_trading_module import gcc_scalp_observe as _gcc_scalp
                     from coinbase_data_provider import get_candles as _cb_candles
-                    _SCALP_INTERVAL = 300  # 5min
-                    _scalp_last_key = "_scalp_op_last_ts"
+                    _SCALP_INTERVAL = 900  # 15min
+                    _scalp_last_key = "_scalp_btc_last_ts"
                     _scalp_last = getattr(self, _scalp_last_key, 0)
                     if time.time() - _scalp_last >= _SCALP_INTERVAL:
                         setattr(self, _scalp_last_key, time.time())
-                        _op_bars = _cb_candles("OPUSDC", granularity="FIVE_MINUTE", limit=40)
-                        if _op_bars and len(_op_bars) >= 15:
-                            # Coinbase返回倒序，翻转为时间正序
-                            _op_bars.sort(key=lambda x: x.get("start", "0"))
-                            _scalp_res = _gcc_scalp("OPUSDC", _op_bars)
+                        _btc_bars = _cb_candles("BTCUSDC", granularity="FIFTEEN_MINUTE", limit=40)
+                        if _btc_bars and len(_btc_bars) >= 20:
+                            _btc_bars.sort(key=lambda x: x.get("start", "0"))
+                            _scalp_res = _gcc_scalp("BTCUSDC", _btc_bars)
                             if _scalp_res:
-                                logger.info(f"[GCC-SCALP] OP: {_scalp_res}")
+                                logger.info(f"[GCC-SCALP] BTC: {_scalp_res}")
                             else:
-                                # heartbeat: 每30min打一次alive日志
                                 _hb_key = "_scalp_hb_ts"
                                 _hb_last = getattr(self, _hb_key, 0)
                                 if time.time() - _hb_last >= 1800:
                                     setattr(self, _hb_key, time.time())
-                                    _closes = [float(b.get("close", 0)) for b in _op_bars]
-                                    from gcc_trading_module import _scalp_calc_rsi as _hb_rsi_fn
-                                    _hb_rsi = _hb_rsi_fn(_closes, 7)
-                                    logger.info(f"[GCC-SCALP] OP alive: RSI={_hb_rsi:.1f}, price=${_closes[-1]:.4f}, no signal")
+                                    _closes = [float(b.get("close", 0)) for b in _btc_bars]
+                                    from gcc_trading_module import _scalp_calc_rsi as _hb_rsi_fn, _scalp_calc_bb as _hb_bb_fn
+                                    _hb_rsi = _hb_rsi_fn(_closes, 14)
+                                    _hb_bb_l, _hb_bb_m, _hb_bb_u = _hb_bb_fn(_closes)
+                                    logger.info(f"[GCC-SCALP] BTC alive: RSI={_hb_rsi:.1f} BB=[{_hb_bb_l:.0f}/{_hb_bb_m:.0f}/{_hb_bb_u:.0f}] price=${_closes[-1]:.0f}")
                 except ImportError:
                     pass
                 except Exception as _scalp_err:
-                    logger.warning(f"[GCC-SCALP] OP error: {_scalp_err}")
+                    logger.warning(f"[GCC-SCALP] BTC error: {_scalp_err}")
 
                 # 获取当前价格 (用于P0-Open和P0-Tracking)
                 # GCC-0141: 价格拉取计时

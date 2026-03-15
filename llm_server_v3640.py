@@ -43075,9 +43075,9 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
         # 现货只能先买后卖, SELL必须是平仓(有持仓才能卖)
         try:
             from coinbase_sync_v6 import place_order as _cb_place
-            _scalp_product = {"OPUSDC": "OP-USDC"}.get(symbol, f"{symbol[:symbol.index('USD')]}-USDC" if "USD" in symbol else symbol)
-            _scalp_qty = round(float(_gcc_order.get("quantity", 0)), 2)  # OP最小单位0.01
-            _scalp_max = float(_gcc_order.get("max_usd", 500))
+            _scalp_product = {"OPUSDC": "OP-USDC", "BTCUSDC": "BTC-USDC", "ETHUSDC": "ETH-USDC", "SOLUSDC": "SOL-USDC"}.get(symbol, f"{symbol[:symbol.index('USD')]}-USDC" if "USD" in symbol else symbol)
+            _scalp_qty = round(float(_gcc_order.get("quantity", 0)), 8)  # BTC精度8位
+            _scalp_max = float(_gcc_order.get("max_usd", 1000))
             _scalp_limit = _gcc_order.get("limit_price")
             if _scalp_qty <= 0:
                 _scalp_qty = round(_scalp_max / _gcc_cur_price, 2) if _gcc_cur_price > 0 else 0
@@ -43099,7 +43099,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                     _scalp_res = {"success": False, "error": "现货SELL必须是scalp_exit平仓"}
                 else:
                     # 平仓卖出: 限价高挂确保maker + 快速成交
-                    _sell_limit = round(_gcc_cur_price * 1.0005, 4) if _gcc_cur_price > 0 else None
+                    _sell_limit = round(_gcc_cur_price * 1.0005, 2) if _gcc_cur_price > 0 else None
                     if _sell_limit:
                         _scalp_res = _cb_place(_scalp_product, "SELL",
                                                base_size=_scalp_qty, limit_price=_sell_limit)
