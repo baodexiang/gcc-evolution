@@ -43080,7 +43080,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             _scalp_max = float(_gcc_order.get("max_usd", 1000))
             _scalp_limit = _gcc_order.get("limit_price")
             if _scalp_qty <= 0:
-                _scalp_qty = round(_scalp_max / _gcc_cur_price, 2) if _gcc_cur_price > 0 else 0
+                _scalp_qty = round(_scalp_max / _gcc_cur_price, 8) if _gcc_cur_price > 0 else 0
             if _gcc_act == "BUY":
                 if _scalp_limit:
                     # 限价买入: base_size(币数量) + limit_price → maker费率
@@ -43112,7 +43112,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             _order_type = "LIMIT" if _scalp_limit or _gcc_act == "SELL" else "MARKET"
             log_to_server(
                 f"[GCC-SCALP][EXECUTE] {symbol} {_gcc_act} {_order_type}: "
-                f"qty={_scalp_qty:.2f} price=${_gcc_cur_price:.4f} "
+                f"qty={_scalp_qty:.8f} price=${_gcc_cur_price:.2f} "
                 f"limit={_scalp_limit or 'N/A'} "
                 f"success={send_ok} order_id={_scalp_res.get('order_id','')}"
             )
@@ -43122,7 +43122,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                     send_email_notification(
                         f"[剥头皮] {symbol} {_gcc_act} ${_gcc_cur_price:.4f}",
                         f"来源: GCC-SCALP\n品种: {symbol}\n方向: {_gcc_act}\n"
-                        f"价格: ${_gcc_cur_price:.4f}\n数量: {_scalp_qty:.2f}\n"
+                        f"价格: ${_gcc_cur_price:.2f}\n数量: {_scalp_qty:.8f}\n"
                         f"金额: ${_scalp_qty * _gcc_cur_price:.2f}\n"
                         f"原因: {_scalp_reason}\n"
                         f"订单ID: {_scalp_res.get('order_id', '')}"

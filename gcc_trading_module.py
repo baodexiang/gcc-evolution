@@ -3675,8 +3675,8 @@ def gcc_observe(
 
 # ══════════════════════════════════════════════════════════════
 # GCC-0256 S5: OP剥头皮模块 — RSI(7)均值回归 + 方向门控
-# 独立于 gcc_observe 的轻量5min入口
-# 策略: 现货只做多 RSI<25买入, TP/SL/RSI>70/超时卖出, $500限额
+# v3.660: BTC BB均值回归剥头皮 (15min, Buy-Only)
+# 策略: 价格≤BB下轨+RSI(14)<30 → BUY, 回到BB中轨止盈, 1.5%止损
 # ══════════════════════════════════════════════════════════════
 
 _SCALP_STATE_FILE = _STATE_DIR / "gcc_scalp_state.json"
@@ -3756,9 +3756,9 @@ def _scalp_default_state() -> dict:
         "cooldown": 0,
         "tp_price": 0.0,          # 止盈价
         "sl_price": 0.0,          # 止损价
-        "quantity": 0.0,          # 持仓数量(OP个数)
+        "quantity": 0.0,          # 持仓数量(BTC)
         "entry_confirmed": False,  # GCC-0256 fix: 执行层确认后才允许出场
-        "entry_strategy": None,   # "RSI" 或 "BB_RSI"
+        "entry_strategy": None,   # "BB_RSI"
     }
 
 
@@ -4080,12 +4080,9 @@ def gcc_scalp_observe(
     quantity = round(_SCALP_MAX_POSITION_USD / current_price, 8)
     # 限价: 比当前价低一点确保maker (BUY挂低于ask)
     limit_price = round(current_price * 0.9995, 2)
-    if entry_strategy == "BB_RSI":
-        tp_price = bb_mid       # BB策略: 回到中轨止盈
-        sl_price = current_price - atr
-    else:
-        tp_price = current_price + atr   # RSI策略: ATR止盈
-        sl_price = current_price - atr
+    # v3.660: BB均值回归止盈止损
+    tp_price = bb_mid                              # 回到中轨止盈
+    sl_price = current_price * 0.985               # 固定1.5%止损(ATR在BTC上可能过大)
 
     now_ts = datetime.now(_NY_TZ)
     entry_reason = f"scalp_entry_{entry_strategy}{rsi:.0f}"
