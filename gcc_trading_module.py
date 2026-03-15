@@ -289,31 +289,33 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
     now = time.time()
     candle_open = _get_candle_open_utc(now, symbol=symbol)
 
-    # Vision读取: 优先通过主程序触发新API调用, 回退到缓存
+    # v0.5: Vision读取 — 直接读 vision_analyzer.py 的分析结果(pattern_latest.json)
+    # 不再调 _vision_call_inline() 独立API，避免简陋图表+通用prompt产生相反结论
+    # (实测: inline给BTC/ETH/SOL判SELL, 而pattern_latest正确判MARKUP/UP)
     vision_bias, vision_conf = "HOLD", 0.5
     _fresh_called = False
-    if bars and len(bars) >= 15:
-        try:
-            from llm_server_v3640 import read_vision_result
-            # 排除最后一根(当前未完成K线), Vision看历史
-            hist_bars = bars[:-1] if len(bars) > 1 else bars
-            # force_refresh=True: 新K线必须拿新鲜Vision，绕过冷却
-            vr = read_vision_result(symbol, ohlcv_bars=hist_bars, force_refresh=True)
-            if vr and vr.get("current"):
-                cur = vr["current"]
-                direction = (cur.get("direction") or "SIDE").upper()
-                conf = float(cur.get("confidence") or 0.5)
-                conf = max(0.0, min(1.0, conf))
+    try:
+        import json as _json_v
+        _pattern_file = _STATE_DIR / "vision" / "pattern_latest.json"
+        if _pattern_file.exists():
+            _pat_data = _json_v.loads(_pattern_file.read_text(encoding="utf-8"))
+            _pat = _pat_data.get(symbol)
+            if _pat:
+                _direction = (_pat.get("direction") or "SIDE").upper()
+                _conf = float(_pat.get("confidence") or 0.5)
+                _conf = max(0.0, min(1.0, _conf))
+                _structure = (_pat.get("overall_structure") or "UNKNOWN").upper()
                 bias_map = {"UP": "BUY", "DOWN": "SELL"}
-                vision_bias = bias_map.get(direction, "HOLD")
-                vision_conf = conf
+                vision_bias = bias_map.get(_direction, "HOLD")
+                vision_conf = _conf
                 _fresh_called = True
-                logger.info("[GCC-TM] %s fresh Vision call: %s(%.0f%%)", symbol, vision_bias, conf * 100)
-        except Exception as e:
-            logger.warning("[GCC-TM] %s fresh Vision FAILED at candle open, using stale cache: %s", symbol, e)
+                logger.info("[GCC-TM] %s Vision from pattern_latest: %s(%.0f%%) structure=%s pattern=%s",
+                            symbol, vision_bias, _conf * 100, _structure, _pat.get("pattern", "?"))
+    except Exception as e:
+        logger.warning("[GCC-TM] %s Vision pattern_latest read FAILED: %s", symbol, e)
     if not _fresh_called:
         vision_bias, vision_conf = _read_vision(symbol)
-        logger.warning("[GCC-TM] %s Vision from STALE cache (no fresh call): %s(%.0f%%)", symbol, vision_bias, vision_conf * 100)
+        logger.warning("[GCC-TM] %s Vision fallback to cache: %s(%.0f%%)", symbol, vision_bias, vision_conf * 100)
 
     # KEY-010: BrooksVision 从门控拆出→信号池外挂 (4H开盘扫一次, 推入信号池持续8轮)
     bv_bias, bv_pattern = "HOLD", "NONE"

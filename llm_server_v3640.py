@@ -46472,52 +46472,24 @@ def llm_decide():
     # 优先级: P0 Supreme > P1 Vision(含K线) > P2 Swing SR > P3 Sell Lock > P4 LLM/L2
     # ========================================================================
     
-    # v2.800: 计算L1趋势视觉 (v2.865: 包含K线形态检测)
-    l1_trend_vision = {"l1_bias": "HOLD", "action_bias": "HOLD", "confidence": 0.5, "reasons": [], "candle": {}}
-    
-    if 'ohlcv_window' in locals() and ohlcv_window.size() >= 10:  # v3.320修复: is_ready()要求61根,实际只需10根
+    # v3.690: 废弃get_l1_trend_vision()数学伪Vision — l1_bias总是被l1_unified覆盖，
+    # 且在ZEC等低位品种中产生误导性SELL信号(不考虑pos_ratio)
+    # 保留dict结构供下游兼容，l1_bias/confidence由l1_unified覆盖
+    l1_trend_vision = {"l1_bias": "HOLD", "action_bias": "HOLD", "confidence": 0.5,
+                       "score": 0.0, "reasons": [], "candle": {}, "slope": {}, "stage": {}, "volume": {}}
+
+    if 'ohlcv_window' in locals() and ohlcv_window.size() >= 10:
         bars = ohlcv_window.get_bars()
+        # 记录到decision + state (l1_bias/confidence将被l1_unified覆盖)
+        decision["l1_trend_vision"] = l1_trend_vision
+        state["_last_l1_trend_vision"] = l1_trend_vision
+
+        # ============================================================
+        # v2.850: 计算统一视觉素材
+        # ============================================================
         if bars and len(bars) >= 10:
-            # 获取swing支撑阻力
-            swing_support = 0.0
-            swing_resistance = 0.0
-            if 'swing_sr_result' in locals() and swing_sr_result:
-                swing_support = swing_sr_result.get("swing_support", 0.0)
-                swing_resistance = swing_sr_result.get("swing_resistance", 0.0)
-            
-            # v2.865: Vision整合K线形态，传入完整参数
-            l1_trend_vision = get_l1_trend_vision(
-                ohlcv_bars=bars,
-                pos_ratio=pos_ratio,
-                swing_support=swing_support,
-                swing_resistance=swing_resistance,
-            )
-            
-            # 记录到decision
-            decision["l1_trend_vision"] = l1_trend_vision
-            
-            # 保存到state供监控程序读取
-            state["_last_l1_trend_vision"] = l1_trend_vision
-            
-            # v2.865: 打印Vision信息(含K线形态)
-            l1_bias_orig = l1_trend_vision.get("l1_bias", "HOLD")
-            l1_score = l1_trend_vision.get("score", 0)
-            l1_reasons = l1_trend_vision.get("reasons", [])
-            l1_candle = l1_trend_vision.get("candle", {})
-            slope_info = l1_trend_vision.get("slope", {})
-            
-            candle_signal_str = l1_candle.get("signal", "NONE")
-            candle_pattern = l1_candle.get("pattern", "NONE")
-            
-            print(f"[v2.865] Vision: {l1_bias_orig} (score:{l1_score:.3f})")
-            print(f"         K线: {candle_signal_str}({candle_pattern}) | 斜率: {slope_info.get('slope_trend', 'SIDE')}")
-            print(f"         理由: {', '.join(l1_reasons[:4])}")
-            
-            # ============================================================
-            # v2.850: 计算统一视觉素材
-            # ============================================================
             visual_material = compute_unified_visual_material(bars, state)
-            
+
             if visual_material.get("ready"):
                 # 打印统一视觉素材信息
                 trend_info = visual_material.get("trend", {})
@@ -46525,7 +46497,7 @@ def llm_decide():
                 vol_price = visual_material.get("volume_price", {})
                 sequence = visual_material.get("sequence", {})
                 ai_hist = visual_material.get("ai_history", {})
-                
+
                 print(f"[v2.850] 统一视觉素材:")
                 print(f"         趋势: {trend_info.get('trend_visual', 'N/A')} "
                       f"(强度:{trend_info.get('trend_strength', 0):.0%}, "
@@ -46540,13 +46512,13 @@ def llm_decide():
                 print(f"         序列: HH={sequence.get('higher_highs', 0)}/HL={sequence.get('higher_lows', 0)} "
                       f"LH={sequence.get('lower_highs', 0)}/LL={sequence.get('lower_lows', 0)} "
                       f"→ {sequence.get('sequence_bias', 'NEUTRAL')}")
-                
+
                 # AI历史反馈
                 if ai_hist.get("total_decisions", 0) > 0:
                     print(f"         AI历史: 准确率={ai_hist.get('recent_accuracy', 0.5):.0%}, "
                           f"校准因子={ai_hist.get('confidence_factor', 1.0):.2f}, "
                           f"上次错误={ai_hist.get('last_mistake', '无')}")
-                
+
                 # 保存到state
                 state["_last_visual_material"] = visual_material
             else:

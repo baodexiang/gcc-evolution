@@ -314,9 +314,8 @@ def radar_tick(symbols: List[str] = None):
 
 def _lazy_imports():
     mods = {}
-    from vision_analyzer import generate_pattern_chart, call_chatgpt_vision
-    mods["generate_chart"] = generate_pattern_chart
-    mods["call_vision"] = call_chatgpt_vision
+    # GCC-0194: generate_pattern_chart / call_chatgpt_vision 已移除
+    # radar_scan() 改为读 pattern_latest.json，不再独立调API
 
     from price_scan_engine_v21 import YFinanceDataFetcher
     mods["fetcher"] = YFinanceDataFetcher
@@ -655,63 +654,8 @@ def radar_scan(symbol: str, mods: dict) -> Optional[Dict[str, Any]]:
     return result
 
 
-def _parse_vision_dict(resp) -> Dict[str, Any]:
-    default = {"signal": "NONE", "pattern": "unknown", "confidence": 0,
-               "stoploss": 0.0, "brooks_pattern": "NONE"}
-    if not resp or not isinstance(resp, dict):
-        return default
 
-    try:
-        direction = str(resp.get("direction", "SIDE")).upper()
-        confidence = resp.get("confidence", 0)
-        reason = str(resp.get("reason", ""))[:100]
-        try:
-            stoploss = float(resp.get("stoploss", 0))
-        except (ValueError, TypeError):
-            stoploss = 0.0
-        brooks_pattern = str(resp.get("brooks_pattern", "NONE")).upper()
-    except Exception as e:
-        logger.warning(f"[BrooksVision] _parse_vision_dict字段解析失败: {e}, resp={resp}")
-        return default
-
-    if direction == "UP":
-        signal = "BUY"
-    elif direction == "DOWN":
-        signal = "SELL"
-    else:
-        signal = "NONE"
-
-    # confidence: 支持 0-1 和 0-100 两种格式
-    try:
-        conf = float(confidence)
-    except (ValueError, TypeError):
-        conf = 0.0
-    if conf <= 1.0:
-        conf_pct = int(conf * 100)
-    else:
-        conf_pct = int(conf)
-
-    # 兼容旧形态名 (WEDGE→方向性版本, MTR→方向性版本)
-    # 只在GPT给了明确方向时才映射，SIDE/NONE时保留为NONE(无法判断方向)
-    if brooks_pattern == "WEDGE" and signal in ("BUY", "SELL"):
-        brooks_pattern = "WEDGE_FALLING" if signal == "BUY" else "WEDGE_RISING"
-    elif brooks_pattern == "MTR" and signal in ("BUY", "SELL"):
-        brooks_pattern = "MTR_BUY" if signal == "BUY" else "MTR_SELL"
-    elif brooks_pattern in ("WEDGE", "MTR"):
-        brooks_pattern = "NONE"  # 方向不明时不猜
-
-    # 规范化 brooks_pattern (从 PATTERN_SIGNAL_MAP 取合法值)
-    valid_patterns = set(PATTERN_SIGNAL_MAP.keys())
-    if brooks_pattern not in valid_patterns:
-        brooks_pattern = "NONE"
-
-    return {
-        "signal": signal,
-        "pattern": reason if reason else "unknown",
-        "confidence": max(0, min(100, conf_pct)),
-        "stoploss": stoploss,
-        "brooks_pattern": brooks_pattern,
-    }
+# _parse_vision_dict() 已移除 — GCC-0194后radar_scan()直接读pattern_latest.json，不再解析API响应
 
 
 # ===================================================================
