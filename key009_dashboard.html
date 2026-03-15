@@ -352,7 +352,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <table><thead><tr><th>通道</th><th>错误数</th><th>占比</th><th>Top品种</th><th>最近时间</th></tr></thead>
 <tbody id="err-by-channel"></tbody></table>
 <h2>按品种统计</h2>
-<table><thead><tr><th>品种</th><th>S1</th><th>S2</th><th>S3</th><th>S4</th><th>S5</th><th>P0</th><th>SYS</th><th>合计</th></tr></thead>
+<table><thead><tr><th>品种</th><th>B1</th><th>B2</th><th>B3</th><th>S1</th><th>S2</th><th>S3</th><th>S4</th><th>S5</th><th>P0</th><th>SYS</th><th>合计</th></tr></thead>
 <tbody id="err-by-symbol"></tbody></table>
 <h2>最近错误 (今天)</h2>
 <table><thead><tr><th>时间</th><th>通道</th><th>品种</th><th>来源</th><th>错误消息</th></tr></thead>
@@ -2243,7 +2243,7 @@ function loadGccTm() {
         // 错误分类标签
         // ══════════════════════════════════════════════════════
         const errAll = d.error_classify || [];
-        const _chColors = {S1:'#656d76',S2:'#9a6700',S3:'#0969da',S4:'#bc4c00',S5:'#1a7f37',P0:'#8250df',SYS:'#cf222e',OTHER:'#afb8c1'};
+        const _chColors = {B1:'#0550ae',B2:'#6639ba',B3:'#bf8700',S1:'#656d76',S2:'#9a6700',S3:'#0969da',S4:'#bc4c00',S5:'#1a7f37',P0:'#8250df',SYS:'#cf222e',OTHER:'#afb8c1'};
         // Summary cards
         const errTotal = errAll.length;
         const errByCh = {};
@@ -2252,7 +2252,9 @@ function loadGccTm() {
         $('err-cards').innerHTML = `
             <div class="card"><div class="label">总错误</div><div class="value red">${errTotal}</div></div>
             <div class="card"><div class="label">涉及品种</div><div class="value">${errSyms.size}</div></div>
-            <div class="card"><div class="label">S5(GCC-TM)</div><div class="value" style="color:#1a7f37">${errByCh.S5||0}</div></div>
+            <div class="card"><div class="label">B1(主决策)</div><div class="value" style="color:#0550ae">${errByCh.B1||0}</div></div>
+            <div class="card"><div class="label">B2(TSLA期权)</div><div class="value" style="color:#6639ba">${errByCh.B2||0}</div></div>
+            <div class="card"><div class="label">B3(BTC短线)</div><div class="value" style="color:#bf8700">${errByCh.B3||0}</div></div>
             <div class="card"><div class="label">SYS(系统)</div><div class="value red">${errByCh.SYS||0}</div></div>
             <div class="card"><div class="label">P0(扫描)</div><div class="value" style="color:#8250df">${errByCh.P0||0}</div></div>
         `;
@@ -2275,10 +2277,10 @@ function loadGccTm() {
         }).join('') : '<tr><td colspan="5" style="color:#656d76">今日无错误</td></tr>';
         // By symbol table
         const errBySymCh = {};
-        const channels = ['S1','S2','S3','S4','S5','P0','SYS'];
+        const channels = ['B1','B2','B3','S1','S2','S3','S4','S5','P0','SYS'];
         errAll.forEach(e => {
             const sym = e.symbol || '(无品种)';
-            if (!errBySymCh[sym]) errBySymCh[sym] = {S1:0,S2:0,S3:0,S4:0,S5:0,P0:0,SYS:0,OTHER:0,total:0};
+            if (!errBySymCh[sym]) errBySymCh[sym] = {B1:0,B2:0,B3:0,S1:0,S2:0,S3:0,S4:0,S5:0,P0:0,SYS:0,OTHER:0,total:0};
             errBySymCh[sym][e.channel] = (errBySymCh[sym][e.channel]||0) + 1;
             errBySymCh[sym].total++;
         });

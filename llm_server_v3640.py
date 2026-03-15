@@ -25861,14 +25861,14 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
             from modules.vision_adaptive import apply_key001_gate as _k1_gate
             _k1_allowed, _k1_reason = _k1_gate(symbol, final_action, {})
             log_to_server(
-                f"[KEY-001][GATE] {symbol} {final_action} "
+                f"[B1][KEY-001][GATE] {symbol} {final_action} "
                 f"allowed={_k1_allowed} reason={_k1_reason}"
             )
             if not _k1_allowed:
-                log_to_server(f"[KEY-001][GATE][拦截] {symbol} {final_action}: {_k1_reason}")
+                log_to_server(f"[B1][KEY-001][GATE][拦截] {symbol} {final_action}: {_k1_reason}")
                 return None  # 门控拦截，非API失败
         except Exception as _k1_e:
-            log_to_server(f"[KEY-001][GATE][ERROR] {symbol}: {_k1_e}")
+            log_to_server(f"[B1][KEY-001][GATE][ERROR] {symbol}: {_k1_e}")
 
     # ── KEY-001 Vision Cache Gate (GCC-0062: Phase3 full拦截) ──
     # v3.678: 写入点已在llm_decide()内完成, Gate点从缓存读snapshot做校准
@@ -25920,15 +25920,15 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
             _k2_conf   = float(_k2_l1v.get("confidence", 0.60)) if isinstance(_k2_l1v, dict) else 0.60
             _k2_allowed, _k2_reason = _k2_gate(symbol, _k2_conf, _k2_params)
             log_to_server(
-                f"[KEY-002][GATE] {symbol} {final_action} regime={_k2_regime} "
+                f"[B1][KEY-002][GATE] {symbol} {final_action} regime={_k2_regime} "
                 f"conf={_k2_conf:.3f} threshold={_k2_params.entry_threshold:.3f} "
                 f"allowed={_k2_allowed} reason={_k2_reason}"
             )
             if not _k2_allowed:
-                log_to_server(f"[KEY-002][GATE][拦截] {symbol} {final_action}: {_k2_reason}")
+                log_to_server(f"[B1][KEY-002][GATE][拦截] {symbol} {final_action}: {_k2_reason}")
                 return None  # 门控拦截，非API失败
         except Exception as _k2_e:
-            log_to_server(f"[KEY-002][GATE][ERROR] {symbol}: {_k2_e}")
+            log_to_server(f"[B1][KEY-002][GATE][ERROR] {symbol}: {_k2_e}")
 
     # ── AUD-052 方向翻转冷却门控 (direction_flip_cooldown_bars) ────────────
     _dfc_exempt = signal_type in ("移动止损", "移动止盈") or _3c_gcc_tm_bypass
@@ -40030,14 +40030,14 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
             from modules.vision_adaptive import apply_key001_gate as _ss_k1_gate
             _ss_k1_allowed, _ss_k1_reason = _ss_k1_gate(symbol, final_action, {})
             log_to_server(
-                f"[KEY-001][GATE] {symbol} {final_action} "
+                f"[B1][KEY-001][GATE] {symbol} {final_action} "
                 f"allowed={_ss_k1_allowed} reason={_ss_k1_reason}"
             )
             if not _ss_k1_allowed:
-                log_to_server(f"[KEY-001][GATE][拦截] {symbol} {final_action}: {_ss_k1_reason}")
+                log_to_server(f"[B1][KEY-001][GATE][拦截] {symbol} {final_action}: {_ss_k1_reason}")
                 return None  # 门控拦截，非API失败
         except Exception as _ss_k1_e:
-            log_to_server(f"[KEY-001][GATE][ERROR] {symbol}: {_ss_k1_e}")
+            log_to_server(f"[B1][KEY-001][GATE][ERROR] {symbol}: {_ss_k1_e}")
 
     # ── KEY-001 Vision Cache Gate (GCC-0062: Phase3 full拦截) ──────────────
     KEY001_VCACHE_MODE_SS = "observe"  # GCC-0062: "observe"/"soft"/"full"
@@ -40084,15 +40084,15 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
             _ss_k2_conf   = float(_ss_k2_l1v.get("confidence", 0.60)) if isinstance(_ss_k2_l1v, dict) else 0.60
             _ss_k2_allowed, _ss_k2_reason = _ss_k2_gate(symbol, _ss_k2_conf, _ss_k2_params)
             log_to_server(
-                f"[KEY-002][GATE] {symbol} {final_action} regime={_ss_k2_regime} "
+                f"[B1][KEY-002][GATE] {symbol} {final_action} regime={_ss_k2_regime} "
                 f"conf={_ss_k2_conf:.3f} threshold={_ss_k2_params.entry_threshold:.3f} "
                 f"allowed={_ss_k2_allowed} reason={_ss_k2_reason}"
             )
             if not _ss_k2_allowed:
-                log_to_server(f"[KEY-002][GATE][拦截] {symbol} {final_action}: {_ss_k2_reason}")
+                log_to_server(f"[B1][KEY-002][GATE][拦截] {symbol} {final_action}: {_ss_k2_reason}")
                 return None  # 门控拦截，非API失败
         except Exception as _ss_k2_e:
-            log_to_server(f"[KEY-002][GATE][ERROR] {symbol}: {_ss_k2_e}")
+            log_to_server(f"[B1][KEY-002][GATE][ERROR] {symbol}: {_ss_k2_e}")
 
     # ── AUD-052 方向翻转冷却门控 (direction_flip_cooldown_bars) ────────────
     _ss_dfc_exempt = signal_type in ("移动止损", "移动止盈") or _ss_gcc_tm_bypass
@@ -43057,7 +43057,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
         try:
             send_ok = send_signalstack_order(_gcc_act, symbol, source="gcc_tm")
         except Exception as _ss_e:
-            log_to_server(f"[GCC-TM][ERROR] {symbol} SignalStack: {_ss_e}")
+            log_to_server(f"[B1][GCC-TM][ERROR] {symbol} SignalStack: {_ss_e}")
     elif _gcc_order.get("source") == "gcc_scalp":
         # GCC-0256 S5: OP剥头皮 → Coinbase API限价单 (maker费率0.06%)
         # 现货只能先买后卖, SELL必须是平仓(有持仓才能卖)
@@ -43133,7 +43133,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                 except Exception:
                     pass
         except Exception as _3c_e:
-            log_to_server(f"[GCC-TM][ERROR] {symbol} 3Commas: {_3c_e}")
+            log_to_server(f"[B1][GCC-TM][ERROR] {symbol} 3Commas: {_3c_e}")
     _gcc_confirm(symbol, success=send_ok)
     _is_scalp = _gcc_order.get("source") == "gcc_scalp"
     # GCC-0256 fix: scalp进场执行结果回调 → 同步内部state与Coinbase实际状态
@@ -48071,15 +48071,15 @@ def llm_decide():
                 print(f"[v3.498 WARNING]   位置={_pos_ratio_check:.2%}, 仓位={_final_pos_units}/{_final_max_units}")
                 print(f"[v3.498 WARNING]   建议: 考虑卖出高成本仓位后低位补仓")
                 log_to_server(f"[v3.498] ⚠️ 低位加仓机会但满仓: {symbol} pos={_pos_ratio_check:.2%}")
-            print(f"[v3.411] ⛔ 满仓最终拦截 [{symbol}]: BUY被阻止 (仓位={_final_pos_units}/{_final_max_units})")
-            log_to_server(f"[v3.411] ⛔ 满仓最终拦截 [{symbol}]: final_action=BUY 但仓位已满({_final_pos_units}/{_final_max_units})，强制改为不执行")
+            print(f"[B1][v3.411] ⛔ 满仓最终拦截 [{symbol}]: BUY被阻止 (仓位={_final_pos_units}/{_final_max_units})")
+            log_to_server(f"[B1][v3.411] ⛔ 满仓最终拦截 [{symbol}]: final_action=BUY 但仓位已满({_final_pos_units}/{_final_max_units})，强制改为不执行")
             # 更新final_action以确保后续日志正确
             final_action = "HOLD"
         elif final_action == "SELL" and _final_pos_units <= 0:
             send_ok = False
             executed_qty = 0.0
-            print(f"[v3.411] ⛔ 空仓最终拦截 [{symbol}]: SELL被阻止 (仓位={_final_pos_units}/{_final_max_units})")
-            log_to_server(f"[v3.411] ⛔ 空仓最终拦截 [{symbol}]: final_action=SELL 但仓位为空({_final_pos_units})，强制改为不执行")
+            print(f"[B1][v3.411] ⛔ 空仓最终拦截 [{symbol}]: SELL被阻止 (仓位={_final_pos_units}/{_final_max_units})")
+            log_to_server(f"[B1][v3.411] ⛔ 空仓最终拦截 [{symbol}]: final_action=SELL 但仓位为空({_final_pos_units})，强制改为不执行")
             final_action = "HOLD"
         # ===== v3.411: 仓位检查结束，继续正常发单流程 =====
         # ===== v3.651: 外挂信号绕过L1参考模式 =====
@@ -50632,12 +50632,12 @@ L2门卫交易触发
                 # 原: _gcc_push(symbol, "L2_Gate", trade_action, _gate_conf_shadow)
 
                 log_to_server(
-                    f"[GCC-TM][PUSH] {symbol} "
+                    f"[B1][GCC-TM][PUSH] {symbol} "
                     f"macd={macd_action or '-'} gate={trade_action or '-'} "
                     f"allow={allow_trade} crypto={is_crypto_symbol(symbol)}"
                 )
             except Exception as _gcc_shadow_err:
-                log_to_server(f"[GCC-TM][PUSH] {symbol} 推送失败: {_gcc_shadow_err}")
+                log_to_server(f"[B1][GCC-TM][PUSH] {symbol} 推送失败: {_gcc_shadow_err}")
 
         # v20.3: 提取MACD背离强度用于返回值
         _macd_strength = 0.0
@@ -51320,6 +51320,11 @@ def key009_gcctm():
         try:
             import re as _ec_re
             _EC_CHANNEL_RULES = [
+                # B1/B2/B3 通道标签 (优先匹配)
+                ("B1", [r"\[B1\]"]),
+                ("B2", [r"\[B2\]"]),
+                ("B3", [r"\[B3\]"]),
+                # 旧标签兼容
                 ("S5", [r"\[GCC-TM\]", r"\[GCC-TRADE\]", r"gcc_trading", r"\[PUCT\]"]),
                 ("S3", [r"\[S3.*MACD\]", r"\[MACD.L2\]", r"\[L2_MACD\]", r"macd.*divergence"]),
                 ("S4", [r"\[S4.*Gate\]", r"\[L2.Gate\]", r"\[L2_Gate\]", r"\[L2门卫\]"]),
