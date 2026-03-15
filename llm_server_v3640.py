@@ -12953,7 +12953,7 @@ def compute_ai_signals_v2900(llm_result: dict, reason_bullets: list = None) -> d
             found_reaction = True
             log_to_server(f"[v3.340] AI信号解析: x4_regime={result['x4_regime']}, current_regime={result['current_regime']}")
         else:
-            log_to_server(f"[v3.340] AI信号解析失败: reason不含REAL_FIRST_REACTION, llm_result.keys={list(llm_result.keys()) if isinstance(llm_result, dict) else 'not dict'}")
+            pass  # fallback: 使用llm_result["action"]直接提取，无需告警
 
     # 从LLM结果获取置信度
     result["confidence"] = float(llm_result.get("confidence", 0.5))
@@ -25830,15 +25830,13 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
         log_to_server(f"[3Commas] final_action={final_action} 非 BUY/SELL，跳过。")
         return False
 
-    # GCC-0254: GCC-TM 独占模式 — 白名单品种(加密+5美股)主路径信号转为观察记录
-    if _HAS_GCC_TM and symbol in _GCC_TM_EXECUTE_SYMBOLS and source != "gcc_tm":
+    # v3.660: GCC-TM全量独占 — 所有加密货币只允许gcc_tm/gcc_scalp下单
+    if source not in ("gcc_tm", "gcc_scalp"):
         log_to_server(
-            f"[GCC_TM_OBSERVE] {symbol} {final_action} price={last_close:.2f} "
-            f"source={source} type={signal_type} → GCC-TM接管，主路径观察"
+            f"[GCC_TM_ONLY] {symbol} {final_action} price={last_close:.2f} "
+            f"source={source} type={signal_type} → 非GCC-TM来源，仅观察"
         )
         return None  # 门控拦截，不实际下单
-
-    # GCC-0194: 所有信号(含移动止损/止盈)均在扫描引擎FilterChain Vision门控统一过滤，主程序不再重复
 
     # GCC-TM 裁决信号: 已经过Vision门控+8轮决策, 跳过KEY-001/KEY-002二次审查
     _3c_gcc_tm_bypass = (source == "gcc_tm")
@@ -40009,15 +40007,13 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
             )
             return None
 
-    # GCC-0254: GCC-TM 独占模式 — 白名单美股主路径信号转为观察记录
-    if _HAS_GCC_TM and symbol in _GCC_TM_EXECUTE_SYMBOLS and source != "gcc_tm":
+    # v3.660: GCC-TM全量独占 — 所有美股只允许gcc_tm下单(TSLA期权通道已在上方处理)
+    if source not in ("gcc_tm",):
         log_to_server(
-            f"[GCC_TM_OBSERVE] {symbol} {final_action} "
-            f"source={source} type={signal_type} → GCC-TM接管，主路径观察"
+            f"[GCC_TM_ONLY] {symbol} {final_action} "
+            f"source={source} type={signal_type} → 非GCC-TM来源，仅观察"
         )
         return None  # 门控拦截，不实际下单
-
-    # GCC-0194: 所有信号(含移动止损/止盈)均在扫描引擎FilterChain Vision门控统一过滤，主程序不再重复
 
     # GCC-TM 裁决信号: 已经过Vision门控+8轮决策, 跳过KEY-001/KEY-002/KEY-003二次审查
     _ss_gcc_tm_bypass = (source == "gcc_tm")

@@ -7694,8 +7694,15 @@ class PriceScanEngine:
                         _ts_consensus = calc_consensus_score(symbol, "SELL", self._get_trend_for_plugin(symbol))
                         log_consensus_score(symbol, "SELL", "移动止损", _ts_consensus)
 
-                        # 通知服务器
+                        # v3.660: 移动止损信号归入GCC-TM信号池(不再直接下单)
                         main_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
+                        try:
+                            from gcc_trading_module import gcc_push_signal as _gcc_push
+                            _gcc_push(main_symbol, "TrailingStop", "SELL", confidence=0.8)
+                            logger.info(f"[v3.660] {main_symbol} 移动止损SELL → GCC-TM信号池")
+                        except Exception as _gp_err:
+                            logger.warning(f"[v3.660] {main_symbol} gcc_push_signal失败: {_gp_err}")
+                        # 仍通知服务器记录(会被GCC_TM_ONLY门控拦截,仅观察)
                         server_response = self._notify_main_server(main_symbol, signal_data)
                         signal_data["server_executed"] = server_response.get("executed", False)
                         signal_data["server_reason"] = server_response.get("reason", "")
@@ -7888,8 +7895,15 @@ class PriceScanEngine:
                         _tp_consensus = calc_consensus_score(symbol, "BUY", self._get_trend_for_plugin(symbol))
                         log_consensus_score(symbol, "BUY", "移动止盈", _tp_consensus)
 
-                        # 通知服务器
+                        # v3.660: 移动止盈信号归入GCC-TM信号池(不再直接下单)
                         main_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
+                        try:
+                            from gcc_trading_module import gcc_push_signal as _gcc_push
+                            _gcc_push(main_symbol, "TrailingProfit", "BUY", confidence=0.7)
+                            logger.info(f"[v3.660] {main_symbol} 移动止盈BUY → GCC-TM信号池")
+                        except Exception as _gp_err:
+                            logger.warning(f"[v3.660] {main_symbol} gcc_push_signal失败: {_gp_err}")
+                        # 仍通知服务器记录(会被GCC_TM_ONLY门控拦截,仅观察)
                         server_response = self._notify_main_server(main_symbol, signal_data)
                         signal_data["server_executed"] = server_response.get("executed", False)
                         signal_data["server_reason"] = server_response.get("reason", "")
