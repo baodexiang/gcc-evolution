@@ -10126,7 +10126,6 @@ class PriceScanEngine:
         GCC-0021: 15min外挂扫描, 信号推入GCC-TM信号池。
         每30分钟调用一次, 15min K线每次有2根新数据。
         活跃外挂: Hoffman_15m + EMA_Cross_15m (+ BrooksVision_4H persistent)
-        ADX(14)门控: <20震荡市抑制所有信号
         """
         try:
             from gcc_trading_module import gcc_push_signal as _gcc_push_15m
@@ -10135,10 +10134,10 @@ class PriceScanEngine:
 
         main_symbol = REVERSE_SYMBOL_MAP.get(symbol, symbol)
 
-        # ── 获取15min K线 (调用间隔30min, K线粒度15min) ──
-        bars_30m = YFinanceDataFetcher.get_15m_ohlcv(symbol, 60)  # 60根=15小时
-        if not bars_30m or len(bars_30m) < 30:
-            logger.debug(f"[S11] {symbol} 15m K线不足({len(bars_30m) if bars_30m else 0}根), 跳过")
+        # ── 获取15min K线 ──
+        bars_15m = YFinanceDataFetcher.get_15m_ohlcv(symbol, 60)  # 60根=15小时
+        if not bars_15m or len(bars_15m) < 30:
+            logger.debug(f"[S11] {symbol} 15m K线不足({len(bars_15m) if bars_15m else 0}根), 跳过")
             return
 
         # 趋势信息(大周期, 用于过滤)
@@ -10163,10 +10162,10 @@ class PriceScanEngine:
                 plugin = get_rob_hoffman_plugin()
                 result = plugin.process_for_scan(
                     symbol=symbol,
-                    ohlcv_bars=bars_30m,
+                    ohlcv_bars=bars_15m,
                     current_trend=current_trend,
                     pos_in_channel=pos_in_channel,
-                    position_units=0,  # 30m信号不做仓位判断
+                    position_units=0,  # 信号不做仓位判断
                 )
                 if plugin.should_activate_for_scan(result):
                     action = plugin.get_action_for_scan(result)
@@ -10189,13 +10188,13 @@ class PriceScanEngine:
         #     ... (GCC-0021 S1)
 
         # ═══════════════════════════════════════════════════════════
-        # GCC-0259: 技术指标信号 (从30min K线直接计算, 零API成本)
+        # GCC-0259: 技术指标信号 (从15min K线直接计算, 零API成本)
         # ═══════════════════════════════════════════════════════════
         try:
             import numpy as np
-            closes = np.array([float(b["close"]) for b in bars_30m])
-            highs = np.array([float(b["high"]) for b in bars_30m])
-            lows = np.array([float(b["low"]) for b in bars_30m])
+            closes = np.array([float(b["close"]) for b in bars_15m])
+            highs = np.array([float(b["high"]) for b in bars_15m])
+            lows = np.array([float(b["low"]) for b in bars_15m])
             n = len(closes)
 
             if n >= 21:
