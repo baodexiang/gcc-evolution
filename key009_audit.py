@@ -202,6 +202,17 @@ RE_L1_DECISION = re.compile(r"L1综合:\s+(\w+)")
 RE_VA_FALLBACK = re.compile(r"\[KEY-003\]\[LIVE\]\[FALLBACK\]\s+ticker=(\S+)\s+reason=(.+?)(?:\s*->|$)")
 RE_VA_BATCH = re.compile(r"\[KEY-003\]\[BATCH\].*?symbols=(\d+)\s+failed=(\d+)\s+status=(\w+)")
 
+# ── GCC-0263: B1全链路7维审计 ──
+RE_B1_S4_PRUNE = re.compile(r"\[GCC-TM\]\[S4-PRUNE\]\s+(\S+)\s+L1存活=(\[.*?\])\s+剪枝=(\[.*?\])")
+RE_B1_S4_BEV = re.compile(r"\[GCC-TM\]\[S4-BEV\]\s+active=(\d+)/(\d+)\s+consensus=(\d+)\s+verdict=(\w+)")
+RE_B1_S5_EXEC = re.compile(r"\[B1\]\[GCC-TM\]\[EXEC\]\s+(\S+)\s+(\w+)\s+(\S+)\s+(OK|FAIL)")
+RE_B1_S5_PEEK = re.compile(r"\[GCC-TM\]\[PEEK\]\s+(\S+)\s+(\w+)")
+RE_B1_S5_CONSUME = re.compile(r"\[GCC-TM\]\[S5-CONSUME\]\s+(\S+)\s+(已消费|解析失败)")
+# B2 TSLA期权: [B2][TSLA-OPT] source ACTION → success=True/False
+RE_B2_TSLA_OPT = re.compile(r"\[B2\]\[TSLA-OPT\]\s+(\S+)\s+(\w+)\s+→\s+success=(True|False)")
+# 非B1通道拦截: [BLOCKED][非B1] SYMBOL ACTION source=xxx
+RE_NON_B1_BLOCKED = re.compile(r"\[BLOCKED\]\[非B1\]\s+(\S+)\s+(\w+)\s+.*source=(\S+)")
+
 
 def parse_timestamp(line: str):
     """从日志行提取时间戳。"""
@@ -295,6 +306,22 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
                       "by_symbol": defaultdict(lambda: {"pass": 0, "block": 0, "no_data": 0}),
                       "by_direction": defaultdict(lambda: {"pass": 0, "block": 0, "no_data": 0})}
     dc_stats = {"total": 0, "pass": 0, "block": 0, "no_data": 0}
+
+    # ── GCC-0263: B1全链路7维审计计数器 ──
+    b1_audit = {
+        "S1_vision": {"count": 0, "by_symbol": defaultdict(int)},
+        "S2_signal_gen": {"count": 0},  # 复用KEY-011 tasks计数
+        "S3_filter": {"total": 0},       # 复用vision_filter
+        "S4_prune": {"total": 0, "pruned": 0, "survived": 0, "by_symbol": defaultdict(int), "recent": []},
+        "S4_bev": {"total": 0, "execute": 0, "skip": 0, "by_verdict": defaultdict(int), "recent": []},
+        "S5_exec": {"total": 0, "ok": 0, "fail": 0, "by_symbol": defaultdict(lambda: {"ok": 0, "fail": 0}), "recent": []},
+        "S5_peek": {"total": 0, "by_symbol": defaultdict(int)},
+        "S5_consume": {"consumed": 0, "parse_fail": 0},
+        "S6_accuracy": {},  # 从gcc_trading_accuracy.json读取
+        "S7_dashboard": {"status": "OK"},  # dashboard存在性检查
+        "B2_tsla_opt": {"total": 0, "ok": 0, "fail": 0, "by_source": defaultdict(int), "recent": []},
+        "non_b1_blocked": {"total": 0, "by_source": defaultdict(int), "by_symbol": defaultdict(int)},
+    }
 
     # ── 原始ERROR/WARNING日志聚合 ──
     raw_error_patterns = defaultdict(lambda: {"count": 0, "symbols": set(), "first": "", "last": "", "sample": ""})
@@ -572,6 +599,86 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
                 # 按blocked_by分类 (volume/vision/structure等)
                 _fc_reason_key = _fc_by if _fc_by else (_fc_reason_text[:20] if _fc_reason_text else "其他")
                 vision_filter["by_reason"][_fc_reason_key] += 1
+
+            # ── GCC-0263: B1全链路7维审计匹配 ──
+            m = RE_B1_S4_PRUNE.search(line)
+            if m:
+                _b1_sym = m.group(1)
+                _b1_survived = m.group(2)
+                _b1_pruned = m.group(3)
+                b1_audit["S4_prune"]["total"] += 1
+                b1_audit["S4_prune"]["by_symbol"][_b1_sym] += 1
+                # 粗略计数: 中括号内逗号分隔
+                _n_surv = _b1_survived.count("'") // 2
+                _n_prun = _b1_pruned.count("'") // 2
+                b1_audit["S4_prune"]["survived"] += _n_surv
+                b1_audit["S4_prune"]["pruned"] += _n_prun
+                if len(b1_audit["S4_prune"]["recent"]) < 20:
+                    b1_audit["S4_prune"]["recent"].append({"sym": _b1_sym, "survived": _b1_survived, "pruned": _b1_pruned, "ts": ts.isoformat() if ts else ""})
+
+            m = RE_B1_S4_BEV.search(line)
+            if m:
+                _bev_verdict = m.group(4)
+                b1_audit["S4_bev"]["total"] += 1
+                b1_audit["S4_bev"]["by_verdict"][_bev_verdict] += 1
+                if _bev_verdict == "EXECUTE":
+                    b1_audit["S4_bev"]["execute"] += 1
+                else:
+                    b1_audit["S4_bev"]["skip"] += 1
+                if len(b1_audit["S4_bev"]["recent"]) < 20:
+                    b1_audit["S4_bev"]["recent"].append({"active": m.group(1), "total": m.group(2), "consensus": m.group(3), "verdict": _bev_verdict, "ts": ts.isoformat() if ts else ""})
+
+            m = RE_B1_S5_EXEC.search(line)
+            if m:
+                _exec_sym, _exec_act, _exec_broker, _exec_result = m.group(1), m.group(2), m.group(3), m.group(4)
+                b1_audit["S5_exec"]["total"] += 1
+                if _exec_result == "OK":
+                    b1_audit["S5_exec"]["ok"] += 1
+                    b1_audit["S5_exec"]["by_symbol"][_exec_sym]["ok"] += 1
+                else:
+                    b1_audit["S5_exec"]["fail"] += 1
+                    b1_audit["S5_exec"]["by_symbol"][_exec_sym]["fail"] += 1
+                if len(b1_audit["S5_exec"]["recent"]) < 20:
+                    b1_audit["S5_exec"]["recent"].append({"sym": _exec_sym, "action": _exec_act, "broker": _exec_broker, "result": _exec_result, "ts": ts.isoformat() if ts else ""})
+
+            m = RE_B1_S5_PEEK.search(line)
+            if m:
+                b1_audit["S5_peek"]["total"] += 1
+                b1_audit["S5_peek"]["by_symbol"][m.group(1)] += 1
+
+            m = RE_B1_S5_CONSUME.search(line)
+            if m:
+                if "已消费" in m.group(2):
+                    b1_audit["S5_consume"]["consumed"] += 1
+                else:
+                    b1_audit["S5_consume"]["parse_fail"] += 1
+
+            # B2: TSLA期权执行
+            m = RE_B2_TSLA_OPT.search(line)
+            if m:
+                _b2_source, _b2_act, _b2_ok = m.group(1), m.group(2), m.group(3) == "True"
+                b1_audit["B2_tsla_opt"]["total"] += 1
+                b1_audit["B2_tsla_opt"]["by_source"][_b2_source] += 1
+                if _b2_ok:
+                    b1_audit["B2_tsla_opt"]["ok"] += 1
+                else:
+                    b1_audit["B2_tsla_opt"]["fail"] += 1
+                if len(b1_audit["B2_tsla_opt"]["recent"]) < 10:
+                    b1_audit["B2_tsla_opt"]["recent"].append({"source": _b2_source, "action": _b2_act, "ok": _b2_ok, "ts": ts.isoformat() if ts else ""})
+
+            # 非B1通道拦截计数(验证通道独占性)
+            m = RE_NON_B1_BLOCKED.search(line)
+            if m:
+                b1_audit["non_b1_blocked"]["total"] += 1
+                b1_audit["non_b1_blocked"]["by_source"][m.group(3)] += 1
+                b1_audit["non_b1_blocked"]["by_symbol"][m.group(1)] += 1
+
+            # S1 Vision: 复用已有RE_P0_VISION匹配
+            if "[VisionPattern]" in line and "形态触发" in line:
+                m = RE_P0_VISION.search(line)
+                if m:
+                    b1_audit["S1_vision"]["count"] += 1
+                    b1_audit["S1_vision"]["by_symbol"][m.group(1)] += 1
 
             # ── deepseek_arbiter.log (JSON行) ──
             if "arbiter_decision" in line and line.strip().startswith("{"):
@@ -1127,6 +1234,33 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
         "state": _bl_state,
     }
 
+    # GCC-0263: 补充S2/S3/S6/S7到b1_audit
+    b1_audit["S2_signal_gen"]["count"] = tasks.get("KEY-011", {}).get("count", 0)
+    b1_audit["S3_filter"]["total"] = vision_filter["total"]
+    # S6: 读gcc_trading_accuracy.json
+    try:
+        _acc_path = Path(__file__).parent / "state" / "gcc_trading_accuracy.json"
+        if _acc_path.exists():
+            b1_audit["S6_accuracy"] = json.loads(_acc_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    # S7: dashboard存在性
+    _dash_path = Path(__file__).parent / "state" / "key009_dashboard_live.html"
+    b1_audit["S7_dashboard"]["status"] = "OK" if _dash_path.exists() else "MISSING"
+    # 序列化defaultdict
+    _b1_serial = {}
+    for k, v in b1_audit.items():
+        if isinstance(v, dict):
+            _sv = {}
+            for kk, vv in v.items():
+                if isinstance(vv, defaultdict):
+                    _sv[kk] = {str(dk): (dict(dv) if isinstance(dv, dict) else dv) for dk, dv in vv.items()}
+                else:
+                    _sv[kk] = vv
+            _b1_serial[k] = _sv
+        else:
+            _b1_serial[k] = v
+
     return _build_result(now_str, hours, tasks, summary_metrics,
                          dict(vf_by_plugin), macd_stats, dict(knn_suppress),
                          knn_suppress_total, plugin_exec, dict(governance_actions),
@@ -1152,7 +1286,8 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
                          raw_error_total=sum(
                              ep["count"] for ek, ep in raw_error_patterns.items()
                              if not any(np_ in ek for np_ in _NOISE_PATTERNS)),
-                         error_dimensions={k: v[-50:] for k, v in error_dimensions.items()})
+                         error_dimensions={k: v[-50:] for k, v in error_dimensions.items()},
+                         b1_audit=_b1_serial)
 
 
 def _load_system_config() -> dict:
@@ -3035,7 +3170,8 @@ def _build_result(now_str, hours, tasks, summary_metrics,
                   system_evo=None,
                   l1_reference_mode=False,
                   raw_error_total=0,
-                  error_dimensions=None):
+                  error_dimensions=None,
+                  b1_audit=None):
     """构建输出数据结构。"""
     # 序列化defaultdict → dict
     _macd = dict(macd_stats)
@@ -3197,6 +3333,7 @@ def _build_result(now_str, hours, tasks, summary_metrics,
         "baseline": baseline_data or {"stats": {"total": 0, "pass": 0, "block": 0, "no_data": 0, "by_symbol": {}, "by_direction": {}}, "state": {}},
         "system_evo": system_evo or {"score": 0, "baselines": {}, "collab_issues": [], "collab_count": 0, "memory_history": [], "trend": "STABLE"},
         "issues": issues,
+        "b1_audit": b1_audit or {},
     }
 
 

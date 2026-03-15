@@ -180,6 +180,7 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div class="tab" data-tab="vgate">Vision门控</div>
 <div class="tab" data-tab="sigpool">信号池</div>
 <div class="tab" data-tab="tasks">GCC任务</div>
+<div class="tab" data-tab="b1audit">B1审计</div>
 <div class="tab" data-tab="evolution">进化</div>
 </div>
 
@@ -197,6 +198,25 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <thead><tr><th>Task</th><th>Name</th><th>Events</th><th>Errors</th><th>Expected</th><th>Status</th></tr></thead>
 <tbody id="task-body"></tbody>
 </table>
+</div>
+
+<!-- Tab: B1审计 (GCC-0263) -->
+<div class="tab-content" id="tab-b1audit">
+<h2>B1全链路7维审计</h2>
+<div id="b1-audit-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:20px;"></div>
+<h2>通道独占性验证</h2>
+<div id="b1-channel-verify" style="margin-bottom:20px;"></div>
+<h2>S4 剪枝记录 (最近20条)</h2>
+<table><thead><tr><th>时间</th><th>品种</th><th>存活</th><th>剪枝</th></tr></thead>
+<tbody id="b1-prune-body"></tbody></table>
+<h2>S4 BEV裁决 (最近20条)</h2>
+<table><thead><tr><th>时间</th><th>活跃视角</th><th>共识</th><th>裁决</th></tr></thead>
+<tbody id="b1-bev-body"></tbody></table>
+<h2>S5 执行记录 (最近20条)</h2>
+<table><thead><tr><th>时间</th><th>品种</th><th>方向</th><th>券商</th><th>结果</th></tr></thead>
+<tbody id="b1-exec-body"></tbody></table>
+<h2>S6 准确率指标</h2>
+<div id="b1-accuracy-summary"></div>
 </div>
 
 <!-- Tab: 问题&风险 -->
@@ -1900,6 +1920,88 @@ function loadGccTm() {
         renderDimTab('D3_filter','dim3-cards', 'dim3-list');
         renderDimTab('D4_exec', 'dim4-cards', 'dim4-list');
         renderDimTab('D5_pnl',  'dim5-cards', 'dim5-list');
+
+        // ══════════════════════════════════════════════════════
+        // GCC-0263: B1全链路7维审计 Tab
+        // ══════════════════════════════════════════════════════
+        {
+            const ba = DATA.b1_audit || {};
+            const dims7 = [
+                {key:'S1', label:'S1 视觉分析', val: (ba.S1_vision||{}).count||0, desc:'VisionPattern触发'},
+                {key:'S2', label:'S2 信号生成', val: (ba.S2_signal_gen||{}).count||0, desc:'GCC-TM决策次数'},
+                {key:'S3', label:'S3 过滤链', val: (ba.S3_filter||{}).total||0, desc:'FilterChain拦截'},
+                {key:'S4p', label:'S4 剪枝', val: (ba.S4_prune||{}).total||0, desc:`存活${(ba.S4_prune||{}).survived||0} 剪枝${(ba.S4_prune||{}).pruned||0}`},
+                {key:'S4b', label:'S4 BEV', val: (ba.S4_bev||{}).total||0, desc:`EXEC=${(ba.S4_bev||{}).execute||0} SKIP=${(ba.S4_bev||{}).skip||0}`},
+                {key:'S5', label:'S5 执行', val: (ba.S5_exec||{}).total||0, desc:`OK=${(ba.S5_exec||{}).ok||0} FAIL=${(ba.S5_exec||{}).fail||0}`},
+                {key:'S6', label:'S6 准确率', val: (ba.S6_accuracy||{}).total_trades||0, desc:'总交易数'},
+                {key:'S7', label:'S7 Dashboard', val: (ba.S7_dashboard||{}).status||'N/A', desc:'面板状态'},
+            ];
+            const statusColor = (d) => {
+                if (d.key === 'S7') return d.val === 'OK' ? '#1a7f37' : '#cf222e';
+                if (d.key === 'S5') return (ba.S5_exec||{}).fail > 0 ? '#cf222e' : '#1a7f37';
+                return d.val > 0 ? '#1a7f37' : '#9a6700';
+            };
+            const statusLabel = (d) => {
+                if (d.key === 'S7') return d.val === 'OK' ? 'OK' : 'FAIL';
+                if (d.key === 'S5') return (ba.S5_exec||{}).fail > 0 ? 'WARNING' : 'OK';
+                return d.val > 0 ? 'OK' : 'SILENT';
+            };
+            $('b1-audit-cards').innerHTML = dims7.map(d => {
+                const sc = statusColor(d);
+                const sl = statusLabel(d);
+                return `<div class="card" style="border-left:4px solid ${sc}">
+                    <div class="label">${d.label} <span style="color:${sc};font-weight:700;font-size:0.75em">[${sl}]</span></div>
+                    <div class="value" style="color:${sc}">${d.val}</div>
+                    <div style="font-size:0.7em;color:#656d76">${d.desc}</div>
+                </div>`;
+            }).join('');
+            // 通道独占性验证
+            const b2 = ba.B2_tsla_opt || {};
+            const nb = ba.non_b1_blocked || {};
+            const nbSources = Object.entries(nb.by_source||{}).sort((a,b)=>b[1]-a[1]);
+            $('b1-channel-verify').innerHTML = `
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
+                    <div class="card" style="border-left:4px solid #0550ae">
+                        <div class="label">B2 TSLA期权</div>
+                        <div class="value">${b2.total||0}</div>
+                        <div style="font-size:0.7em;color:#656d76">OK=${b2.ok||0} FAIL=${b2.fail||0}</div>
+                    </div>
+                    <div class="card" style="border-left:4px solid ${nb.total>0?'#1a7f37':'#9a6700'}">
+                        <div class="label">非B1拦截 <span style="color:#1a7f37;font-weight:700;font-size:0.75em">[${nb.total>0?'ACTIVE':'SILENT'}]</span></div>
+                        <div class="value" style="color:#1a7f37">${nb.total||0}</div>
+                        <div style="font-size:0.7em;color:#656d76">通道独占门控正常拦截非B1来源</div>
+                    </div>
+                </div>
+                ${nbSources.length ? '<p style="margin-top:8px;font-size:0.82em"><strong>被拦截来源:</strong> ' + nbSources.map(([s,c])=>`${s}(${c})`).join(', ') + '</p>' : ''}
+            `;
+            // S4 Prune table
+            const pruneRecent = (ba.S4_prune||{}).recent || [];
+            $('b1-prune-body').innerHTML = pruneRecent.length ? pruneRecent.map(r =>
+                `<tr><td style="font-size:0.82em;color:#656d76">${r.ts||''}</td><td style="font-weight:600">${r.sym}</td><td style="color:#1a7f37">${r.survived}</td><td style="color:#cf222e">${r.pruned}</td></tr>`
+            ).join('') : '<tr><td colspan="4" style="color:#656d76">无剪枝记录</td></tr>';
+            // S4 BEV table
+            const bevRecent = (ba.S4_bev||{}).recent || [];
+            $('b1-bev-body').innerHTML = bevRecent.length ? bevRecent.map(r => {
+                const vc = r.verdict === 'EXECUTE' ? '#1a7f37' : '#cf222e';
+                return `<tr><td style="font-size:0.82em;color:#656d76">${r.ts||''}</td><td>${r.active}/${r.total}</td><td>${r.consensus}</td><td style="color:${vc};font-weight:600">${r.verdict}</td></tr>`;
+            }).join('') : '<tr><td colspan="4" style="color:#656d76">无BEV记录</td></tr>';
+            // S5 Exec table
+            const execRecent = (ba.S5_exec||{}).recent || [];
+            $('b1-exec-body').innerHTML = execRecent.length ? execRecent.map(r => {
+                const rc = r.result === 'OK' ? '#1a7f37' : '#cf222e';
+                return `<tr><td style="font-size:0.82em;color:#656d76">${r.ts||''}</td><td style="font-weight:600">${r.sym}</td><td>${r.action}</td><td>${r.broker}</td><td style="color:${rc};font-weight:700">${r.result}</td></tr>`;
+            }).join('') : '<tr><td colspan="5" style="color:#656d76">无执行记录</td></tr>';
+            // S6 Accuracy summary
+            const acc = ba.S6_accuracy || {};
+            const accSyms = acc.by_symbol || {};
+            const accRows = Object.entries(accSyms).sort((a,b) => b[1].trades - a[1].trades);
+            $('b1-accuracy-summary').innerHTML = acc.total_trades ?
+                `<p>总交易: <strong>${acc.total_trades}</strong> | 最近: ${acc.last_trade_ts||'-'}</p>
+                 <table><thead><tr><th>品种</th><th>交易数</th><th>BUY</th><th>SELL</th></tr></thead><tbody>` +
+                accRows.map(([s,v]) => `<tr><td style="font-weight:600">${s}</td><td>${v.trades}</td><td style="color:#1a7f37">${v.buys||0}</td><td style="color:#cf222e">${v.sells||0}</td></tr>`).join('') +
+                `</tbody></table>` :
+                '<p style="color:#656d76">暂无准确率数据</p>';
+        }
 
         // ══════════════════════════════════════════════════════
         // 错误分类标签

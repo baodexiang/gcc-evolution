@@ -6758,6 +6758,40 @@ class ReportGenerator:
                                     if i.get("task") == "LOG-ERROR" and i.get("fixed"))
                     if _k9_raw > 0:
                         lines.append(f"\n**KEY-009交叉**: 原始错误{_k9_raw}条, 已标记修复{_k9_fixed}条")
+                    # GCC-0263: B1七维审计摘要
+                    _b1 = _k9_data.get("24h", {}).get("b1_audit", {})
+                    if _b1:
+                        lines.extend([
+                            "",
+                            "### B1七维审计摘要 (GCC-0263)",
+                            "",
+                            "| 维度 | 指标 | 状态 |",
+                            "|------|------|------|",
+                        ])
+                        _s1 = _b1.get("S1_vision", {})
+                        _s2 = _b1.get("S2_signal_gen", {})
+                        _s3 = _b1.get("S3_filter", {})
+                        _s4p = _b1.get("S4_prune", {})
+                        _s4b = _b1.get("S4_bev", {})
+                        _s5 = _b1.get("S5_exec", {})
+                        _s6 = _b1.get("S6_accuracy", {})
+                        _s7 = _b1.get("S7_dashboard", {})
+                        _ok = lambda v: "OK" if v else "SILENT"
+                        _exec_st = "FAIL" if _s5.get("fail", 0) > 0 else ("OK" if _s5.get("ok", 0) > 0 else "SILENT")
+                        _b2 = _b1.get("B2_tsla_opt", {})
+                        _nb = _b1.get("non_b1_blocked", {})
+                        lines.extend([
+                            f"| S1 视觉分析 | 触发={_s1.get('count', 0)} | {_ok(_s1.get('count', 0))} |",
+                            f"| S2 信号生成 | 决策={_s2.get('count', 0)} | {_ok(_s2.get('count', 0))} |",
+                            f"| S3 过滤链 | 拦截={_s3.get('total', 0)} | {_ok(_s3.get('total', 0))} |",
+                            f"| S4 剪枝 | 存活={_s4p.get('survived', 0)} 剪枝={_s4p.get('pruned', 0)} | {_ok(_s4p.get('total', 0))} |",
+                            f"| S4 BEV | EXEC={_s4b.get('execute', 0)} SKIP={_s4b.get('skip', 0)} | {_ok(_s4b.get('total', 0))} |",
+                            f"| S5 执行 | OK={_s5.get('ok', 0)} FAIL={_s5.get('fail', 0)} | {_exec_st} |",
+                            f"| S6 准确率 | 交易={_s6.get('total_trades', 0)} | {_ok(_s6.get('total_trades', 0))} |",
+                            f"| S7 Dashboard | {_s7.get('status', 'N/A')} | {_s7.get('status', 'N/A')} |",
+                            f"| B2 TSLA期权 | OK={_b2.get('ok', 0)} FAIL={_b2.get('fail', 0)} | {_ok(_b2.get('total', 0))} |",
+                            f"| 非B1拦截 | 拦截={_nb.get('total', 0)} | {'OK' if _nb.get('total', 0) >= 0 else 'ALERT'} |",
+                        ])
             except Exception:
                 pass
             lines.append("")
