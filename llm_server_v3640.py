@@ -26130,8 +26130,9 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
         bot_uuid = cfg.get("long_bot_uuid")
         action = "enter_long"
     else:
-        bot_uuid = cfg.get("short_bot_uuid")
-        action = "enter_short"
+        # SELL = 平多仓, long bot + exit_long (实测确认可用)
+        bot_uuid = cfg.get("long_bot_uuid")
+        action = "exit_long"
 
     if not bot_uuid:
         log_to_server(f"[3Commas] {symbol} 缺少对应 {final_action} bot_uuid，跳过下单。")
