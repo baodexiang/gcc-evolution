@@ -10153,6 +10153,53 @@ class PriceScanEngine:
 
         pushed = 0
 
+        # ── GCC-0021 S2: ADX(14) 趋势强度门控 ──
+        # ADX<20 = 震荡市, 抑制所有15min信号(减少20-30%低质量信号)
+        _adx_gate_pass = True
+        _adx_conf_bonus = 0.0
+        try:
+            import numpy as _adx_np
+            _adx_closes = _adx_np.array([float(b["close"]) for b in bars_15m])
+            _adx_highs = _adx_np.array([float(b["high"]) for b in bars_15m])
+            _adx_lows = _adx_np.array([float(b["low"]) for b in bars_15m])
+            if len(_adx_closes) >= 28:  # ADX(14)需要至少28根
+                # True Range
+                _tr_h_l = _adx_highs[1:] - _adx_lows[1:]
+                _tr_h_c = _adx_np.abs(_adx_highs[1:] - _adx_closes[:-1])
+                _tr_l_c = _adx_np.abs(_adx_lows[1:] - _adx_closes[:-1])
+                _tr = _adx_np.maximum(_tr_h_l, _adx_np.maximum(_tr_h_c, _tr_l_c))
+                # +DM / -DM
+                _up_move = _adx_highs[1:] - _adx_highs[:-1]
+                _dn_move = _adx_lows[:-1] - _adx_lows[1:]
+                _plus_dm = _adx_np.where((_up_move > _dn_move) & (_up_move > 0), _up_move, 0)
+                _minus_dm = _adx_np.where((_dn_move > _up_move) & (_dn_move > 0), _dn_move, 0)
+                # Wilder smooth (14)
+                _period = 14
+                _atr14 = _adx_np.mean(_tr[:_period])
+                _plus_di14 = _adx_np.mean(_plus_dm[:_period])
+                _minus_di14 = _adx_np.mean(_minus_dm[:_period])
+                for _i in range(_period, len(_tr)):
+                    _atr14 = (_atr14 * (_period - 1) + _tr[_i]) / _period
+                    _plus_di14 = (_plus_di14 * (_period - 1) + _plus_dm[_i]) / _period
+                    _minus_di14 = (_minus_di14 * (_period - 1) + _minus_dm[_i]) / _period
+                _plus_di = (_plus_di14 / _atr14 * 100) if _atr14 > 0 else 0
+                _minus_di = (_minus_di14 / _atr14 * 100) if _atr14 > 0 else 0
+                _dx = abs(_plus_di - _minus_di) / (_plus_di + _minus_di) * 100 if (_plus_di + _minus_di) > 0 else 0
+                # ADX = DX的14期EMA近似
+                _adx_value = _dx  # 简化: 用最新DX代替完整ADX平滑
+
+                if _adx_value < 20:
+                    _adx_gate_pass = False
+                    logger.info(f"[ADX-GATE] {symbol} ADX={_adx_value:.1f}<20 震荡市 → 抑制15min信号")
+                elif _adx_value > 25:
+                    _adx_conf_bonus = 0.05
+                    logger.debug(f"[ADX-GATE] {symbol} ADX={_adx_value:.1f}>25 趋势强 → conf+0.05")
+        except Exception as _adx_e:
+            pass  # ADX计算异常不拦截
+
+        if not _adx_gate_pass:
+            return  # 震荡市不推任何15min信号
+
         # ── 1. Hoffman 15m ──
         if _rob_hoffman_available:
             try:
@@ -10167,54 +10214,22 @@ class PriceScanEngine:
                 if plugin.should_activate_for_scan(result):
                     action = plugin.get_action_for_scan(result)
                     if action in ("BUY", "SELL"):
-                        _gcc_push_15m(main_symbol, "Hoffman_15m", action, min(0.7, result.confidence))
+                        _gcc_push_15m(main_symbol, "Hoffman_15m", action, min(0.7, result.confidence + _adx_conf_bonus))
                         pushed += 1
                         logger.info(f"[S11] {symbol} Hoffman_15m → {action} (conf={result.confidence:.2f})")
             except Exception as e:
                 logger.debug(f"[S11] {symbol} Hoffman_15m error: {e}")
 
-        # ── 2. 缠论 15m ──
-        if _chan_bs_available:
-            try:
-                bars_15m_long = YFinanceDataFetcher.get_15m_ohlcv(symbol, 200)  # 缠论需要更多数据
-                if bars_15m_long and len(bars_15m_long) >= 60:
-                    chan_plugin = get_chan_bs_plugin()
-                    chan_result = chan_plugin.process_for_scan(
-                        symbol=symbol,
-                        ohlcv_bars=bars_15m_long,
-                        current_trend=current_trend,
-                    )
-                    if chan_plugin.should_activate_for_scan(chan_result):
-                        action = chan_plugin.get_action_for_scan(chan_result)
-                        if action in ("BUY", "SELL"):
-                            _conf = min(0.7, chan_result.strength) if hasattr(chan_result, 'strength') else 0.6
-                            _gcc_push_15m(main_symbol, "ChanBS_15m", action, _conf)
-                            pushed += 1
-                            logger.info(f"[S11] {symbol} ChanBS_15m → {action}")
-            except Exception as e:
-                logger.debug(f"[S11] {symbol} ChanBS_15m error: {e}")
+        # [DISABLED 2026-03-15] ChanBS_15m: 实盘胜率11.8%, 累计亏损-$1,670, 已DOWNGRADED
+        # 缠论15min 200根K线不足以形成完整中枢, 一买/一卖本质是逆趋势信号
+        # if _chan_bs_available:
+        #     ... (GCC-0021 S1)
 
-        # ── 3. SuperTrend 15m ──
-        # v0.3: 纯15min数据, 不传4H l1_signals/market_data, 方向过滤交给Vision门控
-        if _supertrend_available:
-            try:
-                st_config = self.config[market_type].get("supertrend", {})
-                if st_config.get("enabled", False):
-                    close_prices_15m = [b["close"] for b in bars_15m]
-                    plugin = get_supertrend_plugin()
-                    st_result = plugin.process(
-                        symbol=symbol,
-                        ohlcv_bars=bars_15m,
-                        close_prices=close_prices_15m,
-                        l1_signals={},       # 空: 不混入4H信号
-                        market_data={},      # 空: 纯15min判断
-                    )
-                    if st_result and st_result.action in ("BUY", "SELL"):
-                        _gcc_push_15m(main_symbol, "SuperTrend_15m", st_result.action, 0.6)
-                        pushed += 1
-                        logger.info(f"[S11] {symbol} SuperTrend_15m → {st_result.action}")
-            except Exception as e:
-                logger.debug(f"[S11] {symbol} SuperTrend_15m error: {e}")
+        # [DISABLED 2026-03-15] SuperTrend_15m: 实盘胜率15%, 累计亏损-$1,212, 已DOWNGRADED
+        # 15min层传入l1_signals={}/market_data={}完全裸奔, 固定参数不适配不同品种
+        # 4H层SuperTrend保留(有market_data)
+        # if _supertrend_available:
+        #     ... (GCC-0021 S1)
 
         # ═══════════════════════════════════════════════════════════
         # GCC-0259 S1-S4: 技术指标信号 (从15min K线直接计算, 零API成本)
@@ -10256,72 +10271,21 @@ class PriceScanEngine:
                 ema21 = _ema(closes, 21)
                 # 交叉检测: 前一根 vs 当前根
                 if ema9[-2] <= ema21[-2] and ema9[-1] > ema21[-1]:
-                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "BUY", 0.6)
+                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "BUY", 0.6 + _adx_conf_bonus)
                     pushed += 1
                     logger.info(f"[GCC-0259] {symbol} EMA9×21金叉 → BUY")
                 elif ema9[-2] >= ema21[-2] and ema9[-1] < ema21[-1]:
-                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "SELL", 0.6)
+                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "SELL", 0.6 + _adx_conf_bonus)
                     pushed += 1
                     logger.info(f"[GCC-0259] {symbol} EMA9×21死叉 → SELL")
 
-                # ── S3: MACD柱状图翻转 ──
-                ema12 = _ema(closes, 12)
-                ema26 = _ema(closes, 26)
-                macd_line = ema12 - ema26
-                macd_signal = _ema(macd_line, 9)
-                histogram = macd_line - macd_signal
-                if histogram[-2] <= 0 and histogram[-1] > 0:
-                    _gcc_push_15m(main_symbol, "MACD_Hist_15m", "BUY", 0.55)
-                    pushed += 1
-                    logger.info(f"[GCC-0259] {symbol} MACD柱状图翻正 → BUY")
-                elif histogram[-2] >= 0 and histogram[-1] < 0:
-                    _gcc_push_15m(main_symbol, "MACD_Hist_15m", "SELL", 0.55)
-                    pushed += 1
-                    logger.info(f"[GCC-0259] {symbol} MACD柱状图翻负 → SELL")
+                # [DISABLED 2026-03-15] MACD_Hist_15m: 与SuperTrend内部MACD双重投票, 置信度0.55最低
+                # MACD(12,26,9)柱状图翻转 ≈ EMA_Cross的二阶导数, 信号冗余
+                # (GCC-0021 S1)
 
-                # ── S3: BB(20,2) 均值回归 — 30min K线 ──
-                # v3.660: 启用BB外挂(左侧交易), 用30min数据更稳定
-                # 原B3独立通道合并入B1, 由GCC-TM统一决策
-                try:
-                    _bb_bars = None
-                    if market_type == "crypto":
-                        from coinbase_data_provider import get_candles as _cb_get
-                        _bb_bars_raw = _cb_get(main_symbol, granularity="THIRTY_MINUTE", limit=40)
-                        if _bb_bars_raw and len(_bb_bars_raw) >= 25:
-                            _bb_bars_raw.sort(key=lambda x: x.get("start", "0"))
-                            _bb_bars = _bb_bars_raw
-                    if _bb_bars is None:
-                        # 美股/fallback: 用15min合成30min
-                        if n >= 50:
-                            _bb_closes_30m = [(closes[j] + closes[j+1]) / 2 for j in range(0, n-1, 2)]
-                        else:
-                            _bb_closes_30m = None
-                    else:
-                        _bb_closes_30m = [float(b.get("close", 0)) for b in _bb_bars]
-
-                    if _bb_closes_30m and len(_bb_closes_30m) >= 25:
-                        _bb_arr = np.array(_bb_closes_30m)
-                        _bb_window = _bb_arr[-20:]
-                        _bb_mid = float(np.mean(_bb_window))
-                        _bb_std = float(np.std(_bb_window, ddof=1))
-                        _bb_lower = _bb_mid - 2.0 * _bb_std
-                        _bb_upper = _bb_mid + 2.0 * _bb_std
-                        _bb_cur = float(_bb_closes_30m[-1])
-
-                        # RSI(14) on 30min
-                        _bb_delta = np.diff(_bb_arr[-(15):])
-                        _bb_gain = np.where(_bb_delta > 0, _bb_delta, 0)
-                        _bb_loss = np.where(_bb_delta < 0, -_bb_delta, 0)
-                        _bb_ag = float(np.mean(_bb_gain)) if len(_bb_gain) > 0 else 0
-                        _bb_al = float(np.mean(_bb_loss)) if len(_bb_loss) > 0 else 0
-                        _bb_rsi = 100 - (100 / (1 + _bb_ag / _bb_al)) if _bb_al > 0 else (100 if _bb_ag > 0 else 50)
-
-                        if _bb_cur <= _bb_lower and _bb_rsi < 30:
-                            _gcc_push_15m(main_symbol, "BB_MeanRev_30m", "BUY", 0.65)
-                            pushed += 1
-                            logger.info(f"[S3][BB] {symbol} 30m BB下轨+RSI={_bb_rsi:.0f}<30 → BUY (price={_bb_cur:.0f} lower={_bb_lower:.0f} mid={_bb_mid:.0f})")
-                except Exception as _bb_e:
-                    logger.debug(f"[S3][BB] {symbol} BB_30m error: {_bb_e}")
+                # [DISABLED 2026-03-15] BB_MeanRev_30m: 均值回归与78%趋势跟随系统矛盾
+                # RSI_15m已以同理由禁用, BB同属逆趋势信号(跌到下轨BUY=接飞刀)
+                # (GCC-0021 S1)
 
         except Exception as _ind_e:
             logger.debug(f"[GCC-0259] {symbol} 技术指标信号异常: {_ind_e}")
