@@ -10187,7 +10187,7 @@ class PriceScanEngine:
                     plugin = get_rob_hoffman_plugin()
                     result = plugin.process_for_scan(
                         symbol=symbol,
-                        ohlcv_bars=bars_15m,
+                        ohlcv_bars=bars_15m[:-1],  # 排除最后一根未完成K线
                         current_trend=current_trend,
                         pos_in_channel=pos_in_channel,
                         position_units=0,
@@ -10228,9 +10228,11 @@ class PriceScanEngine:
         # ═══════════════════════════════════════════════════════════
         try:
             import numpy as np
-            closes = np.array([float(b["close"]) for b in bars_15m])
-            highs = np.array([float(b["high"]) for b in bars_15m])
-            lows = np.array([float(b["low"]) for b in bars_15m])
+            # 排除最后一根未完成K线, 避免假信号
+            _completed = bars_15m[:-1]
+            closes = np.array([float(b["close"]) for b in _completed])
+            highs = np.array([float(b["high"]) for b in _completed])
+            lows = np.array([float(b["low"]) for b in _completed])
             n = len(closes)
 
             if n >= 21:
