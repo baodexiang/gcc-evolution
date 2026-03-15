@@ -51447,6 +51447,23 @@ def key009_gcctm():
         scalp_pnl = _scalp_pnl_fn()
     except Exception:
         pass
+    # TSLA期权数据
+    def _load_options_data():
+        _oh, _op = [], {}
+        try:
+            _oh_p = ROOT / "state" / "tsla_options_history.json"
+            if _oh_p.exists():
+                _oh = json.loads(_oh_p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        try:
+            _op_p = ROOT / "state" / "tsla_options_position.json"
+            if _op_p.exists():
+                _op = json.loads(_op_p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return _oh, _op
+
     # 剥头皮完整数据(state + trades + summary)供dashboard面板
     scalp_full = {"state": {}, "trades": [], "summary": {}}
     try:
@@ -51467,6 +51484,8 @@ def key009_gcctm():
     except Exception:
         pass
 
+    _opt_hist, _opt_pos = _load_options_data()
+
     return app.response_class(
         json.dumps(
             {
@@ -51484,6 +51503,8 @@ def key009_gcctm():
                 "error_classify": error_classify,
                 "scalp_pnl": scalp_pnl,
                 "scalp": scalp_full,
+                "options_history": _opt_hist,
+                "options_position": _opt_pos,
             },
             ensure_ascii=False,
         ),
