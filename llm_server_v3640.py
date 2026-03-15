@@ -56132,6 +56132,14 @@ def _qqq_options_manager_worker():
                 elif pending_status == "FAILED":
                     log_to_server("[B2][TSLA-OPT][AUTO] 平仓订单失败，恢复open等下轮重试")
 
+                # GCC-0016 S0: 手工平仓检测 (每轮检查Schwab实际持仓)
+                try:
+                    from qqq_options import sync_manual_close as _qqq_sync
+                    if _qqq_sync():
+                        log_to_server("[B2][TSLA-OPT] 手工平仓检测: 已同步清除内部state")
+                except Exception:
+                    pass
+
                 pos = _qqq_pos()
 
                 # ── (2) 有仓: 检查出场 ────────────────────────────────

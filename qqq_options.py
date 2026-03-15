@@ -921,6 +921,46 @@ def _check_addon_buy(dry_run: bool = True) -> Optional[dict]:
         return None
 
 
+def sync_manual_close() -> bool:
+    """GCC-0016 S0: 检测用户手工平仓 → 同步清除内部state
+    查Schwab实际持仓, 如果内部state有仓但Schwab没有 → 清除state
+    Returns: True=检测到手工平仓并清除, False=正常
+    """
+    pos = _load_position(include_pending=True)
+    if not pos:
+        return False
+    opt = pos.get("option") or pos.get("spread")
+    if not opt:
+        return False
+    try:
+        from schwab.client import Client
+        client, account_hash = _get_schwab_client()
+        resp = client.get_accounts(fields=[Client.Account.Fields.POSITIONS])
+        accounts = resp.json() if resp.status_code == 200 else []
+        if not isinstance(accounts, list):
+            accounts = [accounts]
+        # 查是否还持有TSLA期权
+        has_tsla_option = False
+        for acct in accounts:
+            sa = acct.get("securitiesAccount", acct)
+            for p in sa.get("positions", []):
+                inst = p.get("instrument", {})
+                if inst.get("assetType") == "OPTION" and "TSLA" in inst.get("symbol", ""):
+                    qty = p.get("longQuantity", 0)
+                    if qty > 0:
+                        has_tsla_option = True
+                        break
+        if not has_tsla_option:
+            logger.warning(
+                "[B2][TSLA-OPT] 手工平仓检测: 内部state有仓但Schwab无TSLA期权持仓 → 清除state"
+            )
+            _clear_position()
+            return True
+    except Exception as e:
+        logger.debug(f"[B2][TSLA-OPT] sync_manual_close检查异常: {e}")
+    return False
+
+
 def auto_manage(dry_run: bool = True) -> Optional[dict]:
     """
     自动持仓管理: 加仓检查 → 卖出规则检查 → 执行平仓(支持部分平仓)
