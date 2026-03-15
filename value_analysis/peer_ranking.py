@@ -203,8 +203,7 @@ def _rank_group(
 
             # 更新profile中的评分
             score_map = profiles[sym].get(bucket)
-            if isinstance(score_map, dict) and metric in score_map:
-                old_score = score_map[metric]
+            if isinstance(score_map, dict):
                 score_map[metric] = score
 
             # 记录排名
