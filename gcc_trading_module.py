@@ -342,10 +342,10 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
                                         min(0.95, max(0.3, _bv_conf / 100.0)),
                                         persistent=True)
                     else:
-                        logger.info("[B1][GCC-TM] %s BrooksVision %s [%s] → 观察模式(低胜率形态不推信号)",
-                                    symbol, _bv_sig, _bv_pat)
+                        logger.info("[B1][Brooks] %s %s [OBSERVE] 低胜率形态不推信号 signal=%s",
+                                    symbol, _bv_pat, _bv_sig)
                     break
-        logger.info("[B1][GCC-TM] %s BrooksVision→信号池: %s [%s]", symbol, bv_bias, bv_pattern)
+        logger.info("[B1][Brooks] %s 信号池: %s [%s]", symbol, bv_bias, bv_pattern)
     except ImportError:
         logger.debug("[GCC-TM] %s BrooksVision not installed, skip", symbol)
     except Exception as _bv_e:
@@ -414,8 +414,8 @@ def _init_candle_state(symbol: str, bars: list = None) -> CandleState:
         logger.info("[GCC-TM] %s GCC-0264 SELL硬约束: vision=BUY(%.0f%%>70%%) → SELL→HOLD",
                     symbol, vision_conf * 100)
 
-    logger.info("[B1][GCC-TM] %s 三方投票: vision=%s prev=%s wyckoff=%s(Ph%s) → effective=%s (BV→池: %s[%s])",
-                symbol, vision_bias, prev_dir, wyckoff_bias, wyckoff_phase, effective, bv_bias, bv_pattern)
+    logger.info("[B1][Direction] %s 4H方向锁定=%s vision=%s prev=%s wyckoff=%s(Ph%s) BV=%s[%s]",
+                symbol, effective, vision_bias, prev_dir, wyckoff_bias, wyckoff_phase, bv_bias, bv_pattern)
 
     state = CandleState(
         symbol=symbol,
@@ -2523,7 +2523,7 @@ class GCCTradingModule:
         _surv_actions = [n.action for n in surviving_l1]
         _prune_reasons = {n.action: getattr(n, "prune_reason", "unknown") for n in _pruned_nodes}
         logger.info(
-            "[B1][GCC-TM][S4-PRUNE] %s L1存活=%s 剪枝=%s reasons=%s",
+            "[B1][Pruning] %s 存活=%s 剪枝=%s reasons=%s",
             sym, _surv_actions, [n.action for n in _pruned_nodes], _prune_reasons,
         )
         if not surviving_l1:

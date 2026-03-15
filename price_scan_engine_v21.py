@@ -7699,7 +7699,7 @@ class PriceScanEngine:
                         try:
                             from gcc_trading_module import gcc_push_signal as _gcc_push
                             _gcc_push(main_symbol, "TrailingStop", "SELL", confidence=0.8)
-                            logger.info(f"[B1][v3.660] {main_symbol} 移动止损SELL → GCC-TM信号池")
+                            logger.info(f"[B1][Trailing] {main_symbol} 止损SELL conf=0.80 → 信号池")
                         except Exception as _gp_err:
                             logger.warning(f"[v3.660] {main_symbol} gcc_push_signal失败: {_gp_err}")
                         # 仍通知服务器记录(会被GCC_TM_ONLY门控拦截,仅观察)
@@ -7900,7 +7900,7 @@ class PriceScanEngine:
                         try:
                             from gcc_trading_module import gcc_push_signal as _gcc_push
                             _gcc_push(main_symbol, "TrailingProfit", "BUY", confidence=0.7)
-                            logger.info(f"[B1][v3.660] {main_symbol} 移动止盈BUY → GCC-TM信号池")
+                            logger.info(f"[B1][Trailing] {main_symbol} 止盈BUY conf=0.70 → 信号池")
                         except Exception as _gp_err:
                             logger.warning(f"[v3.660] {main_symbol} gcc_push_signal失败: {_gp_err}")
                         # 仍通知服务器记录(会被GCC_TM_ONLY门控拦截,仅观察)
@@ -10208,7 +10208,7 @@ class PriceScanEngine:
                     if action in ("BUY", "SELL"):
                         _gcc_push_15m(main_symbol, "Hoffman_15m", action, min(0.7, result.confidence))
                         pushed += 1
-                        logger.info(f"[B1][S11] {symbol} Hoffman_15m → {action} (conf={result.confidence:.2f})")
+                        logger.info(f"[B1][Hoffman] {symbol} 回调入场 {action} conf={result.confidence:.2f}")
             except Exception as e:
                 logger.debug(f"[S11] {symbol} Hoffman_15m error: {e}")
 
@@ -10267,11 +10267,11 @@ class PriceScanEngine:
                 if ema9[-2] <= ema21[-2] and ema9[-1] > ema21[-1]:
                     _gcc_push_15m(main_symbol, "EMA_Cross_15m", "BUY", 0.6)
                     pushed += 1
-                    logger.info(f"[B1][GCC-0259] {symbol} EMA9×21金叉 → BUY")
+                    logger.info(f"[B1][EMA] {symbol} 金叉 BUY conf=0.60")
                 elif ema9[-2] >= ema21[-2] and ema9[-1] < ema21[-1]:
                     _gcc_push_15m(main_symbol, "EMA_Cross_15m", "SELL", 0.6)
                     pushed += 1
-                    logger.info(f"[B1][GCC-0259] {symbol} EMA9×21死叉 → SELL")
+                    logger.info(f"[B1][EMA] {symbol} 死叉 SELL conf=0.60")
 
                 # [DISABLED 2026-03-15] MACD_Hist_15m: 与SuperTrend内部MACD双重投票, 置信度0.55最低
                 # MACD(12,26,9)柱状图翻转 ≈ EMA_Cross的二阶导数, 信号冗余
@@ -10285,7 +10285,7 @@ class PriceScanEngine:
             logger.debug(f"[GCC-0259] {symbol} 技术指标信号异常: {_ind_e}")
 
         if pushed > 0:
-            logger.info(f"[B1][S11] {symbol} 扫描完成: {pushed}个信号推入GCC-TM信号池")
+            logger.info(f"[B1][Scan] {symbol} 扫描完成: {pushed}个信号推入信号池")
 
     def _scan_crypto(self):
         """扫描加密货币 - v3.545: P0-Tracking + 剥头皮 + L1外挂"""
