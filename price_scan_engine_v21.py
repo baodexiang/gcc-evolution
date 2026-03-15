@@ -10381,10 +10381,20 @@ class PriceScanEngine:
                             _scalp_res = _gcc_scalp("OPUSDC", _op_bars)
                             if _scalp_res:
                                 logger.info(f"[GCC-SCALP] OP: {_scalp_res}")
+                            else:
+                                # heartbeat: 每30min打一次alive日志
+                                _hb_key = "_scalp_hb_ts"
+                                _hb_last = getattr(self, _hb_key, 0)
+                                if time.time() - _hb_last >= 1800:
+                                    setattr(self, _hb_key, time.time())
+                                    _closes = [float(b.get("close", 0)) for b in _op_bars]
+                                    from gcc_trading_module import _scalp_calc_rsi as _hb_rsi_fn
+                                    _hb_rsi = _hb_rsi_fn(_closes, 7)
+                                    logger.info(f"[GCC-SCALP] OP alive: RSI={_hb_rsi:.1f}, price=${_closes[-1]:.4f}, no signal")
                 except ImportError:
                     pass
                 except Exception as _scalp_err:
-                    logger.debug(f"[GCC-SCALP] OP error: {_scalp_err}")
+                    logger.warning(f"[GCC-SCALP] OP error: {_scalp_err}")
 
                 # 获取当前价格 (用于P0-Open和P0-Tracking)
                 # GCC-0141: 价格拉取计时

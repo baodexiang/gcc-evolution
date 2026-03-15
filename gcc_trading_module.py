@@ -3657,13 +3657,8 @@ def _scalp_calc_atr(highs: list, lows: list, closes: list, period: int = 3) -> f
     return float(_np.mean(tr[-period:]))
 
 
-def _load_scalp_state() -> dict:
-    """加载剥头皮持仓状态。"""
-    if _SCALP_STATE_FILE.exists():
-        try:
-            return json.loads(_SCALP_STATE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+def _scalp_default_state() -> dict:
+    """剥头皮状态默认值。"""
     return {
         "in_trade": False,
         "direction": None,        # "BUY" or "SELL"
@@ -3674,7 +3669,22 @@ def _load_scalp_state() -> dict:
         "tp_price": 0.0,          # 止盈价
         "sl_price": 0.0,          # 止损价
         "quantity": 0.0,          # 持仓数量(OP个数)
+        "entry_confirmed": False,  # GCC-0256 fix: 执行层确认后才允许出场
     }
+
+
+def _load_scalp_state() -> dict:
+    """加载剥头皮持仓状态。"""
+    if _SCALP_STATE_FILE.exists():
+        try:
+            state = json.loads(_SCALP_STATE_FILE.read_text(encoding="utf-8"))
+            # 兼容旧state: 没有entry_confirmed字段的视为已确认(避免误清已有持仓)
+            if "entry_confirmed" not in state:
+                state["entry_confirmed"] = state.get("in_trade", False)
+            return state
+        except Exception:
+            pass
+    return _scalp_default_state()
 
 
 def _save_scalp_state(state: dict) -> None:
@@ -3695,6 +3705,29 @@ def _record_scalp_trade(trade: dict) -> None:
             f.write(json.dumps(trade, ensure_ascii=False) + "\n")
     except Exception as e:
         logger.warning("[GCC-SCALP] record trade: %s", e)
+
+
+def scalp_confirm_entry(symbol: str) -> None:
+    """执行层回调: 进场订单已在Coinbase成功下单。"""
+    state = _load_scalp_state()
+    if state.get("in_trade") and not state.get("entry_confirmed"):
+        state["entry_confirmed"] = True
+        _save_scalp_state(state)
+        logger.info("[GCC-SCALP] %s entry CONFIRMED on exchange", symbol)
+
+
+def scalp_fail_entry(symbol: str) -> None:
+    """执行层回调: 进场订单失败/被拦截 → 清除虚假持仓状态。"""
+    state = _load_scalp_state()
+    if state.get("in_trade") and not state.get("entry_confirmed"):
+        logger.warning(
+            "[GCC-SCALP] %s entry FAILED on exchange — clearing phantom position "
+            "(was: %s @ $%.4f)",
+            symbol, state.get("direction"), state.get("entry_price", 0),
+        )
+        new_state = _scalp_default_state()
+        new_state["cooldown"] = _SCALP_COOLDOWN_BARS
+        _save_scalp_state(new_state)
 
 
 def scalp_get_pnl_summary() -> dict:
@@ -3828,14 +3861,27 @@ def gcc_scalp_observe(
         # 现货安全: direction=SELL是损坏状态(现货不能做空),强制重置
         if state.get("direction") == "SELL":
             logger.error("[GCC-SCALP] %s 损坏状态: direction=SELL on spot. 强制重置", symbol)
-            state = {
-                "in_trade": False, "direction": None,
-                "entry_price": 0.0, "entry_ts": None,
-                "bars_held": 0, "cooldown": 0,
-                "tp_price": 0.0, "sl_price": 0.0, "quantity": 0.0,
-            }
-            _save_scalp_state(state)
+            new_state = _scalp_default_state()
+            _save_scalp_state(new_state)
             return None
+
+        # GCC-0256 fix: 进场未经Coinbase确认 → 不允许出场逻辑
+        # consumer线程30s内会回调 scalp_confirm_entry/scalp_fail_entry
+        if not state.get("entry_confirmed", False):
+            state["bars_held"] += 1
+            # 超过2根(10min) consumer仍未确认 → 视为执行失败,清除幽灵持仓
+            if state["bars_held"] > 2:
+                logger.warning(
+                    "[GCC-SCALP] %s entry NOT confirmed after %d bars — clearing phantom",
+                    symbol, state["bars_held"],
+                )
+                new_state = _scalp_default_state()
+                new_state["cooldown"] = _SCALP_COOLDOWN_BARS
+                _save_scalp_state(new_state)
+            else:
+                _save_scalp_state(state)
+            return None
+
         state["bars_held"] += 1
         should_exit = False
         exit_reason = ""
@@ -3918,12 +3964,8 @@ def gcc_scalp_observe(
                                  f"scalp_exit_{exit_reason}")
 
             # 重置状态
-            state = {
-                "in_trade": False, "direction": None,
-                "entry_price": 0.0, "entry_ts": None,
-                "bars_held": 0, "cooldown": _SCALP_COOLDOWN_BARS,
-                "tp_price": 0.0, "sl_price": 0.0, "quantity": 0.0,
-            }
+            state = _scalp_default_state()
+            state["cooldown"] = _SCALP_COOLDOWN_BARS
             _save_scalp_state(state)
             return {"action": close_action, "reason": exit_reason,
                     "pnl_usd": net_pnl_usd}
@@ -3988,7 +4030,7 @@ def gcc_scalp_observe(
     except Exception:
         pass
 
-    # 更新状态
+    # 更新状态 — entry_confirmed=False, 等待consumer回调确认
     state = {
         "in_trade": True,
         "direction": signal,
@@ -3999,6 +4041,7 @@ def gcc_scalp_observe(
         "tp_price": tp_price,
         "sl_price": sl_price,
         "quantity": quantity,
+        "entry_confirmed": False,
     }
     _save_scalp_state(state)
 

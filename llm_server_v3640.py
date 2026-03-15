@@ -43130,6 +43130,17 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             log_to_server(f"[GCC-TM][ERROR] {symbol} 3Commas: {_3c_e}")
     _gcc_confirm(symbol, success=send_ok)
     _is_scalp = _gcc_order.get("source") == "gcc_scalp"
+    # GCC-0256 fix: scalp进场执行结果回调 → 同步内部state与Coinbase实际状态
+    if _is_scalp and "scalp_entry" in _gcc_order.get("reason", ""):
+        try:
+            if send_ok:
+                from gcc_trading_module import scalp_confirm_entry
+                scalp_confirm_entry(symbol)
+            else:
+                from gcc_trading_module import scalp_fail_entry
+                scalp_fail_entry(symbol)
+        except Exception as _scalp_cb_e:
+            log_to_server(f"[GCC-SCALP][CALLBACK] {symbol} entry callback error: {_scalp_cb_e}")
     if send_ok:
         log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单成功")
         # GCC-0257 S5: 交易记录入KEY-009
