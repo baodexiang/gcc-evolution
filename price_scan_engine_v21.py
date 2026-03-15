@@ -10157,33 +10157,52 @@ class PriceScanEngine:
         # GCC-0021 S2: ADX(14)趋势强度门控 — 用户要求取消
 
         # ── 1. Hoffman 15m ──
-        # [MODIFIED 2026-03-15] 15min K线每4根合成1根1H, 适配Hoffman原始1H参数
-        # 原始: 直接传bars_15m → EMA(5/13/21/34/55)看15min视角太短
-        # 改后: 合成1H bars → EMA参数等效回原始设计
+        # [MODIFIED 2026-03-15] 直接用15min K线, 在调用前临时覆盖参数适配15min周期
         if _rob_hoffman_available:
             try:
-                # 合成1H K线 (每4根15min = 1根1H)
-                _hoff_bars = []
-                for _hi in range(0, len(bars_15m) - 3, 4):
-                    _b1, _b2, _b3, _b4 = bars_15m[_hi], bars_15m[_hi+1], bars_15m[_hi+2], bars_15m[_hi+3]
-                    _hoff_bars.append({
-                        "open": _b1["open"],
-                        "high": max(_b1["high"], _b2["high"], _b3["high"], _b4["high"]),
-                        "low": min(_b1["low"], _b2["low"], _b3["low"], _b4["low"]),
-                        "close": _b4["close"],
-                        "volume": sum(b.get("volume", 0) for b in [_b1, _b2, _b3, _b4]),
-                    })
-                if len(_hoff_bars) < 10:
-                    _hoff_bars = bars_15m  # fallback: 不够合成就用原始
-
-                plugin = get_rob_hoffman_plugin()
-                result = plugin.process_for_scan(
-                    symbol=symbol,
-                    ohlcv_bars=_hoff_bars,
-                    current_trend=current_trend,
-                    pos_in_channel=pos_in_channel,
-                    position_units=0,
-                )
+                import rob_hoffman_plugin as _rhp
+                # 保存原始参数 (1H设计)
+                _orig = {
+                    'irb': _rhp.IRB_WICK_PCT,           # 0.34
+                    'er': _rhp.KAMA_ER_TANGLED_THRESHOLD, # 0.18
+                    'ema_p': _rhp.EMA_PURPLE,            # 5
+                    'ema_g': _rhp.EMA_GREEN,             # 13
+                    'ema_w1': _rhp.EMA_WHITE_1,          # 21
+                    'ema_w2': _rhp.EMA_WHITE_2,          # 34
+                    'ema_w3': _rhp.EMA_WHITE_3,          # 55
+                    'min_bars': _rhp.MIN_BARS_FOR_ANALYSIS, # 60
+                    'all_ema': list(_rhp.ALL_EMA_PERIODS),
+                }
+                # [MODIFIED 2026-03-15] 15min适配参数 (EMA×4 + IRB/ER调低)
+                _rhp.IRB_WICK_PCT = 0.28               # 原0.34, 15min影线噪音→放宽
+                _rhp.KAMA_ER_TANGLED_THRESHOLD = 0.12   # 原0.18, 15min ER天然低→降低
+                _rhp.EMA_PURPLE = 20                    # 原5×4
+                _rhp.EMA_GREEN = 52                     # 原13×4
+                _rhp.EMA_WHITE_1 = 84                   # 原21×4
+                _rhp.EMA_WHITE_2 = 136                  # 原34×4
+                _rhp.EMA_WHITE_3 = 220                  # 原55×4
+                _rhp.MIN_BARS_FOR_ANALYSIS = 30          # 原60, 15min数据60根可能不够→降低
+                _rhp.ALL_EMA_PERIODS = [20, 52, 84, 136, 220]
+                try:
+                    plugin = get_rob_hoffman_plugin()
+                    result = plugin.process_for_scan(
+                        symbol=symbol,
+                        ohlcv_bars=bars_15m,
+                        current_trend=current_trend,
+                        pos_in_channel=pos_in_channel,
+                        position_units=0,
+                    )
+                finally:
+                    # 恢复原始参数(不影响4H层)
+                    _rhp.IRB_WICK_PCT = _orig['irb']
+                    _rhp.KAMA_ER_TANGLED_THRESHOLD = _orig['er']
+                    _rhp.EMA_PURPLE = _orig['ema_p']
+                    _rhp.EMA_GREEN = _orig['ema_g']
+                    _rhp.EMA_WHITE_1 = _orig['ema_w1']
+                    _rhp.EMA_WHITE_2 = _orig['ema_w2']
+                    _rhp.EMA_WHITE_3 = _orig['ema_w3']
+                    _rhp.MIN_BARS_FOR_ANALYSIS = _orig['min_bars']
+                    _rhp.ALL_EMA_PERIODS = _orig['all_ema']
                 if plugin.should_activate_for_scan(result):
                     action = plugin.get_action_for_scan(result)
                     if action in ("BUY", "SELL"):
