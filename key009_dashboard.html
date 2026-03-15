@@ -1505,7 +1505,7 @@ function loadGccTm() {
             const ca = _category(a), cb = _category(b);
             return ca !== cb ? ca - cb : a.localeCompare(b);
         });
-        // ── 剥头皮面板 (插入在加密货币与美股之间) ──
+        // ── BTC BB均值回归面板 (插入在加密货币与美股之间) ──
         const _buildScalpPanel = () => {
             const sc = d.scalp || (MULTI_DATA && MULTI_DATA.scalp) || {};
             const st = sc.state || {};
@@ -1513,18 +1513,21 @@ function loadGccTm() {
             const sum = sc.summary || {};
             const inTrade = st.in_trade;
             const statusColor = inTrade ? '#1a7f37' : '#656d76';
-            const statusText = inTrade ? `持仓中 ${st.direction||''} @ $${(st.entry_price||0).toFixed(4)}` : '空仓 (等待信号)';
+            const _ep = st.entry_price||0;
+            const statusText = inTrade ? `持仓中 ${st.direction||''} @ $${_ep > 100 ? _ep.toFixed(2) : _ep.toFixed(4)}` : '空仓 (等待信号)';
             const pnlColor = v => v > 0 ? '#1a7f37' : v < 0 ? '#cf222e' : '#656d76';
+            const _priceFmt = p => p > 100 ? p.toFixed(2) : p.toFixed(4);
+            const _qtyFmt = q => q < 0.01 ? q.toFixed(8) : q < 1 ? q.toFixed(6) : q.toFixed(2);
             const recentTrades = trades.slice(-10).reverse();
             const tradesHTML = recentTrades.length ? recentTrades.map(t => {
                 const pnl = t.net_pnl_usd || 0;
                 const pnlPct = t.net_pnl_pct ? (t.net_pnl_pct * 100).toFixed(2) + '%' : '-';
                 return `<tr>
                     <td style="font-size:0.82em">${(t.exit_ts||'').slice(5,16)}</td>
-                    <td>${t.symbol||'OPUSDC'}</td>
+                    <td>${t.symbol||'BTCUSDC'}</td>
                     <td style="color:${t.direction==='BUY'?'#1a7f37':'#cf222e'}">${t.direction||'-'}</td>
-                    <td>$${(t.entry_price||0).toFixed(4)}</td>
-                    <td>$${(t.exit_price||0).toFixed(4)}</td>
+                    <td>$${_priceFmt(t.entry_price||0)}</td>
+                    <td>$${_priceFmt(t.exit_price||0)}</td>
                     <td style="color:${pnlColor(pnl)};font-weight:600">$${pnl.toFixed(2)} (${pnlPct})</td>
                     <td style="font-size:0.82em">${t.exit_reason||'-'}</td>
                 </tr>`;
@@ -1533,7 +1536,8 @@ function loadGccTm() {
             <div style="border:2px solid #bf8700;border-radius:10px;padding:16px;margin:12px 0;background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%)">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
                     <span style="font-size:1.2em">⚡</span>
-                    <span style="font-weight:700;font-size:1.05em;color:#92400e">GCC-SCALP 剥头皮</span>
+                    <span style="font-weight:700;font-size:1.05em;color:#92400e">BTC BB均值回归 (15min)</span>
+                    <span style="font-size:0.78em;color:#656d76;margin-left:4px">$1000/次 | BB(20,2)+RSI(14)&lt;30 | 1.5%止损</span>
                     <span style="font-size:0.82em;color:${statusColor};font-weight:600;margin-left:auto;padding:2px 8px;border-radius:4px;background:${inTrade?'#dafbe1':'#f6f8fa'}">${statusText}</span>
                 </div>
                 ${sum.total ? `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">
@@ -1555,11 +1559,11 @@ function loadGccTm() {
                     </div>
                 </div>` : ''}
                 ${inTrade ? `<div style="background:#fff;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:0.88em">
-                    <span style="color:#656d76">入场:</span> $${(st.entry_price||0).toFixed(4)}
-                    <span style="margin-left:12px;color:#656d76">止盈:</span> $${(st.tp_price||0).toFixed(4)}
-                    <span style="margin-left:12px;color:#656d76">止损:</span> $${(st.sl_price||0).toFixed(4)}
-                    <span style="margin-left:12px;color:#656d76">持仓:</span> ${st.bars_held||0}根K线
-                    <span style="margin-left:12px;color:#656d76">数量:</span> ${(st.quantity||0).toFixed(2)} OP
+                    <span style="color:#656d76">入场:</span> $${_priceFmt(st.entry_price||0)}
+                    <span style="margin-left:12px;color:#656d76">止盈(BB中轨):</span> $${_priceFmt(st.tp_price||0)}
+                    <span style="margin-left:12px;color:#656d76">止损(1.5%):</span> $${_priceFmt(st.sl_price||0)}
+                    <span style="margin-left:12px;color:#656d76">持仓:</span> ${st.bars_held||0}根×15min
+                    <span style="margin-left:12px;color:#656d76">数量:</span> ${_qtyFmt(st.quantity||0)} BTC
                 </div>` : ''}
                 <table style="margin:0;font-size:0.85em"><thead><tr>
                     <th>时间</th><th>品种</th><th>方向</th><th>入场</th><th>出场</th><th>P&L</th><th>原因</th>

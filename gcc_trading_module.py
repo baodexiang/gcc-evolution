@@ -3674,7 +3674,7 @@ def gcc_observe(
 
 
 # ══════════════════════════════════════════════════════════════
-# GCC-0256 S5: OP剥头皮模块 — RSI(7)均值回归 + 方向门控
+# GCC-0008: BTC BB均值回归剥头皮 (原GCC-0256 OP剥头皮已暂停)
 # v3.660: BTC BB均值回归剥头皮 (15min, Buy-Only)
 # 策略: 价格≤BB下轨+RSI(14)<30 → BUY, 回到BB中轨止盈, 1.5%止损
 # ══════════════════════════════════════════════════════════════
@@ -3896,13 +3896,13 @@ def gcc_scalp_observe(
     bars_5m: list,
 ) -> Optional[dict]:
     """
-    GCC-0256 S5: OP剥头皮5min入口。
-    轻量路径: 方向门控 + RSI(7)信号 + $500仓位检查 → Coinbase限价单。
+    GCC-0008: BTC BB均值回归15min入口。
+    策略: 价格≤BB下轨+RSI(14)<30 → BUY, BB中轨止盈, 1.5%止损。
     跳过树搜索/BEV/PUCT/信号池。
 
     Args:
-        symbol: 品种名 (如 "OPUSDC")
-        bars_5m: 5min OHLCV列表, 至少30根
+        symbol: 品种名 (如 "BTCUSDC")
+        bars_5m: 15min OHLCV列表, 至少20根
             每根: {"open": f, "high": f, "low": f, "close": f, "volume": f}
 
     Returns:
@@ -3932,7 +3932,7 @@ def gcc_scalp_observe(
     try:
         cs = _load_candle_state(symbol)
         if cs is None:
-            # 没有4H CandleState — 尝试读crypto母品种(OPUSDC没有4H的,用自身或跳过)
+            # 没有4H CandleState — 降级为无门控(允许双向)
             # 剥头皮品种可能没有4H门控，降级为无门控
             gate_direction = "BOTH"  # 允许双向
         else:
