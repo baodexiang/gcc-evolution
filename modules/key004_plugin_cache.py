@@ -278,7 +278,7 @@ class CacheStorageBackend:
                 conn.commit()
             return True
         except Exception as exc:
-            logger.warning("[KEY004][CACHE_WRITE_FAIL] %s", type(exc).__name__)
+            logger.warning("[KEY004][CACHE_WRITE_FAIL] %s: %s", type(exc).__name__, exc)
             return False
 
     def query_feature_vector(

@@ -44924,7 +44924,7 @@ def llm_decide():
                     _regime_label = _mr4.get("trend_state", "unknown") if isinstance(_mr4, dict) else str(_mr4)
                     _fv = FeatureVector(
                         symbol=symbol,
-                        timeframe=str(timeframe),
+                        timeframe=str(timeframe).lower(),
                         plugin_name="supertrend",
                         timestamp=int(_time_k4.time()),
                         features_dict={
