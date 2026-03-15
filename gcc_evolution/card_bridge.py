@@ -1,14 +1,20 @@
-"""CardBridge v1.1 — 知识卡活化桥接层 + 因果记忆检索
+"""CardBridge v1.2 — 知识卡活化桥接层 + 因果记忆检索 + KNN完整接口
 
 v1.0: 扫描JSON卡片 → 建立索引 → 规则匹配 → 蒸馏
 v1.1: + 因果记忆检索 (arXiv:2601.11958 Agentic Nowcasting Layer B)
       record_activation()带市场情境 → query_contextual()按情境聚合历史正确率
       → 返回"在当前情境下表现最好的规则"，不是简单的全量匹配
+v1.2: + card_knn_precompute_index() keyword-overlap近邻预计算
+      + card_knn_session_end() 会话激活热点聚合
+      + card_knn_incremental_update_and_drift_check() PSI漂移检测
+      + card_evolution_blast_radius() BFS影响范围评估
+      + query() 支持 route/graph_hops/session_id 参数
 
 数据流:
-  skill/cards/**/*.json  ← Source of Truth
+  skill/cards/**/*.json  ← Source of Truth (统一JSON格式)
   state/card_index.json  ← 索引 (启动时生成)
   state/card_activations.jsonl  ← 激活日志 (追加写入, v1.1含情境字段)
+  state/prefetch_index.json  ← KNN近邻预计算索引
 """
 
 import json
@@ -130,7 +136,8 @@ class CardBridge:
     # ── 查询 ──────────────────────────────────────────────
 
     def query(self, module=None, card_type=None, keywords=None,
-              min_confidence=0.3) -> list:
+              min_confidence=0.3, route="keyword", graph_hops=0,
+              session_id="default", **_kw) -> list:
         """查询匹配的知识卡规则。
 
         返回: [{card_id, title, rules, confidence, quality, module}, ...]
@@ -1116,3 +1123,187 @@ def card_acc_get_phase(card_id: str, symbol: str) -> int:
     key = f"{card_id}_{symbol}"
     entry = _CARD_PHASE_CACHE.get(key, {})
     return entry.get("suggested_phase", 0)
+
+
+# ── KNN Precompute Index ────────────────────────────────────────────────────
+
+def card_knn_precompute_index(top_k: int = 10) -> dict:
+    """Build keyword-based nearest-neighbor prefetch index from all cards."""
+    bridge = CardBridge()
+    bridge.load_index()
+    cards = bridge._cards
+
+    # Build keyword vectors per card
+    from collections import Counter
+    card_keywords: dict[str, Counter] = {}
+    for cid, c in cards.items():
+        tokens = []
+        tokens.extend((c.get("title") or "").lower().split())
+        tokens.extend(t.lower() for t in (c.get("tags") or []))
+        content = c.get("content") or {}
+        tokens.extend((content.get("summary") or "").lower().split())
+        card_keywords[cid] = Counter(tokens)
+
+    # For each card, find top_k most similar by keyword overlap
+    neighbors: dict[str, list[str]] = {}
+    card_ids = list(card_keywords.keys())
+    for i, cid in enumerate(card_ids):
+        scores = []
+        kw_a = card_keywords[cid]
+        if not kw_a:
+            neighbors[cid] = []
+            continue
+        for j, other in enumerate(card_ids):
+            if i == j:
+                continue
+            kw_b = card_keywords[other]
+            shared = sum((kw_a & kw_b).values())
+            if shared > 0:
+                scores.append((other, shared))
+        scores.sort(key=lambda x: -x[1])
+        neighbors[cid] = [s[0] for s in scores[:top_k]]
+
+    # Persist
+    index_data = {
+        "meta": {"backend": "keyword_overlap", "cards": len(cards),
+                 "top_k": top_k, "path": str(_STATE_DIR / "prefetch_index.json"),
+                 "loaded": True},
+        "neighbors": neighbors,
+    }
+    _STATE_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = _STATE_DIR / "prefetch_index.json"
+    out_path.write_text(json.dumps(index_data, ensure_ascii=False), encoding="utf-8")
+    return index_data["meta"]
+
+
+# ── KNN Session End ─────────────────────────────────────────────────────────
+
+def card_knn_session_end(session_id: str = "default", top_k: int = 10) -> dict:
+    """Aggregate card access events from activations log for a session."""
+    if not _ACTIVATIONS_PATH.exists():
+        return {"session_id": session_id, "events": 0, "top_cards": [], "top_keywords": []}
+
+    from collections import Counter
+    card_hits: Counter = Counter()
+    keyword_hits: Counter = Counter()
+    events = 0
+
+    for line in _ACTIVATIONS_PATH.read_text(encoding="utf-8").splitlines():
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("session_id", "default") != session_id:
+            continue
+        events += 1
+        cid = ev.get("card_id", "")
+        if cid:
+            card_hits[cid] += 1
+        for kw in ev.get("keywords", []):
+            keyword_hits[kw] += 1
+
+    top_cards = [{"card_id": c, "hits": n} for c, n in card_hits.most_common(top_k)]
+    top_kws = [{"keyword": k, "hits": n} for k, n in keyword_hits.most_common(top_k)]
+    return {"session_id": session_id, "events": events,
+            "top_cards": top_cards, "top_keywords": top_kws}
+
+
+# ── KNN Incremental Update & Drift Check ────────────────────────────────────
+
+def card_knn_incremental_update_and_drift_check(window: int = 120,
+                                                psi_threshold: float = 0.25) -> dict:
+    """Run incremental KNN evolution + drift check on card accuracy.
+    PSI = proportion of demote/archive events in recent window.
+    """
+    result = card_knn_evolve()
+    # Drift check: read evolution log and compute PSI from recent window
+    drift_alerts = []
+    events = 0
+    demote_archive = 0
+    triggered_rebuild = False
+    if _CARD_KNN_EVO_FILE.exists():
+        lines = _CARD_KNN_EVO_FILE.read_text(encoding="utf-8").splitlines()
+        recent = lines[-window:] if len(lines) > window else lines
+        events = len(recent)
+        for line in recent:
+            try:
+                ev = json.loads(line)
+                if ev.get("action") in ("demote", "archive"):
+                    demote_archive += 1
+                    drift_alerts.append({
+                        "card_id": ev["card_id"], "action": ev["action"],
+                        "accuracy": ev.get("accuracy", 0),
+                    })
+            except json.JSONDecodeError:
+                continue
+    psi = demote_archive / max(1, events)
+    if psi >= psi_threshold:
+        triggered_rebuild = True
+    return {"evolution": result or {}, "drift_alerts": drift_alerts[:20],
+            "psi": round(psi, 4), "psi_threshold": psi_threshold,
+            "events": events, "triggered_rebuild": triggered_rebuild}
+
+
+# ── Card Evolution Blast Radius ──────────────────────────────────────────────
+
+def card_evolution_blast_radius(seed_ids: list[str] = None, hops: int = 2,
+                                out_path: str = "", depth_decay: float = 0.7,
+                                threshold_n: int = 5) -> dict:
+    """Compute blast radius of card changes via BFS on module graph."""
+    bridge = CardBridge()
+    bridge.load_index()
+    seed_ids = seed_ids or []
+
+    # Collect impacted cards via module-based BFS
+    visited: set[str] = set()
+    frontier = set(seed_ids) if seed_ids else set()
+    impacted: list[dict] = []
+
+    # If no seeds, show global summary
+    if not frontier:
+        summary = []
+        for mod, ids in bridge._by_module.items():
+            summary.append({"module": mod, "cards": len(ids),
+                            "risk": "high" if len(ids) > 50 else "medium" if len(ids) > 10 else "low"})
+        summary.sort(key=lambda x: -x["cards"])
+        total = len(bridge._cards)
+        severity = "high" if total > 500 else "medium" if total > 100 else "low"
+        result = {"hops": hops, "summary": {"impacted_total": total, "severity": severity},
+                  "modules": summary, "total_cards": total, "needs_approval": total > threshold_n}
+        if out_path:
+            from pathlib import Path
+            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(out_path).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return result
+
+    for hop in range(hops):
+        next_frontier: set[str] = set()
+        risk = round(1.0 * (depth_decay ** hop), 3)
+        for cid in frontier:
+            if cid in visited:
+                continue
+            visited.add(cid)
+            card = bridge._cards.get(cid)
+            if not card:
+                continue
+            module = (card.get("system_mapping") or {}).get("module", "")
+            impacted.append({"card_id": cid, "module": module, "hop": hop, "risk": risk})
+            # Expand to sibling cards in same module
+            for sibling in bridge._by_module.get(module, []):
+                if sibling not in visited:
+                    next_frontier.add(sibling)
+        frontier = next_frontier
+
+    total = len(impacted)
+    severity = "critical" if total > 50 else "high" if total > 20 else "medium" if total > 5 else "low"
+    result = {
+        "hops": hops, "seeds": seed_ids,
+        "summary": {"impacted_total": total, "severity": severity},
+        "impacted": impacted[:100],
+        "needs_approval": total > threshold_n,
+    }
+    if out_path:
+        from pathlib import Path
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    return result

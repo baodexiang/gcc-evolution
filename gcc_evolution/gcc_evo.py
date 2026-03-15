@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gcc-evo v5.420 — GCC Evolution Engine with Visual Dashboard"""
+"""gcc-evo v5.430 — GCC Evolution Engine with Visual Dashboard"""
 from __future__ import annotations
 
 import json
@@ -35,7 +35,7 @@ if _PROJECT_ROOT not in sys.path:
 
 KEYS_FILE = Path(".gcc/keys.yaml")
 
-HELP_TEXT = """  GCC v5.420 — Active Evolution Engine
+HELP_TEXT = """  GCC v5.430 — Active Evolution Engine
   ═══════════════════════════════════════════════════
 
   Daily Use:
@@ -3338,21 +3338,31 @@ def cmd_dashboard(export, out, serve, port):
         except Exception:
             pass
 
-    # Scan skill/cards/ directories for knowledge cards (supplemental)
+    # Scan skill/cards/ directories for knowledge cards (JSON only)
     _skill_cards_dir = _gcc / "skill" / "cards"
     _card_dirs_seen = set()
     if _skill_cards_dir.exists():
-        for _md_file in _skill_cards_dir.rglob("*.md"):
-            _cat = _md_file.parent.name
-            _card_id = f"sk_{_md_file.stem[:40]}"
+        for _json_file in _skill_cards_dir.rglob("*.json"):
+            _cat = _json_file.parent.name
+            _card_id = f"sk_{_json_file.stem[:40]}"
             if _card_id not in _card_dirs_seen:
                 _card_dirs_seen.add(_card_id)
-                _cards_out.append({
-                    "key_id": _cat,
-                    "title": _md_file.stem.replace("_", " "),
-                    "card_type": "knowledge",
-                    "layer_priority": 2,
-                })
+                try:
+                    import json as _jl
+                    _jdata = _jl.loads(_json_file.read_text(encoding="utf-8"))
+                    _cards_out.append({
+                        "key_id": _cat,
+                        "title": _jdata.get("title", _json_file.stem.replace("_", " ")),
+                        "card_type": _jdata.get("type", "knowledge"),
+                        "layer_priority": 2,
+                    })
+                except Exception:
+                    _cards_out.append({
+                        "key_id": _cat,
+                        "title": _json_file.stem.replace("_", " "),
+                        "card_type": "knowledge",
+                        "layer_priority": 2,
+                    })
         # Generate skill entries from card categories
         _cat_counts = {}
         for c in _cards_out:
@@ -6220,12 +6230,25 @@ def card_knn_precompute(top_k):
 @cmd_card.command("knn-status")
 def card_knn_status():
     """Show prefetch index preload status."""
-    from gcc_evolution.card_bridge import CardBridge
-    b = CardBridge()
-    meta = (b._prefetch_index or {}).get("meta", {})
+    import json as _js
+    from pathlib import Path as _P
+    _idx_path = _P(".gcc") / ".." / "state" / "prefetch_index.json"
+    # Try common locations
+    for candidate in [_P("state/prefetch_index.json"), _P(".gcc/../state/prefetch_index.json")]:
+        if candidate.exists():
+            _idx_path = candidate
+            break
+    meta = {}
+    if _idx_path.exists():
+        try:
+            data = _js.loads(_idx_path.read_text(encoding="utf-8"))
+            meta = data.get("meta", {})
+        except Exception:
+            pass
     click.echo(
-        f"\n  ✦ prefetch backend={meta.get('backend')} loaded={meta.get('loaded', False)} "
-        f"path=state/prefetch_index.pkl\n"
+        f"\n  ✦ prefetch backend={meta.get('backend', 'none')} loaded={meta.get('loaded', False)} "
+        f"cards={meta.get('cards', 0)} top_k={meta.get('top_k', 0)} "
+        f"path={meta.get('path', 'state/prefetch_index.json')}\n"
     )
 
 
