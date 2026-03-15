@@ -164,6 +164,47 @@ def _clip(value: float, low: float, high: float) -> float:
     return value
 
 
+def _fetch_macro_data() -> Dict[str, Any]:
+    """GCC-0006: 拉取宏观指标 (yfinance: ^TNX 10Y国债, ^VIX 恐慌指数)"""
+    result: Dict[str, Any] = {}
+    try:
+        import yfinance as yf
+        tnx = yf.Ticker("^TNX").history(period="5d")
+        if tnx is not None and not tnx.empty and "Close" in tnx.columns:
+            result["tnx"] = round(float(tnx["Close"].iloc[-1]), 2)
+        vix = yf.Ticker("^VIX").history(period="5d")
+        if vix is not None and not vix.empty and "Close" in vix.columns:
+            result["vix"] = round(float(vix["Close"].iloc[-1]), 2)
+    except Exception as exc:
+        _log_key003(f"[KEY-003][MACRO] fetch error: {exc}")
+    return result
+
+
+def _compute_macro_risk(macro: Dict[str, Any]) -> float:
+    """GCC-0006: 宏观数据→risk_penalty加成
+    VIX>30 → +0.5, VIX>40 → +1.0
+    10Y>5% → +0.3, 10Y>6% → +0.6
+    叠加上限2.0"""
+    risk = 0.0
+    vix = macro.get("vix")
+    if isinstance(vix, (int, float)):
+        if vix > 40:
+            risk += 1.0
+        elif vix > 30:
+            risk += 0.5
+        elif vix > 25:
+            risk += 0.2
+    tnx = macro.get("tnx")
+    if isinstance(tnx, (int, float)):
+        if tnx > 6.0:
+            risk += 0.6
+        elif tnx > 5.0:
+            risk += 0.3
+        elif tnx > 4.5:
+            risk += 0.1
+    return min(2.0, risk)
+
+
 def _median(values: List[float]) -> float:
     if not values:
         return 0.0
@@ -405,6 +446,7 @@ def _profile_for_symbol(
                 "confidence_score": float(live_profile.get("confidence_score", 0.60)),
                 "missing_raw_fields": list(live_profile.get("missing_raw_fields", [])),
                 "raw_metrics": live_profile.get("raw_metrics", {}),
+                "crypto_scores": _coerce_score_map(live_profile.get("crypto_scores")),
             }
         except Exception as exc:
             if strict_live:
@@ -477,6 +519,7 @@ def _build_symbol_payload_from_profile(
     symbol: str,
     as_of: str,
     profile: Dict[str, Any],
+    macro_risk: float = 0.0,
 ) -> Dict[str, Any]:
     # GCC-0004: 提取DCF peer-ranked score (如有)
     _dcf_scores = profile.get("dcf_scores", {}) or {}
@@ -494,6 +537,7 @@ def _build_symbol_payload_from_profile(
         cashflow_scores=profile["cashflow_scores"],
         cashflow_weights=profile["cashflow_weights"],
         dcf_score=_dcf_peer_score,
+        macro_risk=macro_risk,
         confidence_score=float(profile.get("confidence_score", 1.0)),
         audit_opinion=profile["audit_opinion"],
         altman_z=profile["altman_z"],
@@ -604,6 +648,17 @@ def run_batch_query(
             failed += 1
             outputs.append({"ticker": symbol, "error": str(exc)})
 
+    # GCC-0006: 拉取宏观数据 (VIX + 10Y国债)
+    macro_risk = 0.0
+    macro_data: Dict[str, Any] = {}
+    if source in {"openbb", "live"}:
+        macro_data = _fetch_macro_data()
+        macro_risk = _compute_macro_risk(macro_data)
+        _log_key003(
+            f"[KEY-003][MACRO] vix={macro_data.get('vix','N/A')} "
+            f"tnx={macro_data.get('tnx','N/A')} risk={macro_risk:.2f}"
+        )
+
     if source in {"openbb", "live"} and profiles:
         _cross_section_impute_profiles(symbols=[s for s in symbols if s in profiles], profiles=profiles)
         # GCC-0003: 在peer ranking前计算DCF, 注入raw_metrics供peer ranking排名
@@ -634,7 +689,7 @@ def run_batch_query(
         if symbol not in profiles:
             continue
         try:
-            outputs.append(_build_symbol_payload_from_profile(symbol=symbol, as_of=as_of, profile=profiles[symbol]))
+            outputs.append(_build_symbol_payload_from_profile(symbol=symbol, as_of=as_of, profile=profiles[symbol], macro_risk=macro_risk))
         except Exception as exc:
             failed += 1
             outputs.append({"ticker": symbol, "error": str(exc)})
@@ -655,6 +710,10 @@ def run_batch_query(
         "strict_live": strict_live,
         "results": outputs,
     }
+    # GCC-0006: 附加宏观数据
+    if macro_data:
+        snapshot["macro"] = macro_data
+        snapshot["macro_risk"] = macro_risk
     # GCC-0002: 附加peer统计和排名到输出
     if peer_result is not None:
         snapshot["peer_stats"] = {

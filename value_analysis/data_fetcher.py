@@ -618,28 +618,143 @@ def _binance_daily_closes(symbol: str) -> list[float]:
     return closes
 
 
+_CRYPTO_COINGECKO_MAP: Dict[str, str] = {
+    "BTCUSDC": "bitcoin",
+    "ETHUSDC": "ethereum",
+    "SOLUSDC": "solana",
+    "ZECUSDC": "zcash",
+}
+
+
+def _fetch_coingecko_data(cg_id: str) -> Dict[str, Any]:
+    """GCC-0005: CoinGecko免费API — 市值排名+交易量+开发者活跃度"""
+    url = (
+        f"https://api.coingecko.com/api/v3/coins/{cg_id}"
+        "?localization=false&tickers=false&community_data=false&sparkline=false"
+    )
+    raw = _read_json(url)
+    md = raw.get("market_data", {})
+    dev = raw.get("developer_data", {})
+    return {
+        "market_cap_rank": raw.get("market_cap_rank"),
+        "market_cap_usd": md.get("market_cap", {}).get("usd"),
+        "total_volume_24h": md.get("total_volume", {}).get("usd"),
+        "dev_commits_4w": dev.get("commit_count_4_weeks", 0),
+        "dev_forks": dev.get("forks", 0),
+        "dev_stars": dev.get("stars", 0),
+    }
+
+
+def _fetch_defillama_tvl(gecko_id: str) -> Optional[float]:
+    """GCC-0005: DefiLlama免费API — 链TVL"""
+    try:
+        url = "https://api.llama.fi/v2/chains"
+        raw = _read_json(url)
+        if isinstance(raw, dict):
+            # wrapped in object
+            chains = raw.get("chains", raw.get("data", []))
+        else:
+            chains = raw
+        # _read_json expects dict, but this returns list — handle via urlopen
+    except Exception:
+        chains = []
+    if not chains:
+        try:
+            req = Request("https://api.llama.fi/v2/chains", headers={"User-Agent": "Mozilla/5.0"})
+            with urlopen(req, timeout=15) as resp:
+                chains = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return None
+    if not isinstance(chains, list):
+        return None
+    for chain in chains:
+        if isinstance(chain, dict) and chain.get("gecko_id") == gecko_id:
+            tvl = chain.get("tvl")
+            if isinstance(tvl, (int, float)):
+                return float(tvl)
+    return None
+
+
+def _coingecko_daily_closes(cg_id: str) -> list[float]:
+    """GCC-0005: CoinGecko价格替代Binance(451地区限制)"""
+    url = f"https://api.coingecko.com/api/v3/coins/{cg_id}/market_chart?vs_currency=usd&days=200&interval=daily"
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    prices = data.get("prices", [])
+    closes = [float(p[1]) for p in prices if isinstance(p, list) and len(p) >= 2]
+    if len(closes) < 130:
+        raise ValueError(f"insufficient CoinGecko daily data for {cg_id}: {len(closes)} bars")
+    return closes
+
+
 def fetch_crypto_profile_live(symbol: str) -> Dict[str, Any]:
-    closes = _binance_daily_closes(symbol)
+    """GCC-0005: 加密货币增强profile — CoinGecko价格+基本面 + DefiLlama TVL"""
+    cg_id = _CRYPTO_COINGECKO_MAP.get(symbol.upper())
+    # 价格: CoinGecko优先(Binance 451), Binance fallback
+    try:
+        closes = _coingecko_daily_closes(cg_id) if cg_id else _binance_daily_closes(symbol)
+    except Exception:
+        closes = _binance_daily_closes(symbol)
     returns = _compute_returns(closes)
     momentum_scores = {
         "ret_1m": _linear_high_better(returns["ret_1m"], good=0.20, bad=-0.20),
         "ret_3m": _linear_high_better(returns["ret_3m"], good=0.45, bad=-0.45),
         "ret_6m": _linear_high_better(returns["ret_6m"], good=0.80, bad=-0.80),
     }
+
+    raw_metrics: Dict[str, Any] = {
+        "ret_1m": returns["ret_1m"],
+        "ret_3m": returns["ret_3m"],
+        "ret_6m": returns["ret_6m"],
+    }
+
+    # CoinGecko基本面 (市值排名+交易量+开发者)
+    crypto_scores: Dict[str, float] = {}
+    cg_id = _CRYPTO_COINGECKO_MAP.get(symbol.upper())
+    if cg_id:
+        try:
+            cg = _fetch_coingecko_data(cg_id)
+            raw_metrics["market_cap_rank"] = cg.get("market_cap_rank")
+            raw_metrics["market_cap_usd"] = cg.get("market_cap_usd")
+            raw_metrics["total_volume_24h"] = cg.get("total_volume_24h")
+            raw_metrics["dev_commits_4w"] = cg.get("dev_commits_4w")
+            raw_metrics["dev_stars"] = cg.get("dev_stars")
+            # 市值排名评分: top 10 → +2, 50+ → -2
+            rank = cg.get("market_cap_rank")
+            if isinstance(rank, (int, float)):
+                crypto_scores["mcap_rank"] = _linear_high_better(1.0 / rank, good=0.10, bad=0.02)
+            # 开发者活跃度评分: commits_4w
+            commits = cg.get("dev_commits_4w", 0)
+            if isinstance(commits, (int, float)):
+                crypto_scores["dev_activity"] = _linear_high_better(float(commits), good=100.0, bad=10.0)
+        except Exception:
+            pass
+
+        # DefiLlama TVL
+        try:
+            tvl = _fetch_defillama_tvl(cg_id)
+            if tvl is not None:
+                raw_metrics["tvl_usd"] = tvl
+                # TVL评分: $10B+ → +2, $100M- → -2
+                crypto_scores["tvl"] = _linear_high_better(tvl / 1e9, good=10.0, bad=0.1)
+        except Exception:
+            pass
+
+    confidence = 0.75 if len(crypto_scores) >= 2 else 0.45
+
     return {
-        "source": "live.binance",
+        "source": "live.binance+coingecko+defillama",
         "valuation_scores": {"pe": 0.0, "pb": 0.0, "ev_ebitda": 0.0, "fcf_yield": 0.0},
         "valuation_weights": {"pe": 0.30, "pb": 0.20, "ev_ebitda": 0.25, "fcf_yield": 0.25},
         "momentum_scores": momentum_scores,
         "momentum_weights": {"ret_1m": 0.30, "ret_3m": 0.35, "ret_6m": 0.35},
+        "crypto_scores": crypto_scores,
         "audit_opinion": "standard",
         "altman_z": 3.0,
         "quality_key_missing": False,
-        "raw_metrics": {
-            "ret_1m": returns["ret_1m"],
-            "ret_3m": returns["ret_3m"],
-            "ret_6m": returns["ret_6m"],
-        },
+        "confidence_score": confidence,
+        "raw_metrics": raw_metrics,
     }
 
 

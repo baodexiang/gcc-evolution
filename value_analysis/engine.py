@@ -41,6 +41,7 @@ def analyze_value_profile(
     cashflow_scores: Optional[Mapping[str, Optional[float]]] = None,
     cashflow_weights: Optional[Mapping[str, float]] = None,
     dcf_score: Optional[float] = None,
+    macro_risk: float = 0.0,
     confidence_score: float = 1.0,
     quality_key_missing: bool = False,
 ) -> ValueAnalysisResult:
@@ -111,7 +112,9 @@ def analyze_value_profile(
     total_fund_missing = len(valuation.missing_fields) + profitability_missing + balance_missing + cashflow_missing
     missing_ratio = (total_fund_missing / total_fund_fields) if total_fund_fields > 0 else 0.0
     confidence = max(0.10, min(1.00, float(confidence_score)))
-    risk_penalty = max(0.0, min(4.0, max(4.0 * missing_ratio, (1.0 - confidence) * 4.0)))
+    data_penalty = max(4.0 * missing_ratio, (1.0 - confidence) * 4.0)
+    # GCC-0006: 宏观风险叠加 (VIX高+利率高→penalty加重)
+    risk_penalty = max(0.0, min(6.0, data_penalty + float(macro_risk)))
 
     quality = evaluate_quality_layer(audit_opinion, altman_z, key_missing=quality_key_missing)
     composite = compute_composite_score(

@@ -85,6 +85,11 @@ METRIC_DIRECTION: Dict[str, bool] = {
     "ret_6m": True,
     # GCC-0003: DCF折价率 — 越高越好(正=低估)
     "dcf_discount_pct": True,
+    # GCC-0005: 加密基本面
+    "market_cap_rank": False,  # 排名越低(数字越小)越好
+    "dev_commits_4w": True,
+    "tvl_usd": True,
+    "total_volume_24h": True,
 }
 
 # 原始指标到评分桶的映射
@@ -106,6 +111,11 @@ METRIC_TO_BUCKET: Dict[str, str] = {
     "ret_6m": "momentum_scores",
     # GCC-0003: DCF折价率独立桶
     "dcf_discount_pct": "dcf_scores",
+    # GCC-0005: 加密基本面桶
+    "market_cap_rank": "crypto_scores",
+    "dev_commits_4w": "crypto_scores",
+    "tvl_usd": "crypto_scores",
+    "total_volume_24h": "crypto_scores",
 }
 
 
