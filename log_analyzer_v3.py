@@ -681,38 +681,7 @@ class LogicChecker:
             r"双底双顶.*跳过x4|跳过x4过滤.*双底|v3\.620.*跳过x4"
         ),
 
-        # === B1/B2/B3 维度1: 通道本身错误 (语法/数据/卡死/断连 — 立刻可修) ===
-        "b1_code_error": re.compile(
-            r"\[B1\].*(?:NameError|TypeError|KeyError|ValueError|AttributeError|"
-            r"ImportError|ZeroDivision|IndexError|SyntaxError|"
-            r"not defined|has no attribute|object is not|cannot unpack|"
-            r"invalid literal|unexpected keyword)",
-            re.I
-        ),
-        "b2_code_error": re.compile(
-            r"\[B2\].*(?:NameError|TypeError|KeyError|ValueError|AttributeError|"
-            r"ImportError|ZeroDivision|IndexError|"
-            r"not defined|has no attribute|object is not)",
-            re.I
-        ),
-        "b3_code_error": re.compile(
-            r"\[B3\].*(?:NameError|TypeError|KeyError|ValueError|AttributeError|"
-            r"ImportError|ZeroDivision|IndexError|"
-            r"not defined|has no attribute|object is not)",
-            re.I
-        ),
-        "b_data_lost": re.compile(
-            r"\[B[123]\].*(?:数据丢失|data.*lost|None.*price|price.*None|"
-            r"NaN|inf|空数据|no data|数据为空|bars不足|K线不足)",
-            re.I
-        ),
-        "b_hang_timeout": re.compile(
-            r"\[B[123]\].*(?:Timeout|超时|卡死|hang|deadlock|"
-            r"ConnectionError|ConnectionRefused|ECONNREFUSED|"
-            r"断连|断开|socket.*closed|RemoteDisconnected)",
-            re.I
-        ),
-        # 通用错误兜底 (不在上面细分类的)
+        # === B1/B2/B3 通道错误追踪 ===
         "b1_error": re.compile(
             r"\[B1\].*(?:ERROR|失败|异常|error|fail)",
             re.I
@@ -727,43 +696,6 @@ class LogicChecker:
         ),
         "b1_blocked": re.compile(
             r"\[BLOCKED\]\[非B1\]"
-        ),
-        # === 维度2: 信号丢失 (BUY/SELL进来但没进信号池/没被处理) ===
-        "b_signal_push": re.compile(
-            r"\[B1\].*\[GCC-TM\]\[PUSH\].*(?:BUY|SELL)",
-            re.I
-        ),
-        "b_signal_received": re.compile(
-            r"\[P0收到\]|\[P0\]\s+\S+\s+(?:BUY|SELL)|"
-            r"\[S2\]\[P0\]\s+\S+\s+(?:BUY|SELL)",
-            re.I
-        ),
-        "b_signal_push_fail": re.compile(
-            r"\[B1\].*\[GCC-TM\]\[PUSH\].*推送失败",
-            re.I
-        ),
-        # === 维度3: 过滤缺失 (应该有过滤记录的没产生) ===
-        "b_gate_pass": re.compile(
-            r"\[B1\].*\[KEY-00[12]\]\[GATE\].*allowed=True"
-        ),
-        "b_gate_block": re.compile(
-            r"\[B1\].*\[KEY-00[12]\]\[GATE\].*拦截"
-        ),
-        "b_filter_chain": re.compile(
-            r"\[FILTER_CHAIN\].*passed=|FILTER_CHAIN拦截"
-        ),
-        # === 维度4: 执行失败 (最终BUY/SELL但没下单) ===
-        "b_exec_success": re.compile(
-            r"\[B1\].*\[GCC-TM\].*下单成功|"
-            r"\[B2\].*success=True|"
-            r"\[B3\].*success=True"
-        ),
-        "b_exec_fail": re.compile(
-            r"\[B1\].*\[GCC-TM\].*下单失败|"
-            r"\[B1\].*\[GCC-TM\]\[ERROR\]|"
-            r"\[B2\].*\[ERROR\]|"
-            r"\[B3\].*\[ERROR\]|"
-            r"\[B3\].*BLOCKED.*SELL拦截"
         ),
 
         # === P1-3: API/网络错误追踪 ===
@@ -813,17 +745,6 @@ class LogicChecker:
             "b2_errors": 0,
             "b3_errors": 0,
             "b1_blocked": 0,
-            "b_code_errors": {"B1": 0, "B2": 0, "B3": 0},
-            "b_data_lost": 0,
-            "b_hang_timeout": 0,
-            "b_signal_push": 0,
-            "b_signal_received": 0,
-            "b_signal_push_fail": 0,
-            "b_gate_pass": 0,
-            "b_gate_block": 0,
-            "b_filter_chain": 0,
-            "b_exec_success": 0,
-            "b_exec_fail": 0,
             "b_error_details": [],
         }
 
@@ -960,102 +881,26 @@ class LogicChecker:
                     "检查API连接和账户状态"
                 )
 
-            # 10. B1/B2/B3 通道错误 — 维度1细分
-            _b_matched = False
-            # 维度1a: 代码错误 (语法/类型/属性 — 立刻可修)
-            for _bk, _br in (("b1_code_error", "B1"), ("b2_code_error", "B2"), ("b3_code_error", "B3")):
+            # 10. B1/B2/B3 通道错误
+            for _bk, _br in (("b1_error", "B1"), ("b2_error", "B2"), ("b3_error", "B3")):
                 if self.PATTERNS[_bk].search(line):
-                    results["b_code_errors"][_br] += 1
                     results[f"{_br.lower()}_errors"] += 1
                     ts_m = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})', line)
                     results["b_error_details"].append({
                         "time": ts_m.group(1) if ts_m else "",
-                        "channel": _br, "dim": "CODE",
-                        "symbol": symbol, "line": line.strip()[:150],
+                        "channel": _br,
+                        "symbol": symbol,
+                        "line": line.strip()[:150],
                     })
                     detector.add_issue(
-                        "CRITICAL", f"{_br}_CODE_ERROR", symbol,
-                        f"[{_br}][代码] {line.strip()[:100]}",
+                        "CRITICAL", f"{_br}_CHANNEL_ERROR", symbol,
+                        f"[{_br}] 通道错误: {line.strip()[:100]}",
                         line.strip()[:200],
-                        "代码BUG — 立刻修复"
+                        f"检查{_br}通道执行路径"
                     )
-                    _b_matched = True
                     break
-            # 维度1b: 数据丢失
-            if not _b_matched and self.PATTERNS["b_data_lost"].search(line):
-                results["b_data_lost"] += 1
-                _br = "B1" if "[B1]" in line else ("B2" if "[B2]" in line else "B3")
-                results[f"{_br.lower()}_errors"] += 1
-                ts_m = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})', line)
-                results["b_error_details"].append({
-                    "time": ts_m.group(1) if ts_m else "",
-                    "channel": _br, "dim": "DATA",
-                    "symbol": symbol, "line": line.strip()[:150],
-                })
-                detector.add_issue(
-                    "CRITICAL", f"{_br}_DATA_LOST", symbol,
-                    f"[{_br}][数据] {line.strip()[:100]}",
-                    line.strip()[:200],
-                    "数据丢失 — 检查数据源"
-                )
-                _b_matched = True
-            # 维度1c: 卡死/断连
-            if not _b_matched and self.PATTERNS["b_hang_timeout"].search(line):
-                results["b_hang_timeout"] += 1
-                _br = "B1" if "[B1]" in line else ("B2" if "[B2]" in line else "B3")
-                results[f"{_br.lower()}_errors"] += 1
-                ts_m = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})', line)
-                results["b_error_details"].append({
-                    "time": ts_m.group(1) if ts_m else "",
-                    "channel": _br, "dim": "HANG",
-                    "symbol": symbol, "line": line.strip()[:150],
-                })
-                detector.add_issue(
-                    "CRITICAL", f"{_br}_HANG_TIMEOUT", symbol,
-                    f"[{_br}][断连] {line.strip()[:100]}",
-                    line.strip()[:200],
-                    "超时/断连 — 检查网络和进程"
-                )
-                _b_matched = True
-            # 维度1d: 通用兜底
-            if not _b_matched:
-                for _bk, _br in (("b1_error", "B1"), ("b2_error", "B2"), ("b3_error", "B3")):
-                    if self.PATTERNS[_bk].search(line):
-                        results[f"{_br.lower()}_errors"] += 1
-                        ts_m = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})', line)
-                        results["b_error_details"].append({
-                            "time": ts_m.group(1) if ts_m else "",
-                            "channel": _br, "dim": "OTHER",
-                            "symbol": symbol, "line": line.strip()[:150],
-                        })
-                        detector.add_issue(
-                            "CRITICAL", f"{_br}_CHANNEL_ERROR", symbol,
-                            f"[{_br}][其他] {line.strip()[:100]}",
-                            line.strip()[:200],
-                            f"检查{_br}通道执行路径"
-                        )
-                        break
             if self.PATTERNS["b1_blocked"].search(line):
                 results["b1_blocked"] += 1
-            # 维度2: 信号流水线计数
-            if self.PATTERNS["b_signal_push"].search(line):
-                results["b_signal_push"] += 1
-            if self.PATTERNS["b_signal_received"].search(line):
-                results["b_signal_received"] += 1
-            if self.PATTERNS["b_signal_push_fail"].search(line):
-                results["b_signal_push_fail"] += 1
-            # 维度3: 过滤计数
-            if self.PATTERNS["b_gate_pass"].search(line):
-                results["b_gate_pass"] += 1
-            if self.PATTERNS["b_gate_block"].search(line):
-                results["b_gate_block"] += 1
-            if self.PATTERNS["b_filter_chain"].search(line):
-                results["b_filter_chain"] += 1
-            # 维度4: 执行计数
-            if self.PATTERNS["b_exec_success"].search(line):
-                results["b_exec_success"] += 1
-            if self.PATTERNS["b_exec_fail"].search(line):
-                results["b_exec_fail"] += 1
 
         detector.stats["logic_check_results"] = results
         return results
@@ -6681,86 +6526,17 @@ class ReportGenerator:
         _b2e = logic_result.get("b2_errors", 0)
         _b3e = logic_result.get("b3_errors", 0)
         _b1blk = logic_result.get("b1_blocked", 0)
-        _b_code = logic_result.get("b_code_errors", {})
-        _b_data = logic_result.get("b_data_lost", 0)
-        _b_hang = logic_result.get("b_hang_timeout", 0)
         if _b1e + _b2e + _b3e + _b1blk > 0:
             lines.extend([
                 "",
                 "### B1/B2/B3 通道错误",
                 "",
-                "**按通道**:",
-                f"- B1(主决策): {_b1e}次" + (f" + {_b1blk}次非B1拦截" if _b1blk else ""),
-                f"- B2(TSLA期权): {_b2e}次",
-                f"- B3(BTC短线): {_b3e}次",
+                f"- B1(主决策): {_b1e}次错误" + (f" + {_b1blk}次非B1拦截" if _b1blk else ""),
+                f"- B2(TSLA期权): {_b2e}次错误",
+                f"- B3(BTC短线): {_b3e}次错误",
             ])
-            # 维度1: 通道本身错误
-            lines.extend([
-                "",
-                "**维度1: 通道本身错误 (代码BUG — 立刻可修)**:",
-                f"- 🔴 代码BUG (语法/类型/属性): B1={_b_code.get('B1',0)} B2={_b_code.get('B2',0)} B3={_b_code.get('B3',0)}",
-                f"- 🟡 数据丢失 (None/NaN/空): {_b_data}次",
-                f"- 🟠 卡死/断连 (超时/断开): {_b_hang}次",
-            ])
-            _b_details = logic_result.get("b_error_details", [])
-            for _dim, _dim_label in [("CODE", "代码BUG"), ("DATA", "数据丢失"), ("HANG", "卡死/断连")]:
-                _dim_items = [d for d in _b_details if d.get("dim") == _dim]
-                if _dim_items:
-                    lines.append(f"\n  {_dim_label} ({len(_dim_items)}条):")
-                    for _bd in _dim_items[:3]:
-                        lines.append(f"    [{_bd['time']}] [{_bd['channel']}] {_bd['symbol']} {_bd['line'][:80]}")
-            # 维度2: 信号丢失
-            _sig_push = logic_result.get("b_signal_push", 0)
-            _sig_recv = logic_result.get("b_signal_received", 0)
-            _sig_fail = logic_result.get("b_signal_push_fail", 0)
-            lines.extend([
-                "",
-                "**维度2: 信号丢失 (BUY/SELL没进信号池)**:",
-                f"- 信号推送: {_sig_push}次, P0收到: {_sig_recv}次, 推送失败: {_sig_fail}次",
-            ])
-            if _sig_fail > 0:
-                lines.append(f"  ⚠️ {_sig_fail}次信号推送失败 — 检查gcc_push_signal")
-            # 维度3: 过滤缺失
-            _gate_pass = logic_result.get("b_gate_pass", 0)
-            _gate_blk = logic_result.get("b_gate_block", 0)
-            _fc = logic_result.get("b_filter_chain", 0)
-            lines.extend([
-                "",
-                "**维度3: 过滤日志 (门控是否正常工作)**:",
-                f"- KEY-001/002门控: 放行{_gate_pass} 拦截{_gate_blk}",
-                f"- FilterChain: {_fc}次",
-            ])
-            if _gate_pass + _gate_blk == 0:
-                lines.append("  ⚠️ 无门控记录 — 门控可能未执行")
-            # 维度4: 执行失败
-            _exec_ok = logic_result.get("b_exec_success", 0)
-            _exec_fail = logic_result.get("b_exec_fail", 0)
-            lines.extend([
-                "",
-                "**维度4: 执行结果 (决策BUY/SELL后下单)**:",
-                f"- 下单成功: {_exec_ok}次, 下单失败: {_exec_fail}次",
-            ])
-            if _exec_fail > 0:
-                lines.append(f"  ⚠️ {_exec_fail}次下单失败 — 检查API连接")
-            # 维度5: PnL亏损 (读trade_history)
-            try:
-                _th_path = Path("state/trade_history.json")
-                if _th_path.exists():
-                    _th = json.loads(_th_path.read_text(encoding="utf-8"))
-                    _th_today = [t for t in _th if t.get("ts", "").startswith(date)]
-                    _th_losses = [t for t in _th_today if t.get("pnl_pct", 0) < 0]
-                    _th_total_pnl = sum(t.get("pnl_pct", 0) for t in _th_today)
-                    if _th_today:
-                        lines.extend([
-                            "",
-                            "**维度5: PnL结果**:",
-                            f"- 今日交易: {len(_th_today)}笔, 亏损: {len(_th_losses)}笔",
-                            f"- 总PnL: {_th_total_pnl:+.2f}%",
-                        ])
-                        for _tl in _th_losses[:3]:
-                            lines.append(f"  - {_tl.get('symbol','')} {_tl.get('action','')} PnL={_tl.get('pnl_pct',0):+.2f}% source={_tl.get('source','')}")
-            except Exception:
-                pass
+            for _bd in logic_result.get("b_error_details", [])[:8]:
+                lines.append(f"  - [{_bd['time']}] [{_bd['channel']}] {_bd['symbol']} {_bd['line'][:80]}")
             # 交叉对比key009
             try:
                 _k9_path = Path("state/key009_audit.latest.json")
@@ -6770,7 +6546,7 @@ class ReportGenerator:
                     _k9_fixed = sum(1 for i in _k9_data.get("24h", {}).get("issues", [])
                                     if i.get("task") == "LOG-ERROR" and i.get("fixed"))
                     if _k9_raw > 0:
-                        lines.append(f"\n**KEY-009交叉**: 原始错误{_k9_raw}条, 已标记修复{_k9_fixed}条")
+                        lines.append(f"- KEY-009交叉: 原始错误{_k9_raw}条, 已标记修复{_k9_fixed}条")
             except Exception:
                 pass
             lines.append("")

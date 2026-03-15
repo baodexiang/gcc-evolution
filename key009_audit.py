@@ -296,6 +296,40 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
                       "by_direction": defaultdict(lambda: {"pass": 0, "block": 0, "no_data": 0})}
     dc_stats = {"total": 0, "pass": 0, "block": 0, "no_data": 0}
 
+    # ── 原始ERROR/WARNING日志聚合 ──
+    raw_error_patterns = defaultdict(lambda: {"count": 0, "symbols": set(), "first": "", "last": "", "sample": ""})
+    # 噪声模式: 已知无害的日志模式(不需要修复)
+    _NOISE_PATTERNS = {
+        "reason不含REAL_FIRST_REACTION",        # 降级模式, 正常fallback
+        "AI信号解析失败",                          # 同上
+        "HTTP Request: GET",                      # httpx库自动输出
+    }
+    # ── 5维度错误计数 ──
+    error_dimensions = {
+        "D1_code": [],      # 维度1: 代码BUG (语法/类型/属性 — 立刻可修)
+        "D2_signal": [],    # 维度2: 信号丢失 (BUY/SELL没进信号池)
+        "D3_filter": [],    # 维度3: 过滤缺失 (门控没工作)
+        "D4_exec": [],      # 维度4: 执行失败 (下单没成功)
+        "D5_pnl": [],       # 维度5: PnL亏损 (框架问题)
+    }
+    _D1_CODE_RE = re.compile(
+        r"NameError|TypeError|KeyError|ValueError|AttributeError|"
+        r"ImportError|ZeroDivision|IndexError|SyntaxError|"
+        r"not defined|has no attribute|object is not|cannot unpack|"
+        r"invalid literal|unexpected keyword", re.I)
+    _D1_DATA_RE = re.compile(
+        r"数据丢失|data.*lost|NaN|inf|空数据|no data|数据为空|bars不足|K线不足|None.*price|price.*None", re.I)
+    _D1_HANG_RE = re.compile(
+        r"Timeout|超时|卡死|hang|deadlock|ConnectionError|ConnectionRefused|"
+        r"ECONNREFUSED|断连|断开|socket.*closed|RemoteDisconnected", re.I)
+    _D2_SIGNAL_RE = re.compile(
+        r"推送失败|PUSH.*失败|信号.*丢失|signal.*lost|去重.*跳过", re.I)
+    _D3_FILTER_RE = re.compile(
+        r"GATE.*ERROR|门控.*异常|FILTER.*ERROR|过滤.*失败", re.I)
+    _D4_EXEC_RE = re.compile(
+        r"下单失败|执行失败|order.*fail|SignalStack.*error|3Commas.*error|"
+        r"Coinbase.*error|BLOCKED.*SELL拦截", re.I)
+
     # 支持多日志文件(逗号分隔)
     log_paths = [p.strip() for p in log_path.split(",") if p.strip()]
     all_log_files = [Path(p) for p in log_paths if Path(p).exists()]
@@ -680,6 +714,50 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
                 elif "[DC_NODATA]" in msg:
                     dc_stats["total"] += 1
                     dc_stats["no_data"] += 1
+
+            # ── 原始 [ERROR] 日志聚合 ──
+            if "[ERROR]" in line:
+                # 提取品种和错误消息: "SYMBOL: error message"
+                _err_m = re.search(r"\[ERROR\]\s*(\S+?):\s*(.+)", line)
+                if _err_m:
+                    _err_sym = _err_m.group(1)
+                    _err_msg = _err_m.group(2).strip()
+                else:
+                    _err_sym = "UNKNOWN"
+                    _err_msg = line.split("[ERROR]")[-1].strip()[:120]
+                # 去除行号等动态部分，生成聚合key
+                _err_key = re.sub(r"line \d+", "line N", _err_msg)
+                _err_key = re.sub(r"0x[0-9a-f]+", "0xNNN", _err_key)
+                _err_key = _err_key[:80]  # 截断保持key稳定
+                _ep = raw_error_patterns[_err_key]
+                _ep["count"] += 1
+                _ep["symbols"].add(_err_sym)
+                _ep["sample"] = _err_msg[:150]
+                _ts_str = ts.strftime("%Y-%m-%d %H:%M") if ts else ""
+                if _ts_str and not _ep["first"]:
+                    _ep["first"] = _ts_str
+                if _ts_str:
+                    _ep["last"] = _ts_str
+                # 5维度分类
+                _dim_entry = {"ts": _ts_str, "sym": _err_sym, "msg": _err_msg[:120]}
+                if _D1_CODE_RE.search(_err_msg):
+                    _dim_entry["sub"] = "code"
+                    error_dimensions["D1_code"].append(_dim_entry)
+                elif _D1_DATA_RE.search(_err_msg):
+                    _dim_entry["sub"] = "data"
+                    error_dimensions["D1_code"].append(_dim_entry)
+                elif _D1_HANG_RE.search(_err_msg):
+                    _dim_entry["sub"] = "hang"
+                    error_dimensions["D1_code"].append(_dim_entry)
+                elif _D2_SIGNAL_RE.search(_err_msg):
+                    error_dimensions["D2_signal"].append(_dim_entry)
+                elif _D3_FILTER_RE.search(_err_msg):
+                    error_dimensions["D3_filter"].append(_dim_entry)
+                elif _D4_EXEC_RE.search(_err_msg):
+                    error_dimensions["D4_exec"].append(_dim_entry)
+                else:
+                    error_dimensions["D1_code"].append(_dim_entry)  # 兜底归维度1
+
           except OSError:
               continue  # 单行读取异常→跳过此行
 
@@ -937,6 +1015,23 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
             issues.append({"task": "BV-PATTERN", "type": "RISK", "category": "signal",
                            "msg": f"BV形态 {pat_name} 准确率{acc:.0%}({dec}笔decisive), 建议降级或排除"})
 
+    # ── 原始ERROR日志 → issues (按模式聚合) ──
+    for _err_key, _ep in sorted(raw_error_patterns.items(), key=lambda x: -x[1]["count"]):
+        _is_noise = any(_np in _err_key for _np in _NOISE_PATTERNS)
+        if _is_noise:
+            continue  # 已知噪声，不显示
+        _syms = sorted(_ep["symbols"])
+        _sym_str = ",".join(_syms[:5]) + (f"+{len(_syms)-5}" if len(_syms) > 5 else "")
+        issues.append({
+            "task": "LOG-ERROR",
+            "type": "ERROR",
+            "category": "system",
+            "msg": f"[{_ep['count']}x] {_ep['sample'][:100]} (品种: {_sym_str})",
+            "count": _ep["count"],
+            "first_seen": _ep["first"],
+            "last_seen": _ep["last"],
+        })
+
     # ── 系统亮点 (POSITIVE) — 与问题并列输出 ──
     # FIFO交易: 整体胜率高
     ft = fifo_trades
@@ -1053,7 +1148,11 @@ def audit(log_path: str, hours: int = 12, check_coverage: bool = False) -> dict:
                          plugin_phases=plugin_phases,
                          baseline_data=_baseline_data,
                          system_evo=system_evo,
-                         l1_reference_mode=_is_reference_mode)
+                         l1_reference_mode=_is_reference_mode,
+                         raw_error_total=sum(
+                             ep["count"] for ek, ep in raw_error_patterns.items()
+                             if not any(np_ in ek for np_ in _NOISE_PATTERNS)),
+                         error_dimensions={k: v[-50:] for k, v in error_dimensions.items()})
 
 
 def _load_system_config() -> dict:
@@ -2934,7 +3033,9 @@ def _build_result(now_str, hours, tasks, summary_metrics,
                   plugin_phases=None,
                   baseline_data=None,
                   system_evo=None,
-                  l1_reference_mode=False):
+                  l1_reference_mode=False,
+                  raw_error_total=0,
+                  error_dimensions=None):
     """构建输出数据结构。"""
     # 序列化defaultdict → dict
     _macd = dict(macd_stats)
@@ -3000,6 +3101,7 @@ def _build_result(now_str, hours, tasks, summary_metrics,
         issues.append({
             "task": rule.get("task", ""),
             "type": rule.get("type", "INFO"),
+            "category": rule.get("category", "system"),
             "msg": f"已修复: {rule.get('fix_note', '')}",
             "fixed": True,
             "fix_note": rule.get("fix_note", ""),
@@ -3012,7 +3114,9 @@ def _build_result(now_str, hours, tasks, summary_metrics,
         "hours": hours,
         "l1_reference_mode": l1_reference_mode,
         "total_events": sum(t["count"] for t in tasks.values()),
-        "total_errors": sum(t["errors"] for t in tasks.values()),
+        "total_errors": sum(t["errors"] for t in tasks.values()) + raw_error_total,
+        "raw_error_count": raw_error_total,
+        "error_dimensions": error_dimensions or {},
         "tasks": tasks,
         "metrics": summary_metrics,
         "plugins": {

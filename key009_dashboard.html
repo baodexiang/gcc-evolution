@@ -170,10 +170,11 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <div class="tab active" data-tab="gcctm">GCC-TM</div>
 <div class="tab" data-tab="broker">券商对账</div>
 <div class="tab" data-tab="errors">错误分类</div>
-<div class="tab" data-tab="obs-s1">S1观察</div>
-<div class="tab" data-tab="obs-s2">S2观察</div>
-<div class="tab" data-tab="obs-s3">S3观察</div>
-<div class="tab" data-tab="obs-s4">S4/P0观察</div>
+<div class="tab" data-tab="dim1">D1代码</div>
+<div class="tab" data-tab="dim2">D2信号</div>
+<div class="tab" data-tab="dim3">D3过滤</div>
+<div class="tab" data-tab="dim4">D4执行</div>
+<div class="tab" data-tab="dim5">D5盈亏</div>
 <div class="tab" data-tab="trades">交易分析</div>
 <div class="tab" data-tab="verdict">裁决分析</div>
 <div class="tab" data-tab="vgate">Vision门控</div>
@@ -359,51 +360,44 @@ footer{text-align:center;color:#afb8c1;font-size:0.7em;margin-top:20px}
 <tbody id="err-recent"></tbody></table>
 </div>
 
-<!-- Tab: S1观察 (L1参考模式) -->
-<div class="tab-content" id="tab-obs-s1">
-<div class="summary" id="obs-s1-cards"></div>
-<h2>S1 L1参考信号 — 按品种统计</h2>
-<table><thead><tr><th>品种</th><th>BUY</th><th>SELL</th><th>合计</th><th>最近时间</th><th>最近价格</th></tr></thead>
-<tbody id="obs-s1-symbol"></tbody></table>
-<h2>S1 最近信号 (最多50条)</h2>
-<table><thead><tr><th>时间</th><th>品种</th><th>方向</th><th>价格</th><th>原因</th></tr></thead>
-<tbody id="obs-s1-recent"></tbody></table>
+<!-- Tab: D1 代码BUG -->
+<div class="tab-content" id="tab-dim1">
+<div class="summary" id="dim1-cards"></div>
+<h2>D1 代码BUG — 语法/数据丢失/卡死/断连 (立刻可修)</h2>
+<table><thead><tr><th>时间</th><th>品种</th><th>子类</th><th>错误消息</th></tr></thead>
+<tbody id="dim1-list"></tbody></table>
 </div>
 
-<!-- Tab: S2观察 (外挂信号) -->
-<div class="tab-content" id="tab-obs-s2">
-<div class="summary" id="obs-s2-cards"></div>
-<h2>S2 外挂信号 — 按品种统计</h2>
-<table><thead><tr><th>品种</th><th>BUY</th><th>SELL</th><th>合计</th><th>最近时间</th><th>原因</th></tr></thead>
-<tbody id="obs-s2-symbol"></tbody></table>
-<h2>S2 最近信号 (最多50条)</h2>
-<table><thead><tr><th>时间</th><th>品种</th><th>方向</th><th>价格</th><th>原因</th></tr></thead>
-<tbody id="obs-s2-recent"></tbody></table>
+<!-- Tab: D2 信号丢失 -->
+<div class="tab-content" id="tab-dim2">
+<div class="summary" id="dim2-cards"></div>
+<h2>D2 信号丢失 — BUY/SELL没进信号池</h2>
+<table><thead><tr><th>时间</th><th>品种</th><th>错误消息</th></tr></thead>
+<tbody id="dim2-list"></tbody></table>
 </div>
 
-<!-- Tab: S3观察 (MACD背离) -->
-<div class="tab-content" id="tab-obs-s3">
-<div class="summary" id="obs-s3-cards"></div>
-<h2>S3 MACD背离 — 按品种统计</h2>
-<table><thead><tr><th>品种</th><th>BUY</th><th>SELL</th><th>合计</th><th>最近时间</th><th>最近价格</th></tr></thead>
-<tbody id="obs-s3-symbol"></tbody></table>
-<h2>S3 最近信号 (最多50条)</h2>
-<table><thead><tr><th>时间</th><th>品种</th><th>方向</th><th>价格</th><th>原因</th></tr></thead>
-<tbody id="obs-s3-recent"></tbody></table>
+<!-- Tab: D3 过滤缺失 -->
+<div class="tab-content" id="tab-dim3">
+<div class="summary" id="dim3-cards"></div>
+<h2>D3 过滤缺失 — 门控/FilterChain没正常工作</h2>
+<table><thead><tr><th>时间</th><th>品种</th><th>错误消息</th></tr></thead>
+<tbody id="dim3-list"></tbody></table>
 </div>
 
-<!-- Tab: S4/P0观察 (L2 Gate + 扫描引擎 + CycleSwitch) -->
-<div class="tab-content" id="tab-obs-s4">
-<div class="summary" id="obs-s4-cards"></div>
-<h2>S4/P0 信号 — 按子通道统计</h2>
-<table><thead><tr><th>子通道</th><th>BUY</th><th>SELL</th><th>合计</th><th>品种数</th></tr></thead>
-<tbody id="obs-s4-subchannel"></tbody></table>
-<h2>S4/P0 信号 — 按品种统计</h2>
-<table><thead><tr><th>品种</th><th>S4 BUY</th><th>S4 SELL</th><th>P0 BUY</th><th>P0 SELL</th><th>合计</th><th>最近时间</th></tr></thead>
-<tbody id="obs-s4-symbol"></tbody></table>
-<h2>S4/P0 最近信号 (最多50条)</h2>
-<table><thead><tr><th>时间</th><th>品种</th><th>通道</th><th>方向</th><th>价格</th><th>原因</th></tr></thead>
-<tbody id="obs-s4-recent"></tbody></table>
+<!-- Tab: D4 执行失败 -->
+<div class="tab-content" id="tab-dim4">
+<div class="summary" id="dim4-cards"></div>
+<h2>D4 执行失败 — 决策BUY/SELL但下单没成功</h2>
+<table><thead><tr><th>时间</th><th>品种</th><th>错误消息</th></tr></thead>
+<tbody id="dim4-list"></tbody></table>
+</div>
+
+<!-- Tab: D5 盈亏 -->
+<div class="tab-content" id="tab-dim5">
+<div class="summary" id="dim5-cards"></div>
+<h2>D5 PnL亏损 — 框架问题需找原因</h2>
+<table><thead><tr><th>时间</th><th>品种</th><th>错误消息</th></tr></thead>
+<tbody id="dim5-list"></tbody></table>
 </div>
 
 <!-- Tab: GCC交易决策模块 (KEY-011) -->
@@ -2127,117 +2121,40 @@ function loadGccTm() {
         }
 
         // ══════════════════════════════════════════════════════
-        // 观察模式4标签: S1/S2/S3/S4+P0
+        // 5维度错误标签: D1代码/D2信号/D3过滤/D4执行/D5盈亏
         // ══════════════════════════════════════════════════════
-        const observeAll = (d.observe_signals || []).filter(x => _isRecent(x.ts));
-        const _obsColor = (a) => a === 'BUY' ? '#1a7f37' : a === 'SELL' ? '#cf222e' : '#656d76';
-
-        function renderObsTab(channel, cardsId, symbolId, recentId, signals) {
-            const buys = signals.filter(s => s.action === 'BUY').length;
-            const sells = signals.filter(s => s.action === 'SELL').length;
-            const syms = new Set(signals.map(s => s.symbol));
+        const dims = DATA.error_dimensions || {};
+        const _dimMeta = {
+            D1_code:  {label:'D1 代码BUG',  color:'#cf222e', desc:'语法/数据丢失/卡死/断连 — 立刻可修'},
+            D2_signal:{label:'D2 信号丢失', color:'#9a6700', desc:'BUY/SELL没进信号池'},
+            D3_filter:{label:'D3 过滤缺失', color:'#bc4c00', desc:'门控/FilterChain没正常工作'},
+            D4_exec:  {label:'D4 执行失败', color:'#8250df', desc:'决策BUY/SELL但下单没成功'},
+            D5_pnl:   {label:'D5 PnL亏损',  color:'#0550ae', desc:'框架问题需找原因'},
+        };
+        function renderDimTab(dimKey, cardsId, listId) {
+            const items = dims[dimKey] || [];
+            const meta = _dimMeta[dimKey];
+            const syms = new Set(items.filter(e=>e.sym).map(e=>e.sym));
             $(cardsId).innerHTML = `
-                <div class="card"><div class="label">总信号</div><div class="value blue">${signals.length}</div></div>
-                <div class="card"><div class="label">BUY</div><div class="value green">${buys}</div></div>
-                <div class="card"><div class="label">SELL</div><div class="value red">${sells}</div></div>
-                <div class="card"><div class="label">品种数</div><div class="value">${syms.size}</div></div>
+                <div class="card"><div class="label">${meta.label}</div><div class="value" style="color:${meta.color}">${items.length}</div></div>
+                <div class="card"><div class="label">涉及品种</div><div class="value">${syms.size}</div></div>
+                <div class="card" style="flex:3"><div class="label">说明</div><div class="value" style="font-size:0.7em;color:#656d76">${meta.desc}</div></div>
             `;
-            // By symbol
-            const bySym = {};
-            signals.forEach(s => {
-                if (!bySym[s.symbol]) bySym[s.symbol] = {buy:0,sell:0,lastTs:'',lastPrice:0,reason:''};
-                const o = bySym[s.symbol];
-                if (s.action==='BUY') o.buy++; else if (s.action==='SELL') o.sell++;
-                if (s.ts > o.lastTs) { o.lastTs = s.ts; o.lastPrice = s.price; o.reason = s.reason||''; }
-            });
-            const symArr = Object.entries(bySym).sort((a,b) => (b[1].buy+b[1].sell) - (a[1].buy+a[1].sell));
-            $(symbolId).innerHTML = symArr.length ? symArr.map(([sym,v]) =>
-                `<tr><td style="font-weight:600">${sym}</td>
-                 <td style="color:#1a7f37;font-weight:600">${v.buy}</td>
-                 <td style="color:#cf222e;font-weight:600">${v.sell}</td>
-                 <td>${v.buy+v.sell}</td>
-                 <td style="color:#656d76;font-size:0.85em">${v.lastTs}</td>
-                 <td>${v.lastPrice ? '$'+v.lastPrice.toFixed(2) : v.reason}</td></tr>`
-            ).join('') : '<tr><td colspan="6" style="color:#656d76">暂无观察信号</td></tr>';
-            // Recent
-            $(recentId).innerHTML = signals.length ? signals.slice(0,50).map(s =>
-                `<tr><td style="color:#656d76;font-size:0.85em">${s.ts||''}</td>
-                 <td style="font-weight:600">${s.symbol}</td>
-                 <td style="color:${_obsColor(s.action)};font-weight:600">${s.action}</td>
-                 <td>${s.price ? '$'+s.price.toFixed(2) : '-'}</td>
-                 <td style="color:#656d76">${s.reason||''}</td></tr>`
-            ).join('') : '<tr><td colspan="5" style="color:#656d76">暂无观察信号</td></tr>';
+            const hasSub = dimKey === 'D1_code';
+            $(listId).innerHTML = items.length ? items.slice(-50).reverse().map(e =>
+                `<tr>
+                 <td style="color:#656d76;font-size:0.82em;white-space:nowrap">${e.ts||''}</td>
+                 <td style="font-weight:600">${e.sym||'-'}</td>
+                 ${hasSub ? `<td style="font-size:0.82em;color:${meta.color}">${e.sub||'other'}</td>` : ''}
+                 <td style="font-size:0.78em;color:#cf222e;word-break:break-all">${e.msg||''}</td>
+                </tr>`
+            ).join('') : `<tr><td colspan="${hasSub?4:3}" style="color:#1a7f37">无错误</td></tr>`;
         }
-
-        // S1
-        renderObsTab('S1', 'obs-s1-cards', 'obs-s1-symbol', 'obs-s1-recent',
-            observeAll.filter(s => s.channel === 'S1'));
-        // S2
-        renderObsTab('S2', 'obs-s2-cards', 'obs-s2-symbol', 'obs-s2-recent',
-            observeAll.filter(s => s.channel === 'S2'));
-        // S3
-        renderObsTab('S3', 'obs-s3-cards', 'obs-s3-symbol', 'obs-s3-recent',
-            observeAll.filter(s => s.channel === 'S3'));
-
-        // S4+P0 combined tab
-        {
-            const s4p0 = observeAll.filter(s => s.channel === 'S4' || s.channel === 'P0');
-            const s4 = s4p0.filter(s => s.channel === 'S4');
-            const p0 = s4p0.filter(s => s.channel === 'P0');
-            const s4Buys = s4.filter(s=>s.action==='BUY').length;
-            const s4Sells = s4.filter(s=>s.action==='SELL').length;
-            const p0Buys = p0.filter(s=>s.action==='BUY').length;
-            const p0Sells = p0.filter(s=>s.action==='SELL').length;
-            const syms = new Set(s4p0.map(s=>s.symbol));
-            $('obs-s4-cards').innerHTML = `
-                <div class="card"><div class="label">S4信号</div><div class="value blue">${s4.length}</div><div class="sub">${s4Buys}B/${s4Sells}S</div></div>
-                <div class="card"><div class="label">P0信号</div><div class="value blue">${p0.length}</div><div class="sub">${p0Buys}B/${p0Sells}S</div></div>
-                <div class="card"><div class="label">合计</div><div class="value">${s4p0.length}</div></div>
-                <div class="card"><div class="label">品种数</div><div class="value">${syms.size}</div></div>
-            `;
-            // Sub-channel breakdown
-            const subCh = {};
-            s4p0.forEach(s => {
-                const key = s.channel + (s.reason ? '/' + s.reason : '');
-                if (!subCh[key]) subCh[key] = {buy:0,sell:0,syms:new Set()};
-                if (s.action==='BUY') subCh[key].buy++; else if (s.action==='SELL') subCh[key].sell++;
-                subCh[key].syms.add(s.symbol);
-            });
-            const subArr = Object.entries(subCh).sort((a,b)=>(b[1].buy+b[1].sell)-(a[1].buy+a[1].sell));
-            $('obs-s4-subchannel').innerHTML = subArr.length ? subArr.map(([ch,v]) =>
-                `<tr><td style="font-weight:600">${ch}</td>
-                 <td style="color:#1a7f37">${v.buy}</td>
-                 <td style="color:#cf222e">${v.sell}</td>
-                 <td>${v.buy+v.sell}</td>
-                 <td>${v.syms.size}</td></tr>`
-            ).join('') : '<tr><td colspan="5" style="color:#656d76">暂无信号</td></tr>';
-            // By symbol
-            const bySym = {};
-            s4p0.forEach(s => {
-                if (!bySym[s.symbol]) bySym[s.symbol] = {s4b:0,s4s:0,p0b:0,p0s:0,lastTs:''};
-                const o = bySym[s.symbol];
-                if (s.channel==='S4') { if (s.action==='BUY') o.s4b++; else o.s4s++; }
-                else { if (s.action==='BUY') o.p0b++; else o.p0s++; }
-                if (s.ts > o.lastTs) o.lastTs = s.ts;
-            });
-            const symArr = Object.entries(bySym).sort((a,b)=>(b[1].s4b+b[1].s4s+b[1].p0b+b[1].p0s)-(a[1].s4b+a[1].s4s+a[1].p0b+a[1].p0s));
-            $('obs-s4-symbol').innerHTML = symArr.length ? symArr.map(([sym,v]) =>
-                `<tr><td style="font-weight:600">${sym}</td>
-                 <td style="color:#1a7f37">${v.s4b}</td><td style="color:#cf222e">${v.s4s}</td>
-                 <td style="color:#1a7f37">${v.p0b}</td><td style="color:#cf222e">${v.p0s}</td>
-                 <td>${v.s4b+v.s4s+v.p0b+v.p0s}</td>
-                 <td style="color:#656d76;font-size:0.85em">${v.lastTs}</td></tr>`
-            ).join('') : '<tr><td colspan="7" style="color:#656d76">暂无信号</td></tr>';
-            // Recent
-            $('obs-s4-recent').innerHTML = s4p0.length ? s4p0.slice(0,50).map(s =>
-                `<tr><td style="color:#656d76;font-size:0.85em">${s.ts||''}</td>
-                 <td style="font-weight:600">${s.symbol}</td>
-                 <td>${s.channel}</td>
-                 <td style="color:${_obsColor(s.action)};font-weight:600">${s.action}</td>
-                 <td>${s.price ? '$'+s.price.toFixed(2) : '-'}</td>
-                 <td style="color:#656d76">${s.reason||''}</td></tr>`
-            ).join('') : '<tr><td colspan="6" style="color:#656d76">暂无信号</td></tr>';
-        }
+        renderDimTab('D1_code',  'dim1-cards', 'dim1-list');
+        renderDimTab('D2_signal','dim2-cards', 'dim2-list');
+        renderDimTab('D3_filter','dim3-cards', 'dim3-list');
+        renderDimTab('D4_exec', 'dim4-cards', 'dim4-list');
+        renderDimTab('D5_pnl',  'dim5-cards', 'dim5-list');
 
         // ══════════════════════════════════════════════════════
         // 错误分类标签
