@@ -39971,6 +39971,32 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
     if final_action not in ["BUY", "SELL"]:
         return False
 
+    # ═══ 最高级别: 人类禁卖拦截 (优先于一切门控, 包括gcc_tm) ═══
+    if final_action == "SELL":
+        try:
+            _hsb_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state", "human_sell_block.json")
+            if os.path.exists(_hsb_path):
+                import json as _hsb_json
+                from datetime import datetime as _hsb_dt
+                from zoneinfo import ZoneInfo as _hsb_zi
+                with open(_hsb_path, "r", encoding="utf-8") as _hsb_f:
+                    _hsb = _hsb_json.load(_hsb_f)
+                _sb = _hsb.get("sell_block", {})
+                if _sb.get("enabled") and symbol in _sb.get("symbols", []):
+                    _hsb_tz = _hsb_zi(_sb.get("timezone", "America/New_York"))
+                    _hsb_now = _hsb_dt.now(_hsb_tz)
+                    _hsb_start = _hsb_dt.fromisoformat(_sb["start"]).replace(tzinfo=_hsb_tz)
+                    _hsb_end = _hsb_dt.fromisoformat(_sb["end"]).replace(tzinfo=_hsb_tz)
+                    if _hsb_start <= _hsb_now <= _hsb_end:
+                        log_to_server(
+                            f"[HUMAN-BLOCK][最高级别] {symbol} SELL 被禁止 — "
+                            f"{_sb['start']}~{_sb['end']} source={source} "
+                            f"原因: {_sb.get('reason','')}"
+                        )
+                        return None
+        except Exception as _hsb_err:
+            log_to_server(f"[HUMAN-BLOCK] 检查异常(不拦截): {_hsb_err}")
+
     # TSLA期权通道: 双通道(任意来源+GCC-TM都可触发)
     TSLA_OPTIONS_ENABLED = True
     if symbol == "TSLA":
@@ -43041,6 +43067,8 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                 f"[B2][TSLA-OPT] GCC-TM {_gcc_act} → success={send_ok} "
                 f"type={_opt_info.get('type', 'N/A')} strike={_opt_info.get('strike', 'N/A')}"
             )
+            # GCC-0263: B1→B2 TSLA期权执行审计
+            log_to_server(f"[B1][GCC-TM][EXEC] TSLA {_gcc_act} Options {'OK' if send_ok else 'FAIL'} price={_gcc_cur_price:.2f}")
             try:
                 send_email_notification(
                     f"[TSLA期权] GCC-TM {_gcc_act}",
@@ -43056,6 +43084,10 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
     elif is_us_stock(symbol):
         try:
             send_ok = send_signalstack_order(_gcc_act, symbol, source="gcc_tm")
+            if send_ok:
+                log_to_server(f"[B1][GCC-TM][EXEC] {symbol} {_gcc_act} SignalStack OK price={_gcc_cur_price:.2f}")
+            else:
+                log_to_server(f"[B1][GCC-TM][EXEC] {symbol} {_gcc_act} SignalStack FAIL price={_gcc_cur_price:.2f}")
         except Exception as _ss_e:
             log_to_server(f"[B1][GCC-TM][ERROR] {symbol} SignalStack: {_ss_e}")
     elif _gcc_order.get("source") == "gcc_scalp":
@@ -43104,6 +43136,8 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                 f"limit={_scalp_limit or 'N/A'} "
                 f"success={send_ok} order_id={_scalp_res.get('order_id','')}"
             )
+            # GCC-0263: B1→S3 Coinbase执行审计
+            log_to_server(f"[B1][GCC-TM][EXEC] {symbol} {_gcc_act} Coinbase {'OK' if send_ok else 'FAIL'} price={_gcc_cur_price:.2f}")
             if send_ok:
                 try:
                     _scalp_reason = _gcc_order.get("reason", "")
@@ -43123,6 +43157,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
         try:
             send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol, source="gcc_tm")
             if send_ok:
+                log_to_server(f"[B1][GCC-TM][EXEC] {symbol} {_gcc_act} 3Commas OK price={_gcc_cur_price:.2f}")
                 try:
                     send_email_notification(
                         f"[加密] {symbol} {_gcc_act} ${_gcc_cur_price:.2f}",
@@ -43132,6 +43167,8 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                     )
                 except Exception:
                     pass
+            else:
+                log_to_server(f"[B1][GCC-TM][EXEC] {symbol} {_gcc_act} 3Commas FAIL price={_gcc_cur_price:.2f}")
         except Exception as _3c_e:
             log_to_server(f"[B1][GCC-TM][ERROR] {symbol} 3Commas: {_3c_e}")
     _gcc_confirm(symbol, success=send_ok)
@@ -43180,6 +43217,22 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             _append_trade_record(_gcc_trade_rec)
         except Exception as _gcc_rec_e:
             log_to_server(f"[GCC-TM] {symbol} trade_record写入失败: {_gcc_rec_e}")
+        # GCC-0263 S6: 实时更新准确率文件
+        try:
+            _acc_path = ROOT / "state" / "gcc_trading_accuracy.json"
+            _acc_data = {}
+            if _acc_path.exists():
+                _acc_data = json.loads(_acc_path.read_text(encoding="utf-8"))
+            _acc_data.setdefault("total_trades", 0)
+            _acc_data.setdefault("by_symbol", {})
+            _acc_data["total_trades"] += 1
+            _acc_data["last_trade_ts"] = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+            _sym_acc = _acc_data["by_symbol"].setdefault(symbol, {"trades": 0, "buys": 0, "sells": 0})
+            _sym_acc["trades"] += 1
+            _sym_acc["buys" if _gcc_act == "BUY" else "sells"] += 1
+            _acc_path.write_text(json.dumps(_acc_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as _acc_e:
+            log_to_server(f"[GCC-TM][S6] {symbol} accuracy更新失败: {_acc_e}")
         # 邮件: gcc_scalp已在上方发过[剥头皮]邮件, 不再重复
         if not _is_scalp:
             try:

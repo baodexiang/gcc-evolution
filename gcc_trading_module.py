@@ -1431,8 +1431,32 @@ def _apply_pruning(nodes: List[TreeNode], symbol: str,
     # 预计算信号指纹（P0 使用）
     fingerprint = _make_signal_fingerprint(context) if failed_patterns else ""
 
+    # P-1: 人类禁卖拦截 (最高级别, 优先于P0/P1/P2)
+    _human_sell_blocked = set()
+    try:
+        _hsb_file = _STATE_DIR / "human_sell_block.json"
+        if _hsb_file.exists():
+            _hsb_data = json.loads(_hsb_file.read_text(encoding="utf-8"))
+            _sb = _hsb_data.get("sell_block", {})
+            if _sb.get("enabled"):
+                from zoneinfo import ZoneInfo as _hsb_zi
+                _hsb_tz = _hsb_zi(_sb.get("timezone", "America/New_York"))
+                _hsb_now = datetime.now(_hsb_tz)
+                _hsb_start = datetime.fromisoformat(_sb["start"]).replace(tzinfo=_hsb_tz)
+                _hsb_end = datetime.fromisoformat(_sb["end"]).replace(tzinfo=_hsb_tz)
+                if _hsb_start <= _hsb_now <= _hsb_end:
+                    _human_sell_blocked = set(_sb.get("symbols", []))
+    except Exception:
+        pass
+
     for node in nodes:
         if node.pruned:
+            continue
+
+        # P-1: 人类禁卖 (最高级别)
+        if node.action == "SELL" and symbol in _human_sell_blocked:
+            node.pruned = True
+            node.prune_reason = "HUMAN-BLOCK:禁卖"
             continue
 
         # P0: 失败模式记忆（论文: negative constraint）
@@ -2087,9 +2111,11 @@ class BeyondEuclidVerifier:
             # 三视角：2/3 通过（原逻辑）
             verdict = "EXECUTE" if consensus_count >= 2 else "SKIP"
 
-        logger.debug(
-            "[GCC-TM][BEV] active=%d/%d consensus=%d verdict=%s",
-            active_count, len(results), consensus_count, verdict
+        # GCC-0263 S4: BEV升级info + 3视角分数
+        _bev_scores = {r.perspective: round(r.score, 3) for r in results if not r.abstain}
+        logger.info(
+            "[GCC-TM][S4-BEV] active=%d/%d consensus=%d verdict=%s scores=%s",
+            active_count, len(results), consensus_count, verdict, _bev_scores,
         )
 
         return consensus_count, results, verdict
@@ -2471,6 +2497,14 @@ class GCCTradingModule:
         _apply_pruning(l1_nodes, sym, context, failed_patterns=failed_patterns)
         surviving_l1 = [n for n in l1_nodes if not n.pruned]
         self._last_rejected_nodes.extend(n for n in l1_nodes if n.pruned)
+        # GCC-0263 S4: 剪枝审计日志
+        _pruned_nodes = [n for n in l1_nodes if n.pruned]
+        _surv_actions = [n.action for n in surviving_l1]
+        _prune_reasons = {n.action: getattr(n, "prune_reason", "unknown") for n in _pruned_nodes}
+        logger.info(
+            "[GCC-TM][S4-PRUNE] %s L1存活=%s 剪枝=%s reasons=%s",
+            sym, _surv_actions, [n.action for n in _pruned_nodes], _prune_reasons,
+        )
         if not surviving_l1:
             hold = TreeNode(action="HOLD", prune_reason="all_candidates_pruned")
             hold.scores_by_source = hold_scores
@@ -3165,9 +3199,11 @@ def gcc_consume_pending_order(symbol: str) -> Optional[dict]:
         try:
             order = json.loads(pending_file.read_text(encoding="utf-8"))
         except Exception:
+            logger.warning("[GCC-TM][S5-CONSUME] %s 解析失败(JSON损坏)", symbol)
             return None
 
         if order.get("consumed"):
+            logger.debug("[GCC-TM][S5-CONSUME] %s 已消费, 跳过", symbol)
             return None
 
         # v3.681: 崩溃恢复保护 — processing=True 说明上次下单可能已发出但未确认

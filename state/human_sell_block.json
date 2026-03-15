@@ -1,0 +1,16 @@
+{
+  "sell_block": {
+    "enabled": true,
+    "symbols": [
+      "AMD",
+      "CRWV",
+      "HIMS"
+    ],
+    "start": "2026-03-15T08:00:00",
+    "end": "2026-03-21T08:00:00",
+    "timezone": "America/New_York",
+    "reason": "用户要求: 3/15~3/21禁止自动卖出, 手工操作除外",
+    "created_by": "human",
+    "cancellable": true
+  }
+}
