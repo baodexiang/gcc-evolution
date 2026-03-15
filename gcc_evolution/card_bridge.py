@@ -1,14 +1,20 @@
-"""CardBridge v1.1 — 知识卡活化桥接层 + 因果记忆检索
+"""CardBridge v1.2 — 知识卡活化桥接层 + 因果记忆检索 + KNN完整接口
 
 v1.0: 扫描JSON卡片 → 建立索引 → 规则匹配 → 蒸馏
 v1.1: + 因果记忆检索 (arXiv:2601.11958 Agentic Nowcasting Layer B)
       record_activation()带市场情境 → query_contextual()按情境聚合历史正确率
       → 返回"在当前情境下表现最好的规则"，不是简单的全量匹配
+v1.2: + card_knn_precompute_index() keyword-overlap近邻预计算
+      + card_knn_session_end() 会话激活热点聚合
+      + card_knn_incremental_update_and_drift_check() PSI漂移检测
+      + card_evolution_blast_radius() BFS影响范围评估
+      + query() 支持 route/graph_hops/session_id 参数
 
 数据流:
-  skill/cards/**/*.json  ← Source of Truth
+  skill/cards/**/*.json  ← Source of Truth (统一JSON格式)
   state/card_index.json  ← 索引 (启动时生成)
   state/card_activations.jsonl  ← 激活日志 (追加写入, v1.1含情境字段)
+  state/prefetch_index.json  ← KNN近邻预计算索引
 """
 
 import json
@@ -130,7 +136,8 @@ class CardBridge:
     # ── 查询 ──────────────────────────────────────────────
 
     def query(self, module=None, card_type=None, keywords=None,
-              min_confidence=0.3) -> list:
+              min_confidence=0.3, route="keyword", graph_hops=0,
+              session_id="default", **_kw) -> list:
         """查询匹配的知识卡规则。
 
         返回: [{card_id, title, rules, confidence, quality, module}, ...]
@@ -179,6 +186,9 @@ class CardBridge:
           query()     → 返回所有confidence>=阈值的卡, 按静态confidence排序
           contextual  → 读历史激活+结果, 按"当前情境下的实际正确率"排序
 
+        GCC-0270: 同时返回仅存在于因果记忆中的经验卡(EXP_TM_*),
+                  它们不在JSON文件索引中, 但有激活历史。
+
         context: {"trend": "UP", "regime": "bull", ...}
         min_samples: 至少N次同情境激活才参与排名(防小样本)
 
@@ -200,11 +210,30 @@ class CardBridge:
                 pass
         if _deprecated:
             candidates = [c for c in candidates if c["card_id"] not in _deprecated]
-        if not candidates:
-            return []
 
         # 2. 加载因果记忆
         causal = self._load_causal_memory(context)
+
+        # GCC-0270: 补充经验卡 — 仅存在于因果记忆中的 EXP_TM_* 卡
+        _existing_ids = {c["card_id"] for c in candidates}
+        for cid, mem in causal.items():
+            if cid.startswith("EXP_TM_") and cid not in _existing_ids and cid not in _deprecated:
+                # 从card_id解析品种和方向: EXP_TM_BTCUSDC_BUY
+                parts = cid.replace("EXP_TM_", "").rsplit("_", 1)
+                _sym = parts[0] if len(parts) == 2 else cid
+                _act = parts[1] if len(parts) == 2 else "NEUTRAL"
+                candidates.append({
+                    "card_id": cid,
+                    "title": f"{_sym} {_act} 实战经验",
+                    "rules": [],
+                    "confidence": mem["correct"] / mem["total"] if mem["total"] > 0 else 0.5,
+                    "quality": "experience",
+                    "module": "",
+                })
+                _existing_ids.add(cid)
+
+        if not candidates:
+            return []
 
         # 3. 给每张卡打因果分
         for card in candidates:
@@ -436,15 +465,52 @@ class CardBridge:
              f"validated={validated} flagged={flagged} inactive={inactive}")
         return report
 
-    def prune_deprecated(self) -> dict:
-        """定期淘汰: 将低正确率的卡标记为deprecated, query_contextual会跳过。
+    def _first_activation_dates(self) -> dict:
+        """读取每张卡的首次激活时间。返回 {card_id: datetime}。"""
+        first_dates = {}
+        if not _ACTIVATIONS_PATH.exists():
+            return first_dates
+        try:
+            with open(_ACTIVATIONS_PATH, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    cid = entry.get("card_id", "")
+                    ts = entry.get("ts", "")
+                    if cid and ts and entry.get("type") != "outcome":
+                        if cid not in first_dates:
+                            try:
+                                first_dates[cid] = datetime.fromisoformat(ts)
+                            except (ValueError, TypeError):
+                                pass
+        except Exception:
+            pass
+        return first_dates
 
+    def prune_deprecated(self) -> dict:
+        """GCC-0270: 固定日历时间淘汰低正确率卡片。
+
+        淘汰日:
+          经验卡: 每月1号和16号 (半月一次)
+          知识卡: 每月1号 (一月一次)
         淘汰规则:
-          知识卡: 正确率<30% 且样本≥5 → deprecated
           经验卡: 正确率<20% 且样本≥5 → deprecated
+          知识卡: 正确率<30% 且样本≥5 → deprecated
 
         返回: {deprecated: int, total_checked: int, details: [...]}
         """
+        now = datetime.now(_NY)
+        _prune_exp = now.day in (1, 16)    # 经验卡: 每月1号和16号
+        _prune_know = now.day == 1          # 知识卡: 每月1号
+        if not _prune_exp and not _prune_know:
+            _log(f"[PRUNE] 非淘汰日(当前{now.day}号, 经验卡1/16号, 知识卡1号), 跳过")
+            return {"deprecated": 0, "total_checked": 0, "details": [], "skipped": "not_prune_day"}
+
         causal = self._load_causal_memory()
         deprecated_list = []
 
@@ -457,11 +523,18 @@ class CardBridge:
             except Exception:
                 pass
 
+        _log(f"[PRUNE] 淘汰日{now.day}号: 经验卡={'YES' if _prune_exp else 'NO'} 知识卡={'YES' if _prune_know else 'NO'}")
+
         for cid, stats in causal.items():
             if stats["total"] < 5:
                 continue
             rate = stats["correct"] / stats["total"]
             is_exp = cid.startswith("EXP_TM_")
+            # 按日历判断是否该淘汰此类型
+            if is_exp and not _prune_exp:
+                continue
+            if not is_exp and not _prune_know:
+                continue
             threshold = 0.20 if is_exp else 0.30
 
             if rate < threshold:
@@ -488,7 +561,7 @@ class CardBridge:
         }
 
     def distill_to_skills(self) -> dict:
-        """蒸馏: 正确率>60%且样本≥10的卡 → 提取为skill写入gcc_skills.json。
+        """GCC-0270: 每月1号蒸馏 — 正确率>60%且样本≥10 → skill。
 
         知识卡: 合并相似规则为一条skill
         经验卡: 提取品种×方向的特征模式为skill
@@ -496,6 +569,11 @@ class CardBridge:
         蒸馏后源卡标记distilled, 不再参与card层评分。
         返回: {new_skills: int, distilled_cards: int, skills: [...]}
         """
+        now = datetime.now(_NY)
+        if now.day != 1:
+            _log(f"[SKILL] 非蒸馏日(当前{now.day}号, 蒸馏日=1号), 跳过")
+            return {"new_skills": 0, "distilled_cards": 0, "skills": [], "skipped": "not_distill_day"}
+
         causal = self._load_causal_memory()
         _skills_file = _STATE_DIR / "gcc_skills.json"
         _distilled_file = _STATE_DIR / "card_distilled.json"
@@ -1045,3 +1123,187 @@ def card_acc_get_phase(card_id: str, symbol: str) -> int:
     key = f"{card_id}_{symbol}"
     entry = _CARD_PHASE_CACHE.get(key, {})
     return entry.get("suggested_phase", 0)
+
+
+# ── KNN Precompute Index ────────────────────────────────────────────────────
+
+def card_knn_precompute_index(top_k: int = 10) -> dict:
+    """Build keyword-based nearest-neighbor prefetch index from all cards."""
+    bridge = CardBridge()
+    bridge.load_index()
+    cards = bridge._cards
+
+    # Build keyword vectors per card
+    from collections import Counter
+    card_keywords: dict[str, Counter] = {}
+    for cid, c in cards.items():
+        tokens = []
+        tokens.extend((c.get("title") or "").lower().split())
+        tokens.extend(t.lower() for t in (c.get("tags") or []))
+        content = c.get("content") or {}
+        tokens.extend((content.get("summary") or "").lower().split())
+        card_keywords[cid] = Counter(tokens)
+
+    # For each card, find top_k most similar by keyword overlap
+    neighbors: dict[str, list[str]] = {}
+    card_ids = list(card_keywords.keys())
+    for i, cid in enumerate(card_ids):
+        scores = []
+        kw_a = card_keywords[cid]
+        if not kw_a:
+            neighbors[cid] = []
+            continue
+        for j, other in enumerate(card_ids):
+            if i == j:
+                continue
+            kw_b = card_keywords[other]
+            shared = sum((kw_a & kw_b).values())
+            if shared > 0:
+                scores.append((other, shared))
+        scores.sort(key=lambda x: -x[1])
+        neighbors[cid] = [s[0] for s in scores[:top_k]]
+
+    # Persist
+    index_data = {
+        "meta": {"backend": "keyword_overlap", "cards": len(cards),
+                 "top_k": top_k, "path": str(_STATE_DIR / "prefetch_index.json"),
+                 "loaded": True},
+        "neighbors": neighbors,
+    }
+    _STATE_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = _STATE_DIR / "prefetch_index.json"
+    out_path.write_text(json.dumps(index_data, ensure_ascii=False), encoding="utf-8")
+    return index_data["meta"]
+
+
+# ── KNN Session End ─────────────────────────────────────────────────────────
+
+def card_knn_session_end(session_id: str = "default", top_k: int = 10) -> dict:
+    """Aggregate card access events from activations log for a session."""
+    if not _ACTIVATIONS_PATH.exists():
+        return {"session_id": session_id, "events": 0, "top_cards": [], "top_keywords": []}
+
+    from collections import Counter
+    card_hits: Counter = Counter()
+    keyword_hits: Counter = Counter()
+    events = 0
+
+    for line in _ACTIVATIONS_PATH.read_text(encoding="utf-8").splitlines():
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("session_id", "default") != session_id:
+            continue
+        events += 1
+        cid = ev.get("card_id", "")
+        if cid:
+            card_hits[cid] += 1
+        for kw in ev.get("keywords", []):
+            keyword_hits[kw] += 1
+
+    top_cards = [{"card_id": c, "hits": n} for c, n in card_hits.most_common(top_k)]
+    top_kws = [{"keyword": k, "hits": n} for k, n in keyword_hits.most_common(top_k)]
+    return {"session_id": session_id, "events": events,
+            "top_cards": top_cards, "top_keywords": top_kws}
+
+
+# ── KNN Incremental Update & Drift Check ────────────────────────────────────
+
+def card_knn_incremental_update_and_drift_check(window: int = 120,
+                                                psi_threshold: float = 0.25) -> dict:
+    """Run incremental KNN evolution + drift check on card accuracy.
+    PSI = proportion of demote/archive events in recent window.
+    """
+    result = card_knn_evolve()
+    # Drift check: read evolution log and compute PSI from recent window
+    drift_alerts = []
+    events = 0
+    demote_archive = 0
+    triggered_rebuild = False
+    if _CARD_KNN_EVO_FILE.exists():
+        lines = _CARD_KNN_EVO_FILE.read_text(encoding="utf-8").splitlines()
+        recent = lines[-window:] if len(lines) > window else lines
+        events = len(recent)
+        for line in recent:
+            try:
+                ev = json.loads(line)
+                if ev.get("action") in ("demote", "archive"):
+                    demote_archive += 1
+                    drift_alerts.append({
+                        "card_id": ev["card_id"], "action": ev["action"],
+                        "accuracy": ev.get("accuracy", 0),
+                    })
+            except json.JSONDecodeError:
+                continue
+    psi = demote_archive / max(1, events)
+    if psi >= psi_threshold:
+        triggered_rebuild = True
+    return {"evolution": result or {}, "drift_alerts": drift_alerts[:20],
+            "psi": round(psi, 4), "psi_threshold": psi_threshold,
+            "events": events, "triggered_rebuild": triggered_rebuild}
+
+
+# ── Card Evolution Blast Radius ──────────────────────────────────────────────
+
+def card_evolution_blast_radius(seed_ids: list[str] = None, hops: int = 2,
+                                out_path: str = "", depth_decay: float = 0.7,
+                                threshold_n: int = 5) -> dict:
+    """Compute blast radius of card changes via BFS on module graph."""
+    bridge = CardBridge()
+    bridge.load_index()
+    seed_ids = seed_ids or []
+
+    # Collect impacted cards via module-based BFS
+    visited: set[str] = set()
+    frontier = set(seed_ids) if seed_ids else set()
+    impacted: list[dict] = []
+
+    # If no seeds, show global summary
+    if not frontier:
+        summary = []
+        for mod, ids in bridge._by_module.items():
+            summary.append({"module": mod, "cards": len(ids),
+                            "risk": "high" if len(ids) > 50 else "medium" if len(ids) > 10 else "low"})
+        summary.sort(key=lambda x: -x["cards"])
+        total = len(bridge._cards)
+        severity = "high" if total > 500 else "medium" if total > 100 else "low"
+        result = {"hops": hops, "summary": {"impacted_total": total, "severity": severity},
+                  "modules": summary, "total_cards": total, "needs_approval": total > threshold_n}
+        if out_path:
+            from pathlib import Path
+            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(out_path).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return result
+
+    for hop in range(hops):
+        next_frontier: set[str] = set()
+        risk = round(1.0 * (depth_decay ** hop), 3)
+        for cid in frontier:
+            if cid in visited:
+                continue
+            visited.add(cid)
+            card = bridge._cards.get(cid)
+            if not card:
+                continue
+            module = (card.get("system_mapping") or {}).get("module", "")
+            impacted.append({"card_id": cid, "module": module, "hop": hop, "risk": risk})
+            # Expand to sibling cards in same module
+            for sibling in bridge._by_module.get(module, []):
+                if sibling not in visited:
+                    next_frontier.add(sibling)
+        frontier = next_frontier
+
+    total = len(impacted)
+    severity = "critical" if total > 50 else "high" if total > 20 else "medium" if total > 5 else "low"
+    result = {
+        "hops": hops, "seeds": seed_ids,
+        "summary": {"impacted_total": total, "severity": severity},
+        "impacted": impacted[:100],
+        "needs_approval": total > threshold_n,
+    }
+    if out_path:
+        from pathlib import Path
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    return result

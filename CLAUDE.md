@@ -67,8 +67,45 @@ Handoff 统一由 `gcc-evo ho create` 写入 `.gcc/branches/{branch}/handoff.md`
 
 需要查询交易知识时：
 1. 先读 .GCC/skill/INDEX.md 找到对应卡片路径
-2. 读取 .GCC/skill/cards/ 下的具体卡片
+2. 读取 .GCC/skill/cards/{书名}/ 下的具体卡片 (**2098张JSON**)
 3. 结合知识回答问题
+
+**格式统一：JSON** — `.md` 仅作人类可读副本，系统只消费 `*.json`。
+
+### 卡片闭环进化 (v5.430 GCC-0270)
+
+卡片生命周期由 `card_bridge.py v1.2` 自动管理，不需要手动干预：
+
+- **消费**: 每30分钟 `_read_knowledge_cards()` 自动读取:
+  - 所有蒸馏skill (全量)
+  - 3张top知识卡 + 2张随机知识卡
+  - 3张top经验卡 + 2张随机经验卡
+- **打分**: 交易结果回填时自动给参与决策的卡片打分 (`record_outcome`)
+- **蒸馏**: 每日8AM `distill()` 汇总正确率
+- **淘汰**: 经验卡每月1/16号, 知识卡每月1号 (`prune_deprecated`)
+- **晋升**: 每月1号正确率>60%且样本≥10的卡蒸馏为skill (`distill_to_skills`)
+- **KNN进化**: 每日 `card_knn_evolve()` 按准确率升降级卡片 (promote/demote/archive)
+- **漂移检测**: `card_knn_incremental_update_and_drift_check()` PSI监控准确率漂移
+
+CLI 手动触发:
+- `gcc-evo card lifecycle` — distill→prune→skills 一键执行
+- `gcc-evo card index` — 重建索引
+- `gcc-evo card knn-precompute` — KNN近邻预计算
+- `gcc-evo card knn-drift-check` — PSI漂移检测
+- `gcc-evo card blast-radius` — BFS影响范围评估
+- `gcc-evo card query -k "keyword"` — 关键词查询
+
+### 关键文件
+
+| 文件 | 作用 |
+|------|------|
+| `gcc_evolution/card_bridge.py` | v1.2 卡片索引/查询/KNN/激活/蒸馏/淘汰 |
+| `gcc_trading_module.py` | B1通道消费卡片 + outcome回填打分 |
+| `state/card_index.json` | 卡片索引缓存 |
+| `state/card_activations.jsonl` | 激活+结果日志 |
+| `state/card_deprecated.json` | 已淘汰卡片列表 |
+| `state/gcc_skills.json` | 蒸馏产出的skill |
+| `state/prefetch_index.json` | KNN近邻预计算索引 |
 
 ## 主要代码目录
 
