@@ -10562,10 +10562,10 @@ class PriceScanEngine:
                                     _dc_exp_s = _dc_atr_s > _dc_atr_avg_s * 1.2 if _dc_atr_avg_s > 0 else False
                                     if _dc_cur_s > _dc_hi_s and _dc_exp_s:
                                         _dc_push_s(symbol, "Donchian_Break", "BUY", 0.70)
-                                        logger.info(f"[B1][Donchian] {symbol} 4H突破上轨 dc_high={_dc_hi_s:.2f} conf=0.70")
+                                        logger.info(f"[B1][Donchian] {symbol} 4H突破上轨 dc_high={_dc_hi_s:.2f} atr={_dc_atr_s:.2f} conf=0.70")
                                     elif _dc_cur_s < _dc_lo_s and _dc_exp_s:
                                         _dc_push_s(symbol, "Donchian_Break", "SELL", 0.70)
-                                        logger.info(f"[B1][Donchian] {symbol} 4H跌破下轨 dc_low={_dc_lo_s:.2f} conf=0.70")
+                                        logger.info(f"[B1][Donchian] {symbol} 4H跌破下轨 dc_low={_dc_lo_s:.2f} atr={_dc_atr_s:.2f} conf=0.70")
                             except Exception as _dc_e_s:
                                 logger.debug(f"[B1][Donchian] {symbol} stock error: {_dc_e_s}")
 
