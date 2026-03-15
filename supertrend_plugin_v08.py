@@ -79,11 +79,14 @@ import numpy as np
 import json
 import os
 import threading
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import time
+
+_st_logger = logging.getLogger("supertrend_plugin")
 
 
 # ========================================================================
@@ -276,7 +279,7 @@ class SuperTrendPlugin:
 
     def _log(self, msg: str):
         if self.debug:
-            print(f"[SuperTrend_Plugin_v{self.VERSION}] {msg}")
+            _st_logger.info(f"[SuperTrend_Plugin_v{self.VERSION}] {msg}")
 
     # ========================================================================
     # 核心接口
@@ -1189,7 +1192,7 @@ def get_supertrend_plugin() -> SuperTrendPlugin:
     with _plugin_lock:
         if _global_plugin is None:
             _global_plugin = SuperTrendPlugin()
-            print(f"[SuperTrend_Plugin] Init OK v{SuperTrendPlugin.VERSION}")
+            _st_logger.info(f"[SuperTrend_Plugin] Init OK v{SuperTrendPlugin.VERSION}")
         return _global_plugin
 
 

@@ -54314,7 +54314,7 @@ if __name__ == "__main__":
                     result = _evo_sp.run(
                         ["python", ".GCC/gcc_evo.py", "loop", "-k", "KEY-011", "--once"],
                         cwd=str(os.path.dirname(os.path.abspath(__file__))),
-                        timeout=300, capture_output=True, text=True,
+                        timeout=300, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     )
                     if result.returncode == 0:
                         _evo_fail_count = 0
@@ -55216,6 +55216,13 @@ def _autosave_worker():
                             _cd_v = sum(1 for v in _card_report.values() if v["status"] == "validated")
                             _cd_f = sum(1 for v in _card_report.values() if v["status"] == "flagged")
                             log_to_server(f"[CARD-BRIDGE][DISTILL] 每日蒸馏完成: {len(_card_report)}卡 validated={_cd_v} flagged={_cd_f}")
+                            # GCC-0270: 淘汰低分卡 + 高分卡蒸馏为skill
+                            _prune_r = _card_bridge.prune_deprecated()
+                            if _prune_r.get("deprecated", 0) > 0:
+                                log_to_server(f"[CARD-BRIDGE][PRUNE] 淘汰{_prune_r['deprecated']}张低分卡")
+                            _skill_r = _card_bridge.distill_to_skills()
+                            if _skill_r.get("new_skills", 0) > 0:
+                                log_to_server(f"[CARD-BRIDGE][SKILL] 蒸馏{_skill_r['new_skills']}条新skill")
                 except Exception as _e_cd:
                     log_to_server(f"[CARD-BRIDGE][DISTILL] 调度异常: {_e_cd}")
 
