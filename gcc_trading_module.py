@@ -1102,6 +1102,8 @@ class DecisionContext:
             "extended": self.extended,
         }
 
+    _SNAPSHOT_MAX_PER_SYMBOL = 200  # 最多保留最近200个快照/品种
+
     def snapshot(self) -> None:
         """落盘快照到 state/gcc_decision_context/{symbol}/{ts}.json。"""
         try:
@@ -1113,6 +1115,11 @@ class DecisionContext:
                 json.dumps(self.as_dict(), ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            # 清理旧快照: 按修改时间保留最近 N 个
+            files = sorted(snap_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
+            if len(files) > self._SNAPSHOT_MAX_PER_SYMBOL:
+                for old in files[: len(files) - self._SNAPSHOT_MAX_PER_SYMBOL]:
+                    old.unlink(missing_ok=True)
         except Exception as e:
             logger.debug("[GCC-TRADE] context snapshot: %s", e)
 
@@ -1577,22 +1584,37 @@ def _make_signal_fingerprint(context: dict) -> str:
     return f"{scan_dir}|{sig_label}"
 
 
+_FAILED_PATTERNS_CACHE: dict = {}
+_FAILED_PATTERNS_CACHE_TS: float = 0.0
+_FAILED_PATTERNS_CACHE_TTL = 300  # 5分钟 (失败模式更新频率低)
+
+
 def _load_failed_patterns() -> dict:
     """加载失败模式缓存 {symbol: [{fingerprint, action, candle_count}]}"""
+    global _FAILED_PATTERNS_CACHE, _FAILED_PATTERNS_CACHE_TS
+    now = time.time()
+    if _FAILED_PATTERNS_CACHE and (now - _FAILED_PATTERNS_CACHE_TS) < _FAILED_PATTERNS_CACHE_TTL:
+        return _FAILED_PATTERNS_CACHE
     if not _FAILED_PATTERN_FILE.exists():
         return {}
     try:
-        return json.loads(_FAILED_PATTERN_FILE.read_text(encoding="utf-8"))
+        data = json.loads(_FAILED_PATTERN_FILE.read_text(encoding="utf-8"))
+        _FAILED_PATTERNS_CACHE = data
+        _FAILED_PATTERNS_CACHE_TS = now
+        return data
     except Exception:
         return {}
 
 
 def _save_failed_patterns(patterns: dict) -> None:
     """保存失败模式缓存。"""
+    global _FAILED_PATTERNS_CACHE, _FAILED_PATTERNS_CACHE_TS
     try:
         _FAILED_PATTERN_FILE.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(_FAILED_PATTERN_FILE,
                       json.dumps(patterns, ensure_ascii=False, indent=2))
+        _FAILED_PATTERNS_CACHE = patterns
+        _FAILED_PATTERNS_CACHE_TS = time.time()
     except Exception as e:
         logger.debug("[GCC-TM] save_failed_patterns: %s", e)
 
@@ -1664,9 +1686,8 @@ class TopologyVerifier:
     def _fiedler_value(vals: list) -> float:
         """
         arXiv:2407.09468: 超图 Laplacian Fiedler值（代数连通度）。
-        Fiedler值 = λ₂ = min_{x⊥1} x'Lx / x'x
-        实现: 构建相似度 Laplacian → Rayleigh 商迭代求 λ₂。
-        对 n≤6 的小矩阵用投影 Rayleigh 商法（精确到收敛）。
+        Fiedler值 = λ₂ = 第二小特征值。
+        对 n≤6 小矩阵: 投影到 1⊥ 子空间后逆迭代求最小非零特征值。
         """
         n = len(vals)
         if n < 2:
@@ -1685,10 +1706,15 @@ class TopologyVerifier:
         D = [sum(W[i]) for i in range(n)]
         L = [[(D[i] if i == j else 0.0) - W[i][j] for j in range(n)] for i in range(n)]
 
-        # Rayleigh 商迭代: 在 1⊥ 子空间中求最小特征值
+        # ── 逆迭代求 Fiedler (λ₂) ──
+        # L 的最小特征值 λ₁=0 (全1向量)，投影到 1⊥ 后逆迭代收敛到 λ₂
+        # 加微小正则化避免 L 奇异: L_reg = L + εI
+        eps = 1e-8
+        L_reg = [[L[i][j] + (eps if i == j else 0.0) for j in range(n)]
+                 for i in range(n)]
+
         # 初始向量: 交替 +1/-1 (正交于全1向量)
         x = [(-1.0) ** i for i in range(n)]
-        # 减去在全1方向的投影 → 保证 x⊥1
         mean_x = sum(x) / n
         x = [xi - mean_x for xi in x]
         norm = sum(xi * xi for xi in x) ** 0.5
@@ -1696,23 +1722,40 @@ class TopologyVerifier:
             return 0.0
         x = [xi / norm for xi in x]
 
+        def _solve_dense(A, b):
+            """Gaussian elimination for n≤6 dense system."""
+            m = len(b)
+            aug = [A[r][:] + [b[r]] for r in range(m)]
+            for col in range(m):
+                max_row = max(range(col, m), key=lambda r: abs(aug[r][col]))
+                aug[col], aug[max_row] = aug[max_row], aug[col]
+                if abs(aug[col][col]) < 1e-14:
+                    continue
+                for row in range(col + 1, m):
+                    f = aug[row][col] / aug[col][col]
+                    for j in range(col, m + 1):
+                        aug[row][j] -= f * aug[col][j]
+            res = [0.0] * m
+            for i in range(m - 1, -1, -1):
+                s = aug[i][m] - sum(aug[i][j] * res[j] for j in range(i + 1, m))
+                res[i] = s / aug[i][i] if abs(aug[i][i]) > 1e-14 else 0.0
+            return res
+
         fiedler = 0.0
-        for _ in range(20):  # 迭代收敛
-            # y = L @ x
-            y = [sum(L[i][j] * x[j] for j in range(n)) for i in range(n)]
-            # Rayleigh 商 = x'y / x'x
-            xty = sum(x[i] * y[i] for i in range(n))
-            xtx = sum(x[i] * x[i] for i in range(n))
-            fiedler = xty / xtx if xtx > 1e-12 else 0.0
-            # 逆迭代: 解 (L - σI)z = x, σ 略小于 fiedler
-            # 简化: 直接用 y 归一化 + 正交化作为下一步
-            # 减去 1⊥ 投影
+        for _ in range(30):
+            # 逆迭代: 解 L_reg · y = x → y 收敛到最小特征值方向
+            y = _solve_dense(L_reg, x)
+            # 投影到 1⊥ 保证不退化到 λ₁=0 的全1向量
             mean_y = sum(y) / n
             y = [yi - mean_y for yi in y]
             norm_y = sum(yi * yi for yi in y) ** 0.5
             if norm_y < 1e-12:
                 break
-            x = [yi / norm_y for yi in y]
+            y = [yi / norm_y for yi in y]
+            # Rayleigh 商 on original L → 精确 λ₂
+            Ly = [sum(L[i][j] * y[j] for j in range(n)) for i in range(n)]
+            fiedler = sum(y[i] * Ly[i] for i in range(n))
+            x = y[:]
 
         return max(0.0, round(fiedler, 6))
 
@@ -2527,8 +2570,9 @@ class GCCTradingModule:
         }
         try:
             self._pending_file.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write(self._pending_file,
-                          json.dumps(order, ensure_ascii=False, indent=2))
+            with _get_pending_lock(self.symbol):
+                _atomic_write(self._pending_file,
+                              json.dumps(order, ensure_ascii=False, indent=2))
             logger.info("[GCC-TRADE] pending_order written: %s %s", action, self.symbol)
         except Exception as e:
             logger.warning("[GCC-TRADE] write_pending_order: %s", e)
@@ -2635,10 +2679,17 @@ def _backfill_outcome(symbol: str, current_price: float,
         return filled_records
     try:
         lines = _KNN_EXP_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
+        # 性能保护: 只扫描最近 500 行寻找待回填记录 (旧记录几乎都已填)
+        _BACKFILL_SCAN_WINDOW = 500
+        scan_start = max(0, len(lines) - _BACKFILL_SCAN_WINDOW)
         updated = []
         fill_count = 0
-        for line in lines:
+        for idx, line in enumerate(lines):
             if not line.strip():
+                updated.append(line)
+                continue
+            # scan_start 之前的旧行直接保留原文，跳过 JSON 解析
+            if idx < scan_start:
                 updated.append(line)
                 continue
             try:
@@ -3084,6 +3135,7 @@ def _drain_signals(symbol: str) -> list:
 # ══════════════════════════════════════════════════════════════
 def gcc_consume_pending_order(symbol: str) -> Optional[dict]:
     """读取 pending_order（如有），标记 processing=True 防止并发/崩溃重复。
+    使用 per-symbol 锁防止与 _write_pending_order / scalp_write_pending 竞态。
 
     返回: {"action": "BUY"/"SELL", "price_ref": float, ...} 或 None。
     调用方需在下单后调用 gcc_confirm_consumed(symbol, success) 标记结果。
@@ -3091,64 +3143,66 @@ def gcc_consume_pending_order(symbol: str) -> Optional[dict]:
     pending_file = _STATE_DIR / f"gcc_pending_order_{symbol}.json"
     if not pending_file.exists():
         return None
-    try:
-        order = json.loads(pending_file.read_text(encoding="utf-8"))
-    except Exception:
-        return None
 
-    if order.get("consumed"):
-        return None
+    with _get_pending_lock(symbol):
+        try:
+            order = json.loads(pending_file.read_text(encoding="utf-8"))
+        except Exception:
+            return None
 
-    # v3.681: 崩溃恢复保护 — processing=True 说明上次下单可能已发出但未确认
-    if order.get("processing"):
-        _proc_ts = order.get("processing_ts", "")
-        logger.warning(
-            "[GCC-TM][CRASH_GUARD] %s %s processing=True (上次可能已下单未确认, ts=%s), 跳过自动重试",
-            symbol, order.get("action"), _proc_ts,
-        )
-        # 超过2小时的processing视为崩溃残留, 自动过期
-        if _proc_ts:
+        if order.get("consumed"):
+            return None
+
+        # v3.681: 崩溃恢复保护 — processing=True 说明上次下单可能已发出但未确认
+        if order.get("processing"):
+            _proc_ts = order.get("processing_ts", "")
+            logger.warning(
+                "[GCC-TM][CRASH_GUARD] %s %s processing=True (上次可能已下单未确认, ts=%s), 跳过自动重试",
+                symbol, order.get("action"), _proc_ts,
+            )
+            # 超过2小时的processing视为崩溃残留, 自动过期
+            if _proc_ts:
+                try:
+                    _proc_dt = datetime.strptime(_proc_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_NY_TZ)
+                    _proc_age_h = (datetime.now(_NY_TZ) - _proc_dt).total_seconds() / 3600
+                    if _proc_age_h > 2:
+                        order["consumed"] = True
+                        order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+                        order["expired"] = True
+                        order["expire_reason"] = "crash_guard_timeout"
+                        _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
+                        logger.warning("[GCC-TM][CRASH_GUARD] %s processing超2h, 自动过期", symbol)
+                except Exception:
+                    pass
+            return None
+
+        # v3.681: TTL检查 — 超过24小时的pending_order自动过期清理
+        _order_ts = order.get("ts", "")
+        if _order_ts:
             try:
-                _proc_dt = datetime.strptime(_proc_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_NY_TZ)
-                _proc_age_h = (datetime.now(_NY_TZ) - _proc_dt).total_seconds() / 3600
-                if _proc_age_h > 2:
+                _order_dt = datetime.strptime(_order_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_NY_TZ)
+                _age_hours = (datetime.now(_NY_TZ) - _order_dt).total_seconds() / 3600
+                if _age_hours > 24:
+                    logger.warning(
+                        "[GCC-TM][EXPIRED] %s %s price_ref=%.2f age=%.1fh > 24h, 丢弃",
+                        symbol, order.get("action"), order.get("price_ref", 0), _age_hours,
+                    )
                     order["consumed"] = True
                     order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
                     order["expired"] = True
-                    order["expire_reason"] = "crash_guard_timeout"
+                    order["expire_reason"] = "ttl_24h"
                     _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
-                    logger.warning("[GCC-TM][CRASH_GUARD] %s processing超2h, 自动过期", symbol)
+                    return None
             except Exception:
                 pass
-        return None
 
-    # v3.681: TTL检查 — 超过24小时的pending_order自动过期清理
-    _order_ts = order.get("ts", "")
-    if _order_ts:
+        # v3.681: 标记 processing=True, 防止崩溃后重复下单
+        order["processing"] = True
+        order["processing_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
         try:
-            _order_dt = datetime.strptime(_order_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_NY_TZ)
-            _age_hours = (datetime.now(_NY_TZ) - _order_dt).total_seconds() / 3600
-            if _age_hours > 24:
-                logger.warning(
-                    "[GCC-TM][EXPIRED] %s %s price_ref=%.2f age=%.1fh > 24h, 丢弃",
-                    symbol, order.get("action"), order.get("price_ref", 0), _age_hours,
-                )
-                order["consumed"] = True
-                order["consumed_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
-                order["expired"] = True
-                order["expire_reason"] = "ttl_24h"
-                _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
-                return None
+            _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
         except Exception:
             pass
-
-    # v3.681: 标记 processing=True, 防止崩溃后重复下单
-    order["processing"] = True
-    order["processing_ts"] = datetime.now(_NY_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        _atomic_write(pending_file, json.dumps(order, ensure_ascii=False, indent=2))
-    except Exception:
-        pass
 
     logger.info(
         "[GCC-TM][PEEK] %s %s price_ref=%.2f (标记processing, 等待执行确认)",
