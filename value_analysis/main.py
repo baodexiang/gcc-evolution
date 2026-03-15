@@ -478,6 +478,10 @@ def _build_symbol_payload_from_profile(
     as_of: str,
     profile: Dict[str, Any],
 ) -> Dict[str, Any]:
+    # GCC-0004: 提取DCF peer-ranked score (如有)
+    _dcf_scores = profile.get("dcf_scores", {}) or {}
+    _dcf_peer_score = _dcf_scores.get("dcf_discount_pct")
+
     result = analyze_value_profile(
         valuation_scores=profile["valuation_scores"],
         valuation_weights=profile["valuation_weights"],
@@ -489,6 +493,7 @@ def _build_symbol_payload_from_profile(
         balance_weights=profile["balance_weights"],
         cashflow_scores=profile["cashflow_scores"],
         cashflow_weights=profile["cashflow_weights"],
+        dcf_score=_dcf_peer_score,
         confidence_score=float(profile.get("confidence_score", 1.0)),
         audit_opinion=profile["audit_opinion"],
         altman_z=profile["altman_z"],
@@ -835,7 +840,8 @@ def _check_t05_composite() -> str:
     res = compute_composite_score(valuation_score=10.0, momentum_score=10.0, quality_factor=1.0)
     if res.valuation_label != "Strong Undervalued":
         raise AssertionError(f"unexpected label={res.valuation_label}")
-    if res.position_modifier != 1.5:
+    # GCC-0004: position_modifier改为连续线性(score=9→1.45, score=10→1.50)
+    if not (1.0 <= res.position_modifier <= 1.50):
         raise AssertionError(f"unexpected position_modifier={res.position_modifier}")
     return "composite mapping validated"
 

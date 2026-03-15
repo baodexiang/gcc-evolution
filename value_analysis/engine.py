@@ -40,6 +40,7 @@ def analyze_value_profile(
     balance_weights: Optional[Mapping[str, float]] = None,
     cashflow_scores: Optional[Mapping[str, Optional[float]]] = None,
     cashflow_weights: Optional[Mapping[str, float]] = None,
+    dcf_score: Optional[float] = None,
     confidence_score: float = 1.0,
     quality_key_missing: bool = False,
 ) -> ValueAnalysisResult:
@@ -83,12 +84,28 @@ def analyze_value_profile(
         cashflow_weights or {},
     )
 
-    fundamental_score = (
-        0.40 * valuation.normalized_score
-        + 0.30 * profitability_norm
-        + 0.20 * balance_norm
-        + 0.10 * cashflow_norm
-    )
+    # GCC-0004: 机构级多维加权
+    # 有DCF: val30% + prof25% + bal15% + cf10% + dcf15% + mom5%
+    # 无DCF: val35% + prof30% + bal20% + cf10% + mom5% (重分配dcf权重)
+    dcf_norm = 0.0
+    if dcf_score is not None:
+        dcf_norm = max(-10.0, min(10.0, float(dcf_score) * 5.0))
+        fundamental_score = (
+            0.30 * valuation.normalized_score
+            + 0.25 * profitability_norm
+            + 0.15 * balance_norm
+            + 0.10 * cashflow_norm
+            + 0.15 * dcf_norm
+            + 0.05 * momentum.normalized_score
+        )
+    else:
+        fundamental_score = (
+            0.35 * valuation.normalized_score
+            + 0.30 * profitability_norm
+            + 0.20 * balance_norm
+            + 0.10 * cashflow_norm
+            + 0.05 * momentum.normalized_score
+        )
 
     total_fund_fields = len(valuation_weights) + profitability_total + balance_total + cashflow_total
     total_fund_missing = len(valuation.missing_fields) + profitability_missing + balance_missing + cashflow_missing

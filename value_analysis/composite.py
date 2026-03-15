@@ -32,15 +32,16 @@ def score_to_label(score: float) -> str:
 
 
 def score_to_position_modifier(score: float) -> float:
-    if score >= 6.0:
-        return 1.50
-    if score >= 2.0:
-        return 1.20
-    if score >= -1.0:
-        return 1.00
-    if score >= -5.0:
-        return 0.60
-    return 0.00
+    """GCC-0004: 连续线性position modifier (替代固定阶梯)
+    score -10 → 0.00, -5 → 0.50, 0 → 1.00, 5 → 1.25, 10 → 1.50
+    比旧阶梯更平滑, 避免阈值附近跳变"""
+    if score <= -10.0:
+        return 0.00
+    if score <= 0.0:
+        # -10→0.0, 0→1.0 线性
+        return _clip(1.0 + score / 10.0, 0.0, 1.0)
+    # 0→1.0, 10→1.5 线性
+    return _clip(1.0 + score * 0.05, 1.0, 1.50)
 
 
 def compute_composite_score(
