@@ -10121,15 +10121,15 @@ class PriceScanEngine:
     # GCC-0258 S11: 15min多周期外挂扫描 — 填充GCC-TM信号池
     # 复用现有外挂(Hoffman/缠论/SuperTrend), 喂15min K线产生高频信号
     # ═══════════════════════════════════════════════════════════
-    def _scan_plugins_30m(self, symbol: str, market_type: str = "crypto"):
+    def _scan_plugins_15m(self, symbol: str, market_type: str = "crypto"):
         """
-        GCC-0021: 30min间隔外挂扫描, 15min K线, 信号推入GCC-TM信号池。
+        GCC-0021: 15min外挂扫描, 信号推入GCC-TM信号池。
         每30分钟调用一次, 15min K线每次有2根新数据。
-        活跃外挂: Hoffman_30m + EMA_Cross_30m (+ BrooksVision_4H persistent)
+        活跃外挂: Hoffman_15m + EMA_Cross_15m (+ BrooksVision_4H persistent)
         ADX(14)门控: <20震荡市抑制所有信号
         """
         try:
-            from gcc_trading_module import gcc_push_signal as _gcc_push_30m
+            from gcc_trading_module import gcc_push_signal as _gcc_push_15m
         except ImportError:
             return
 
@@ -10191,7 +10191,7 @@ class PriceScanEngine:
 
                 if _adx_value < 20:
                     _adx_gate_pass = False
-                    logger.info(f"[ADX-GATE] {symbol} ADX={_adx_value:.1f}<20 震荡市 → 抑制30min信号")
+                    logger.info(f"[ADX-GATE] {symbol} ADX={_adx_value:.1f}<20 震荡市 → 抑制信号")
                 elif _adx_value > 25:
                     _adx_conf_bonus = 0.05
                     logger.debug(f"[ADX-GATE] {symbol} ADX={_adx_value:.1f}>25 趋势强 → conf+0.05")
@@ -10199,9 +10199,9 @@ class PriceScanEngine:
             pass  # ADX计算异常不拦截
 
         if not _adx_gate_pass:
-            return  # 震荡市不推任何30min信号
+            return  # 震荡市不推任何信号
 
-        # ── 1. Hoffman 30m ──
+        # ── 1. Hoffman 15m ──
         if _rob_hoffman_available:
             try:
                 plugin = get_rob_hoffman_plugin()
@@ -10215,11 +10215,11 @@ class PriceScanEngine:
                 if plugin.should_activate_for_scan(result):
                     action = plugin.get_action_for_scan(result)
                     if action in ("BUY", "SELL"):
-                        _gcc_push_30m(main_symbol, "Hoffman_30m", action, min(0.7, result.confidence + _adx_conf_bonus))
+                        _gcc_push_15m(main_symbol, "Hoffman_15m", action, min(0.7, result.confidence + _adx_conf_bonus))
                         pushed += 1
-                        logger.info(f"[S11] {symbol} Hoffman_30m → {action} (conf={result.confidence:.2f})")
+                        logger.info(f"[S11] {symbol} Hoffman_15m → {action} (conf={result.confidence:.2f})")
             except Exception as e:
-                logger.debug(f"[S11] {symbol} Hoffman_30m error: {e}")
+                logger.debug(f"[S11] {symbol} Hoffman_15m error: {e}")
 
         # [DISABLED 2026-03-15] ChanBS_15m: 实盘胜率11.8%, 累计亏损-$1,670, 已DOWNGRADED
         # 缠论15min 200根K线不足以形成完整中枢, 一买/一卖本质是逆趋势信号
@@ -10256,8 +10256,8 @@ class PriceScanEngine:
                     rsi = 100.0 if avg_gain > 0 else 50.0
 
                 # S1: RSI — v0.3禁用(均值回归信号, 与趋势跟随系统矛盾)
-                # if rsi < 30: _gcc_push_30m(main_symbol, "RSI_15m", "BUY", 0.55)
-                # elif rsi > 70: _gcc_push_30m(main_symbol, "RSI_15m", "SELL", 0.55)
+                # if rsi < 30: _gcc_push_15m(main_symbol, "RSI_15m", "BUY", 0.55)
+                # elif rsi > 70: _gcc_push_15m(main_symbol, "RSI_15m", "SELL", 0.55)
 
                 # ── S2: EMA9×EMA21 金叉死叉 ──
                 def _ema(arr, period):
@@ -10272,11 +10272,11 @@ class PriceScanEngine:
                 ema21 = _ema(closes, 21)
                 # 交叉检测: 前一根 vs 当前根
                 if ema9[-2] <= ema21[-2] and ema9[-1] > ema21[-1]:
-                    _gcc_push_30m(main_symbol, "EMA_Cross_30m", "BUY", 0.6 + _adx_conf_bonus)
+                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "BUY", 0.6 + _adx_conf_bonus)
                     pushed += 1
                     logger.info(f"[GCC-0259] {symbol} EMA9×21金叉 → BUY")
                 elif ema9[-2] >= ema21[-2] and ema9[-1] < ema21[-1]:
-                    _gcc_push_30m(main_symbol, "EMA_Cross_30m", "SELL", 0.6 + _adx_conf_bonus)
+                    _gcc_push_15m(main_symbol, "EMA_Cross_15m", "SELL", 0.6 + _adx_conf_bonus)
                     pushed += 1
                     logger.info(f"[GCC-0259] {symbol} EMA9×21死叉 → SELL")
 
@@ -10360,7 +10360,7 @@ class PriceScanEngine:
                     # self._scan_supertrend_av2(symbol)
 
                     # GCC-0258 S11: 15min多周期外挂扫描 (在4H外挂之后, gcc_observe之前)
-                    self._scan_plugins_30m(symbol, market_type="crypto")
+                    self._scan_plugins_15m(symbol, market_type="crypto")
 
                     # GCC-0141: 外挂扫描计时结束
                     _dp.stop(f"plugins_{symbol}")
@@ -10496,7 +10496,7 @@ class PriceScanEngine:
                     # self._scan_supertrend_av2(symbol, market_type="stock")
 
                     # GCC-0258 S11: 15min多周期外挂扫描 (在4H外挂之后, gcc_observe之前)
-                    self._scan_plugins_30m(symbol, market_type="stock")
+                    self._scan_plugins_15m(symbol, market_type="stock")
 
                     # GCC-0141: 外挂扫描计时结束
                     _dp.stop(f"plugins_{symbol}")
