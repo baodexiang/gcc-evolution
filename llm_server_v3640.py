@@ -25833,7 +25833,7 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
     # v3.660: GCC-TM全量独占 — 所有加密货币只允许gcc_tm/gcc_scalp下单
     if source not in ("gcc_tm", "gcc_scalp"):
         log_to_server(
-            f"[GCC_TM_ONLY] {symbol} {final_action} price={last_close:.2f} "
+            f"[BLOCKED][非B1] {symbol} {final_action} price={last_close:.2f} "
             f"source={source} type={signal_type} → 非GCC-TM来源，仅观察"
         )
         return None  # 门控拦截，不实际下单
@@ -39980,7 +39980,7 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
                 _qqq_result = _qqq_execute(final_action, dry_run=False)
                 _opt_info = _qqq_result.get('option', {})
                 log_to_server(
-                    f"[TSLA_OPT] {source} {final_action} → "
+                    f"[B2][TSLA-OPT] {source} {final_action} → "
                     f"success={_qqq_result.get('success')} "
                     f"type={_opt_info.get('type', 'N/A')} strike={_opt_info.get('strike', 'N/A')}"
                 )
@@ -39996,13 +39996,13 @@ def send_signalstack_order(final_action: str, symbol: str, signal_type: str = ""
                     pass
                 return _qqq_result.get("success", False)
             except Exception as _qqq_e:
-                log_to_server(f"[TSLA_OPT][ERROR] {final_action}: {_qqq_e}")
+                log_to_server(f"[B2][TSLA-OPT][ERROR] {final_action}: {_qqq_e}")
                 return False
 
     # v3.660: GCC-TM全量独占 — 所有美股只允许gcc_tm下单
     if source not in ("gcc_tm",):
         log_to_server(
-            f"[GCC_TM_ONLY] {symbol} {final_action} "
+            f"[BLOCKED][非B1] {symbol} {final_action} "
             f"source={source} type={signal_type} → 非GCC-TM来源，仅观察"
         )
         return None  # 门控拦截，不实际下单
@@ -43019,12 +43019,12 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             _gcc_cur_price = _sq.get("last", 0)
             _gcc_price_src = "Schwab"
     except Exception as _api_e:
-        log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_price_src or 'API'}取价失败({_api_e})")
+        log_to_server(f"[B1][GCC-TM] {symbol}: {_gcc_price_src or 'API'}取价失败({_api_e})")
     if _gcc_cur_price <= 0:
         _gcc_cur_price = _gcc_price
         _gcc_price_src = "price_ref"
     log_to_server(
-        f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} "
+        f"[B1][GCC-TM] {symbol}: {_gcc_act} "
         f"price_ref={_gcc_price:.2f} cur={_gcc_cur_price:.2f}({_gcc_price_src}) "
         f"source={_gcc_order.get('source','')}"
     )
@@ -43038,7 +43038,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             send_ok = _qqq_res.get("success", False)
             _opt_info = _qqq_res.get('option', {})
             log_to_server(
-                f"[TSLA_OPT] GCC-TM {_gcc_act} → success={send_ok} "
+                f"[B2][TSLA-OPT] GCC-TM {_gcc_act} → success={send_ok} "
                 f"type={_opt_info.get('type', 'N/A')} strike={_opt_info.get('strike', 'N/A')}"
             )
             try:
@@ -43052,7 +43052,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             except Exception:
                 pass
         except Exception as _qqq_e:
-            log_to_server(f"[TSLA_OPT][ERROR] GCC-TM {_gcc_act}: {_qqq_e}")
+            log_to_server(f"[B2][TSLA-OPT][ERROR] GCC-TM {_gcc_act}: {_qqq_e}")
     elif is_us_stock(symbol):
         try:
             send_ok = send_signalstack_order(_gcc_act, symbol, source="gcc_tm")
@@ -43082,7 +43082,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                 # 现货卖出保护: SELL只允许平仓(reason必须含scalp_exit)
                 _scalp_reason = _gcc_order.get("reason", "")
                 if "scalp_exit" not in _scalp_reason:
-                    log_to_server(f"[GCC-SCALP][BLOCKED] {symbol} SELL拦截 — reason未确认平仓: {_scalp_reason}")
+                    log_to_server(f"[B3][BTC-SCALP][BLOCKED] {symbol} SELL拦截 — reason未确认平仓: {_scalp_reason}")
                     send_ok = False
                     _scalp_res = {"success": False, "error": "现货SELL必须是scalp_exit平仓"}
                 else:
@@ -43099,7 +43099,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
             send_ok = _scalp_res.get("success", False)
             _order_type = "LIMIT" if _scalp_limit or _gcc_act == "SELL" else "MARKET"
             log_to_server(
-                f"[GCC-SCALP][EXECUTE] {symbol} {_gcc_act} {_order_type}: "
+                f"[B3][BTC-SCALP] {symbol} {_gcc_act} {_order_type}: "
                 f"qty={_scalp_qty:.8f} price=${_gcc_cur_price:.2f} "
                 f"limit={_scalp_limit or 'N/A'} "
                 f"success={send_ok} order_id={_scalp_res.get('order_id','')}"
@@ -43118,7 +43118,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                 except Exception:
                     pass
         except Exception as _scalp_e:
-            log_to_server(f"[GCC-SCALP][ERROR] {symbol} Coinbase: {_scalp_e}")
+            log_to_server(f"[B3][BTC-SCALP][ERROR] {symbol} Coinbase: {_scalp_e}")
     else:
         try:
             send_ok = send_3commas_signal(_gcc_act, _gcc_cur_price, symbol, source="gcc_tm")
@@ -43148,7 +43148,7 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
         except Exception as _scalp_cb_e:
             log_to_server(f"[GCC-SCALP][CALLBACK] {symbol} entry callback error: {_scalp_cb_e}")
     if send_ok:
-        log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单成功")
+        log_to_server(f"[B1][GCC-TM] {symbol}: {_gcc_act} 下单成功")
         # GCC-0257 S5: 交易记录入KEY-009
         try:
             from timeframe_params import read_symbol_timeframe
@@ -43194,9 +43194,9 @@ def _gcc_tm_execute_pending_inner(symbol: str) -> bool:
                     f"时间: {_gcc_order.get('ts', '')}"
                 )
             except Exception as _em_err:
-                log_to_server(f"[GCC-TM][EXECUTE] {symbol}: 邮件发送失败 - {_em_err}")
+                log_to_server(f"[B1][GCC-TM] {symbol}: 邮件发送失败 - {_em_err}")
     else:
-        log_to_server(f"[GCC-TM][EXECUTE] {symbol}: {_gcc_act} 下单失败,保留pending_order重试")
+        log_to_server(f"[B1][GCC-TM] {symbol}: {_gcc_act} 下单失败,保留pending_order重试")
     return send_ok
 
 
@@ -55802,7 +55802,7 @@ def _qqq_detect_trend() -> Optional[str]:
     try:
         bars = fetch_ohlcv_from_api("TSLA", 240, limit=50)
         if not bars or len(bars) < 15:
-            log_to_server("[TSLA_OPT][VISION] K线不足，跳过")
+            log_to_server("[B2][TSLA-OPT][VISION] K线不足，跳过")
             return None
 
         # 1. 生成GCC-0262标注图 (Swing H/L + EMA9/21 + NOW标记)
@@ -55814,7 +55814,7 @@ def _qqq_detect_trend() -> Optional[str]:
 
         chart_b64 = generate_clean_chart(bars, f"TSLA - Options Trend ({len(bars)} bars)", timeframe=_current_label)
         if not chart_b64:
-            log_to_server("[TSLA_OPT][VISION] 标注图生成失败，回退极简图")
+            log_to_server("[B2][TSLA-OPT][VISION] 标注图生成失败，回退极简图")
             from vision_analyzer import generate_simple_trend_chart
             chart_b64 = generate_simple_trend_chart(bars[-30:], f"TSLA - {len(bars[-30:])} bars")
             if not chart_b64:
@@ -55835,7 +55835,7 @@ def _qqq_detect_trend() -> Optional[str]:
                 vision_dir = "SELL"
             else:
                 return None
-            log_to_server(f"[TSLA_OPT][VISION] (回退) TSLA趋势={direction} conf={confidence:.0%}")
+            log_to_server(f"[B2][TSLA-OPT][VISION] (回退) TSLA趋势={direction} conf={confidence:.0%}")
             if not _brooks_confirm("TSLA", vision_dir, "TSLA_OPT"):
                 return None
             if not _volume_confirm("TSLA", vision_dir, "TSLA_OPT"):
@@ -55868,11 +55868,11 @@ def _qqq_detect_trend() -> Optional[str]:
             prompt = prompt + _user_ctx
 
         # 3. 调用Claude Vision API (RADAR_PROMPT输出)
-        log_to_server(f"[TSLA_OPT][VISION] 调Claude RADAR V2分析TSLA趋势 ({_current_label})...")
+        log_to_server(f"[B2][TSLA-OPT][VISION] 调Claude RADAR V2分析TSLA趋势 ({_current_label})...")
         result = call_claude_vision(chart_b64, prompt, max_retries=2, expected_mode="trend", symbol="TSLA")
 
         if not result:
-            log_to_server("[TSLA_OPT][VISION] Claude RADAR返回空")
+            log_to_server("[B2][TSLA-OPT][VISION] Claude RADAR返回空")
             return None
 
         # 4. 解析RADAR_PROMPT输出 (confidence 0-100整数, direction UP/DOWN/SIDE)
@@ -55890,11 +55890,11 @@ def _qqq_detect_trend() -> Optional[str]:
 
         # wait_signal=true → Vision建议观望
         if wait_signal:
-            log_to_server(f"[TSLA_OPT][VISION] wait_signal=true, 观望 (conf={confidence:.0%} pattern={brooks_pattern})")
+            log_to_server(f"[B2][TSLA-OPT][VISION] wait_signal=true, 观望 (conf={confidence:.0%} pattern={brooks_pattern})")
             return None
 
         if confidence < 0.6:
-            log_to_server(f"[TSLA_OPT][VISION] 置信度不足 {confidence:.0%}<60% (pattern={brooks_pattern})")
+            log_to_server(f"[B2][TSLA-OPT][VISION] 置信度不足 {confidence:.0%}<60% (pattern={brooks_pattern})")
             return None
 
         if direction in ("UP",):
@@ -55902,11 +55902,11 @@ def _qqq_detect_trend() -> Optional[str]:
         elif direction in ("DOWN",):
             vision_dir = "SELL"
         else:
-            log_to_server(f"[TSLA_OPT][VISION] direction=SIDE, 无方向")
+            log_to_server(f"[B2][TSLA-OPT][VISION] direction=SIDE, 无方向")
             return None
 
         log_to_server(
-            f"[TSLA_OPT][VISION] TSLA趋势={direction} conf={confidence:.0%} "
+            f"[B2][TSLA-OPT][VISION] TSLA趋势={direction} conf={confidence:.0%} "
             f"pattern={brooks_pattern} struct={market_structure} "
             f"failed_break={failed_breakout}"
         )
@@ -55921,7 +55921,7 @@ def _qqq_detect_trend() -> Optional[str]:
 
         return vision_dir
     except Exception as _e:
-        log_to_server(f"[TSLA_OPT][VISION] 调API异常: {_e}")
+        log_to_server(f"[B2][TSLA-OPT][VISION] 调API异常: {_e}")
         return None
 
 _qqq_vision_last_check = {"time": 0}  # Vision读取频率控制
@@ -55966,7 +55966,7 @@ def _qqq_options_manager_worker():
                     _qqq_opt_stop.wait(_QQQ_OPT_CHECK_INTERVAL)
                     continue
                 elif pending_status == "FAILED":
-                    log_to_server("[TSLA_OPT][AUTO] 平仓订单失败，恢复open等下轮重试")
+                    log_to_server("[B2][TSLA-OPT][AUTO] 平仓订单失败，恢复open等下轮重试")
 
                 pos = _qqq_pos()
 
@@ -55976,7 +55976,7 @@ def _qqq_options_manager_worker():
                     exit_result = _qqq_auto(dry_run=False)
                     if exit_result:
                         _exit_msg = (
-                            f"[TSLA_OPT][EXIT] {exit_result['action']}: {exit_result['reason']} "
+                            f"[B2][TSLA-OPT][EXIT] {exit_result['action']}: {exit_result['reason']} "
                             f"PnL=${exit_result.get('pnl', 0):.0f} "
                             f"success={exit_result['result'].get('success')}"
                         )
@@ -56009,7 +56009,7 @@ def _qqq_options_manager_worker():
                                 )
                                 if is_reversal:
                                     _rev_msg = (
-                                        f"[TSLA_OPT][REVERSAL] Vision={vision_dir} 但持仓={opt_type}"
+                                        f"[B2][TSLA-OPT][REVERSAL] Vision={vision_dir} 但持仓={opt_type}"
                                         f" → 平仓(下轮再开新方向)"
                                     )
                                     log_to_server(_rev_msg)
@@ -56047,14 +56047,14 @@ def _qqq_options_manager_worker():
                             # 信号去重: 同方向30分钟内不重复
                             if (direction != _qqq_last_signal["direction"] or
                                     _now_ts - _qqq_last_signal["time"] > 1800):
-                                log_to_server(f"[TSLA_OPT][ENTRY] Vision={direction}，开始选期权开仓")
+                                log_to_server(f"[B2][TSLA-OPT][ENTRY] Vision={direction}，开始选期权开仓")
                                 chain = _qqq_chain()
                                 if chain:
                                     opt = _qqq_select(direction, chain)
                                     if opt:
                                         result = _qqq_place(opt, dry_run=False)
                                         _entry_msg = (
-                                            f"[TSLA_OPT][ENTRY] {opt['type']} "
+                                            f"[B2][TSLA-OPT][ENTRY] {opt['type']} "
                                             f"{opt['strike']} "
                                             f"x{opt['contracts']} cost=${opt['total_cost']:.0f} "
                                             f"success={result.get('success')}"
@@ -56077,7 +56077,7 @@ def _qqq_options_manager_worker():
                                         _qqq_last_signal["time"] = _now_ts
 
         except Exception as _e_qqq:
-            log_to_server(f"[TSLA_OPT][AUTO][ERROR] {_e_qqq}")
+            log_to_server(f"[B2][TSLA-OPT][AUTO][ERROR] {_e_qqq}")
         _qqq_opt_stop.wait(_QQQ_OPT_CHECK_INTERVAL)
 
 def _start_qqq_options_manager():
@@ -56090,7 +56090,7 @@ def _start_qqq_options_manager():
             name="TSLAOptionsManager",
         )
         _qqq_opt_thread.start()
-        log_to_server("[TSLA_OPT] 自动管理线程已启动 (每5分钟检查持仓出场规则)")
+        log_to_server("[B2][TSLA-OPT] 自动管理线程已启动 (每5分钟检查持仓出场规则)")
 
 _start_qqq_options_manager()
 

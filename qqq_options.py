@@ -150,7 +150,7 @@ def _append_trade_history(pos_data: dict, exit_action: str = "", exit_reason: st
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         HISTORY_FILE.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
-        logger.error(f"[TSLA_OPT] 写入交易历史失败: {e}")
+        logger.error(f"[B2][TSLA-OPT] 写入交易历史失败: {e}")
 
 
 def _get_daily_trades() -> dict:
@@ -252,11 +252,11 @@ def check_pending_close() -> Optional[str]:
                                    "pending_action", "pending_close_qty", "pending_current_value"):
                             data.pop(_k, None)
                         STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-                    logger.info(f"[TSLA_OPT] 部分止盈确认: {old_qty}→{old_qty - _pq}张, 追踪止损已激活")
+                    logger.info(f"[B2][TSLA-OPT] 部分止盈确认: {old_qty}→{old_qty - _pq}张, 追踪止损已激活")
                     return "FILLED"
                 # 全部平仓确认: 清除持仓
                 _clear_position()
-                logger.info(f"[TSLA_OPT] 平仓订单{close_order_id}已FILLED，持仓已清除")
+                logger.info(f"[B2][TSLA-OPT] 平仓订单{close_order_id}已FILLED，持仓已清除")
                 return "FILLED"
             elif status in ("CANCELED", "REJECTED", "EXPIRED"):
                 # 平仓失败，恢复为open状态让auto_manage重试
@@ -265,7 +265,7 @@ def check_pending_close() -> Optional[str]:
                     del data["close_order_id"]
                     del data["close_submitted_at"]
                     STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-                logger.warning(f"[TSLA_OPT] 平仓订单{close_order_id}状态={status}，恢复为open重试")
+                logger.warning(f"[B2][TSLA-OPT] 平仓订单{close_order_id}状态={status}，恢复为open重试")
                 return "FAILED"
             else:
                 # PENDING/WORKING/QUEUED等
@@ -276,7 +276,7 @@ def check_pending_close() -> Optional[str]:
                     if elapsed > 600:
                         try:
                             client.cancel_order(int(close_order_id), account_hash)
-                            logger.warning(f"[TSLA_OPT] 平仓订单{close_order_id}超时10min，已取消")
+                            logger.warning(f"[B2][TSLA-OPT] 平仓订单{close_order_id}超时10min，已取消")
                         except Exception:
                             pass
                         with _position_lock:
@@ -289,7 +289,7 @@ def check_pending_close() -> Optional[str]:
                         return "FAILED"
                 return "PENDING"
     except Exception as e:
-        logger.error(f"[TSLA_OPT] 查询平仓订单{close_order_id}异常: {e}")
+        logger.error(f"[B2][TSLA-OPT] 查询平仓订单{close_order_id}异常: {e}")
         return "PENDING"
 
 
@@ -324,7 +324,7 @@ def get_option_chain(client=None) -> dict:
     )
 
     if resp.status_code != 200:
-        logger.error(f"[TSLA_OPT] get_option_chain失败: HTTP {resp.status_code}")
+        logger.error(f"[B2][TSLA-OPT] get_option_chain失败: HTTP {resp.status_code}")
         return {}
 
     data = resp.json()
@@ -383,7 +383,7 @@ def select_option(direction: str, chain: dict = None) -> Optional[dict]:
         chain = get_option_chain()
 
     if not chain or not chain.get("expirations"):
-        logger.error("[TSLA_OPT] 无可用期权链")
+        logger.error("[B2][TSLA-OPT] 无可用期权链")
         return None
 
     price = chain["underlying_price"]
@@ -495,17 +495,17 @@ def place_option(option: dict, dry_run: bool = True) -> dict:
                 affordable = int(option_bp / (option["cost_per_contract"] * 100))
                 if affordable < 1:
                     msg = f"账户期权购买力${option_bp:.0f}不足以买1张(需${option['cost_per_contract'] * 100:.0f})，跳过"
-                    logger.warning(f"[TSLA_OPT] {msg}")
+                    logger.warning(f"[B2][TSLA-OPT] {msg}")
                     return {"success": False, "error": msg}
                 logger.warning(
-                    f"[TSLA_OPT] 资金不足: 购买力${option_bp:.0f} < 计划${option['total_cost']:.0f}，"
+                    f"[B2][TSLA-OPT] 资金不足: 购买力${option_bp:.0f} < 计划${option['total_cost']:.0f}，"
                     f"降级 {option['contracts']}→{affordable}张"
                 )
                 option["contracts"] = affordable
                 option["total_cost"] = round(option["cost_per_contract"] * 100 * affordable, 2)
-            logger.info(f"[TSLA_OPT] 资金检查通过: option_buying_power=${option_bp:.0f}, 下单${option['total_cost']:.0f}")
+            logger.info(f"[B2][TSLA-OPT] 资金检查通过: option_buying_power=${option_bp:.0f}, 下单${option['total_cost']:.0f}")
         except Exception as _bal_e:
-            logger.error(f"[TSLA_OPT] 资金检查异常: {_bal_e}")
+            logger.error(f"[B2][TSLA-OPT] 资金检查异常: {_bal_e}")
             return {"success": False, "error": f"资金检查失败: {_bal_e}"}
 
     try:
@@ -525,7 +525,7 @@ def place_option(option: dict, dry_run: bool = True) -> dict:
 
         if dry_run:
             resp = client.preview_order(account_hash, order_spec)
-            logger.info(f"[TSLA_OPT] PREVIEW {label} cost=${option['total_cost']:.0f} → HTTP {resp.status_code}")
+            logger.info(f"[B2][TSLA-OPT] PREVIEW {label} cost=${option['total_cost']:.0f} → HTTP {resp.status_code}")
             return {"success": resp.status_code == 200, "dry_run": True, "label": label,
                     "status_code": resp.status_code, "option": option}
 
@@ -533,7 +533,7 @@ def place_option(option: dict, dry_run: bool = True) -> dict:
         if resp.status_code == 201:
             location = resp.headers.get("Location", "")
             order_id = location.split("/")[-1] if location else ""
-            logger.info(f"[TSLA_OPT] PLACED {label} cost=${option['total_cost']:.0f} order_id={order_id}")
+            logger.info(f"[B2][TSLA-OPT] PLACED {label} cost=${option['total_cost']:.0f} order_id={order_id}")
 
             # 查询实际成交价 (Schwab常优化成交, ask $9.90 → fill $9.81)
             fill_price = option["cost_per_contract"]  # 默认用ask
@@ -551,9 +551,9 @@ def place_option(option: dict, dry_run: bool = True) -> dict:
                                     _fp = _ex.get("price")
                                     if _fp and _fp > 0:
                                         fill_price = _fp
-                                        logger.info(f"[TSLA_OPT] 实际成交价=${fill_price} (ask=${option['cost_per_contract']})")
+                                        logger.info(f"[B2][TSLA-OPT] 实际成交价=${fill_price} (ask=${option['cost_per_contract']})")
                 except Exception as _fe:
-                    logger.warning(f"[TSLA_OPT] 查询成交价失败, 用ask价: {_fe}")
+                    logger.warning(f"[B2][TSLA-OPT] 查询成交价失败, 用ask价: {_fe}")
 
             # 保存持仓 (用实际成交价, 非ask价)
             # 分批建仓: option.contracts=总目标, 实际先买batch1_qty张
@@ -577,7 +577,7 @@ def place_option(option: dict, dry_run: bool = True) -> dict:
                     "strike": option["strike"],
                     "expiration": option["expiration"],
                 }
-                logger.info(f"[TSLA_OPT] 分批建仓: 先买{batch1_qty}张, 待确认后加仓{addon_qty}张")
+                logger.info(f"[B2][TSLA-OPT] 分批建仓: 先买{batch1_qty}张, 待确认后加仓{addon_qty}张")
             _save_position(pos_data)
 
             return {"success": True, "order_id": order_id, "label": label, "option": option,
@@ -591,7 +591,7 @@ def place_option(option: dict, dry_run: bool = True) -> dict:
             return {"success": False, "error": f"HTTP {resp.status_code}: {error_body}", "option": option}
 
     except Exception as e:
-        logger.error(f"[TSLA_OPT] place_option异常: {e}")
+        logger.error(f"[B2][TSLA-OPT] place_option异常: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -633,7 +633,7 @@ def close_option(option: dict, contracts: int = None, dry_run: bool = True,
             location = resp.headers.get("Location", "")
             order_id = location.split("/")[-1] if location else ""
             _mark_pending_close(order_id)
-            logger.info(f"[TSLA_OPT] CLOSE SUBMITTED {label} order_id={order_id}")
+            logger.info(f"[B2][TSLA-OPT] CLOSE SUBMITTED {label} order_id={order_id}")
             return {"success": True, "order_id": order_id, "label": label}
         else:
             error_body = ""
@@ -693,7 +693,7 @@ def get_option_current_value(option: dict) -> Optional[float]:
 
         return None
     except Exception as e:
-        logger.error(f"[TSLA_OPT] 查询期权当前价值失败: {e}")
+        logger.error(f"[B2][TSLA-OPT] 查询期权当前价值失败: {e}")
         return None
 
 
@@ -719,7 +719,7 @@ def check_exit_rules() -> Optional[dict]:
 
     option = position.get("option") or position.get("spread") or {}
     if not option or "expiration" not in option:
-        logger.warning("[TSLA_OPT] 持仓数据缺少option/expiration字段，跳过")
+        logger.warning("[B2][TSLA-OPT] 持仓数据缺少option/expiration字段，跳过")
         return None
     entry_cost = position.get("entry_cost", option.get("cost_per_contract", 0))
     contracts = option.get("contracts", 0)
@@ -746,7 +746,7 @@ def check_exit_rules() -> Optional[dict]:
     # 2. 查询当前价值
     current_value = get_option_current_value(option)
     if current_value is None:
-        logger.warning("[TSLA_OPT] 无法获取当前期权价值，跳过检查")
+        logger.warning("[B2][TSLA-OPT] 无法获取当前期权价值，跳过检查")
         return None
 
     pnl_per_contract = current_value - entry_cost
@@ -836,7 +836,7 @@ def _check_addon_buy(dry_run: bool = True) -> Optional[dict]:
                     data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
                     data.pop("addon_pending", None)
                     STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-                logger.info(f"[TSLA_OPT] 加仓超时1h, 放弃, 用{option.get('contracts', 0)}张交易")
+                logger.info(f"[B2][TSLA-OPT] 加仓超时1h, 放弃, 用{option.get('contracts', 0)}张交易")
                 return None
         except Exception:
             pass
@@ -853,7 +853,7 @@ def _check_addon_buy(dry_run: bool = True) -> Optional[dict]:
         return None
     if current_value < dip_floor:
         # 跌太多(>5%), 不加仓, 等止损
-        logger.info(f"[TSLA_OPT] 加仓跳过: 当前${current_value:.2f} < 5%底线${dip_floor:.2f}, 跌太多")
+        logger.info(f"[B2][TSLA-OPT] 加仓跳过: 当前${current_value:.2f} < 5%底线${dip_floor:.2f}, 跌太多")
         return None
 
     # 在跌5%以内, 执行加仓
@@ -861,7 +861,7 @@ def _check_addon_buy(dry_run: bool = True) -> Optional[dict]:
     opt_symbol = addon["option_symbol"]
     limit_price = round(current_value, 2)  # 用当前bid价作限价
 
-    logger.info(f"[TSLA_OPT] 加仓触发: 当前${current_value:.2f} 跌至入场${entry_cost:.2f}的5%内, 买{addon_qty}张@${limit_price}")
+    logger.info(f"[B2][TSLA-OPT] 加仓触发: 当前${current_value:.2f} 跌至入场${entry_cost:.2f}的5%内, 买{addon_qty}张@${limit_price}")
 
     if dry_run:
         return {"action": "ADDON_BUY", "qty": addon_qty, "price": limit_price, "dry_run": True}
@@ -908,16 +908,16 @@ def _check_addon_buy(dry_run: bool = True) -> Optional[dict]:
                 STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
             logger.info(
-                f"[TSLA_OPT] 加仓完成: {old_qty}→{new_qty}张, "
+                f"[B2][TSLA-OPT] 加仓完成: {old_qty}→{new_qty}张, "
                 f"成本${old_entry:.2f}→${new_entry:.2f}(加权), fill=${addon_fill}"
             )
             return {"action": "ADDON_BUY", "qty": addon_qty, "fill": addon_fill,
                     "new_total": new_qty, "new_entry": new_entry}
         else:
-            logger.error(f"[TSLA_OPT] 加仓下单失败: HTTP {resp.status_code}")
+            logger.error(f"[B2][TSLA-OPT] 加仓下单失败: HTTP {resp.status_code}")
             return None
     except Exception as e:
-        logger.error(f"[TSLA_OPT] 加仓异常: {e}")
+        logger.error(f"[B2][TSLA-OPT] 加仓异常: {e}")
         return None
 
 
@@ -944,7 +944,7 @@ def auto_manage(dry_run: bool = True) -> Optional[dict]:
     close_qty = exit_signal.get("contracts")  # 部分平仓张数, None=全部
 
     logger.info(
-        f"[TSLA_OPT] 卖出触发: {action} — {exit_signal['reason']} "
+        f"[B2][TSLA-OPT] 卖出触发: {action} — {exit_signal['reason']} "
         f"PnL=${pnl:.0f} qty={close_qty or 'ALL'}"
     )
 
@@ -977,9 +977,9 @@ def auto_manage(dry_run: bool = True) -> Optional[dict]:
                 data["pending_close_qty"] = close_qty
                 data["pending_current_value"] = round(exit_signal["current_value"], 2)
                 STATE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-                logger.info(f"[TSLA_OPT] 部分止盈限价单已提交, 等确认FILLED后更新合约数")
+                logger.info(f"[B2][TSLA-OPT] 部分止盈限价单已提交, 等确认FILLED后更新合约数")
             except Exception as _e:
-                logger.error(f"[TSLA_OPT] 记录pending_action失败: {_e}")
+                logger.error(f"[B2][TSLA-OPT] 记录pending_action失败: {_e}")
 
     return {
         "action": action,
@@ -999,17 +999,17 @@ def execute_signal(direction: str, dry_run: bool = True) -> dict:
         direction: "BUY" 或 "SELL"
         dry_run: True=干跑, False=实盘
     """
-    logger.info(f"[TSLA_OPT] 收到{direction}信号, dry_run={dry_run}")
+    logger.info(f"[B2][TSLA-OPT] 收到{direction}信号, dry_run={dry_run}")
 
     # 0a. 每日交易次数限制: 每方向每天最多1次
     if not _can_trade_today(direction):
-        logger.info(f"[TSLA_OPT] {direction}方向今日已交易, 跳过 (每方向每天限1次)")
+        logger.info(f"[B2][TSLA-OPT] {direction}方向今日已交易, 跳过 (每方向每天限1次)")
         return {"success": True, "action": "DAILY_LIMIT", "reason": f"{direction}方向今日已交易"}
 
     # 0b. 检查是否有pending_close (旧仓等确认中, 不开新仓)
     pending_pos = _load_position(include_pending=True)
     if pending_pos and pending_pos.get("status") == "pending_close":
-        logger.info("[TSLA_OPT] 旧仓pending_close等确认中，跳过开仓")
+        logger.info("[B2][TSLA-OPT] 旧仓pending_close等确认中，跳过开仓")
         return {"success": True, "action": "WAIT_PENDING", "reason": "旧仓平仓等确认中"}
 
     # 1. 检查现有持仓
@@ -1017,7 +1017,7 @@ def execute_signal(direction: str, dry_run: bool = True) -> dict:
     if position:
         opt_data = position.get("option") or position.get("spread")
         if not opt_data:
-            logger.warning("[TSLA_OPT] 持仓数据异常(无option字段)，清除重来")
+            logger.warning("[B2][TSLA-OPT] 持仓数据异常(无option字段)，清除重来")
             _clear_position()
             position = None
     if position:
@@ -1025,14 +1025,14 @@ def execute_signal(direction: str, dry_run: bool = True) -> dict:
         # 同向: 已有持仓，不重复开 (兼容旧BULL_CALL/BEAR_PUT)
         if (direction == "BUY" and existing_type in ("CALL", "BULL_CALL")) or \
            (direction == "SELL" and existing_type in ("PUT", "BEAR_PUT")):
-            logger.info(f"[TSLA_OPT] 已有同向持仓 {existing_type}，跳过")
+            logger.info(f"[B2][TSLA-OPT] 已有同向持仓 {existing_type}，跳过")
             return {"success": True, "action": "HOLD", "reason": "已有同向持仓"}
 
         # 反向: 平旧仓, 不立即开新仓 (等pending_close确认后下轮再开)
-        logger.info(f"[TSLA_OPT] 信号反转 {existing_type} → {direction}，平仓等确认")
+        logger.info(f"[B2][TSLA-OPT] 信号反转 {existing_type} → {direction}，平仓等确认")
         close_result = close_option(opt_data, dry_run=dry_run, market_order=True)
         if not close_result.get("success") and not dry_run:
-            logger.error(f"[TSLA_OPT] 平仓失败: {close_result}")
+            logger.error(f"[B2][TSLA-OPT] 平仓失败: {close_result}")
             return {"success": False, "error": "旧仓平仓失败", "close_result": close_result}
         return {"success": True, "action": "REVERSAL_CLOSE", "reason": f"反转平仓 {existing_type}→{direction}，等确认后再开新仓"}
 
@@ -1051,7 +1051,7 @@ def execute_signal(direction: str, dry_run: bool = True) -> dict:
         return {"success": False, "error": f"总成本${option['total_cost']:.0f}超预算${BUDGET}"}
 
     logger.info(
-        f"[TSLA_OPT] 选中: {option['type']} {option['strike']} "
+        f"[B2][TSLA-OPT] 选中: {option['type']} {option['strike']} "
         f"DTE={option['dte']} x{option['contracts']} "
         f"cost=${option['total_cost']:.0f} delta={option['delta']}"
     )

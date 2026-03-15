@@ -10395,7 +10395,7 @@ class PriceScanEngine:
                             _btc_bars.sort(key=lambda x: x.get("start", "0"))
                             _scalp_res = _gcc_scalp("BTCUSDC", _btc_bars)
                             if _scalp_res:
-                                logger.info(f"[GCC-SCALP] BTC: {_scalp_res}")
+                                logger.info(f"[B3][BTC-SCALP] BTC: {_scalp_res}")
                             else:
                                 _hb_key = "_scalp_hb_ts"
                                 _hb_last = getattr(self, _hb_key, 0)
@@ -10405,11 +10405,11 @@ class PriceScanEngine:
                                     from gcc_trading_module import _scalp_calc_rsi as _hb_rsi_fn, _scalp_calc_bb as _hb_bb_fn
                                     _hb_rsi = _hb_rsi_fn(_closes, 14)
                                     _hb_bb_l, _hb_bb_m, _hb_bb_u = _hb_bb_fn(_closes)
-                                    logger.info(f"[GCC-SCALP] BTC alive: RSI={_hb_rsi:.1f} BB=[{_hb_bb_l:.0f}/{_hb_bb_m:.0f}/{_hb_bb_u:.0f}] price=${_closes[-1]:.0f}")
+                                    logger.info(f"[B3][BTC-SCALP] BTC alive: RSI={_hb_rsi:.1f} BB=[{_hb_bb_l:.0f}/{_hb_bb_m:.0f}/{_hb_bb_u:.0f}] price=${_closes[-1]:.0f}")
                 except ImportError:
                     pass
                 except Exception as _scalp_err:
-                    logger.warning(f"[GCC-SCALP] BTC error: {_scalp_err}")
+                    logger.warning(f"[B3][BTC-SCALP] BTC error: {_scalp_err}")
 
                 # 获取当前价格 (用于P0-Open和P0-Tracking)
                 # GCC-0141: 价格拉取计时

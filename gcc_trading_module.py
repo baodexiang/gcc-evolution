@@ -3785,7 +3785,7 @@ def _save_scalp_state(state: dict) -> None:
         _atomic_write(_SCALP_STATE_FILE,
                       json.dumps(state, ensure_ascii=False, indent=2))
     except Exception as e:
-        logger.warning("[GCC-SCALP] save state: %s", e)
+        logger.warning("[B3][BTC-SCALP] save state: %s", e)
 
 
 def _record_scalp_trade(trade: dict) -> None:
@@ -3795,7 +3795,7 @@ def _record_scalp_trade(trade: dict) -> None:
         with open(_SCALP_TRADES_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(trade, ensure_ascii=False) + "\n")
     except Exception as e:
-        logger.warning("[GCC-SCALP] record trade: %s", e)
+        logger.warning("[B3][BTC-SCALP] record trade: %s", e)
 
 
 def scalp_confirm_entry(symbol: str) -> None:
@@ -3804,7 +3804,7 @@ def scalp_confirm_entry(symbol: str) -> None:
     if state.get("in_trade") and not state.get("entry_confirmed"):
         state["entry_confirmed"] = True
         _save_scalp_state(state)
-        logger.info("[GCC-SCALP] %s entry CONFIRMED on exchange", symbol)
+        logger.info("[B3][BTC-SCALP] %s entry CONFIRMED on exchange", symbol)
 
 
 def scalp_fail_entry(symbol: str) -> None:
@@ -3812,7 +3812,7 @@ def scalp_fail_entry(symbol: str) -> None:
     state = _load_scalp_state()
     if state.get("in_trade") and not state.get("entry_confirmed"):
         logger.warning(
-            "[GCC-SCALP] %s entry FAILED on exchange — clearing phantom position "
+            "[B3][BTC-SCALP] %s entry FAILED on exchange — clearing phantom position "
             "(was: %s @ $%.4f)",
             symbol, state.get("direction"), state.get("entry_price", 0),
         )
@@ -3886,7 +3886,7 @@ def scalp_get_pnl_summary() -> dict:
                     if is_win:
                         result["month"]["wins"] += 1
     except Exception as e:
-        logger.warning("[GCC-SCALP] read trades: %s", e)
+        logger.warning("[B3][BTC-SCALP] read trades: %s", e)
 
     return result
 
@@ -3911,7 +3911,7 @@ def gcc_scalp_observe(
     if symbol not in _SCALP_SYMBOLS:
         return None
     if not bars_5m or len(bars_5m) < 15:
-        logger.debug("[GCC-SCALP] %s: bars不足(%d)", symbol, len(bars_5m) if bars_5m else 0)
+        logger.debug("[B3][BTC-SCALP] %s: bars不足(%d)", symbol, len(bars_5m) if bars_5m else 0)
         return None
 
     # ── 提取OHLC序列 ──
@@ -3952,7 +3952,7 @@ def gcc_scalp_observe(
     if state["in_trade"]:
         # 现货安全: direction=SELL是损坏状态(现货不能做空),强制重置
         if state.get("direction") == "SELL":
-            logger.error("[GCC-SCALP] %s 损坏状态: direction=SELL on spot. 强制重置", symbol)
+            logger.error("[B3][BTC-SCALP] %s 损坏状态: direction=SELL on spot. 强制重置", symbol)
             new_state = _scalp_default_state()
             _save_scalp_state(new_state)
             return None
@@ -3964,7 +3964,7 @@ def gcc_scalp_observe(
             # 超过2根(10min) consumer仍未确认 → 视为执行失败,清除幽灵持仓
             if state["bars_held"] > 2:
                 logger.warning(
-                    "[GCC-SCALP] %s entry NOT confirmed after %d bars — clearing phantom",
+                    "[B3][BTC-SCALP] %s entry NOT confirmed after %d bars — clearing phantom",
                     symbol, state["bars_held"],
                 )
                 new_state = _scalp_default_state()
@@ -4037,7 +4037,7 @@ def gcc_scalp_observe(
                 pass
 
             logger.info(
-                "[GCC-SCALP] %s EXIT %s: $%.4f→$%.4f %s P&L=$%+.2f (%.2f%%)",
+                "[B3][BTC-SCALP] %s EXIT %s: $%.4f→$%.4f %s P&L=$%+.2f (%.2f%%)",
                 symbol, state["direction"], entry_p, current_price,
                 exit_reason, net_pnl_usd, net_pnl_pct * 100,
             )
@@ -4072,7 +4072,7 @@ def gcc_scalp_observe(
 
     # 方向门控: 4H方向=SELL时不做多(避免逆势接飞刀)
     if gate_direction == "SELL":
-        logger.info("[GCC-SCALP] %s BB+RSI BUY signal but 4H gate=SELL → blocked (不逆势)", symbol)
+        logger.info("[B3][BTC-SCALP] %s BB+RSI BUY signal but 4H gate=SELL → blocked (不逆势)", symbol)
         return None
 
     # 计算限价+止盈止损 (现货: 只做多, 限价单maker费率)
@@ -4126,7 +4126,7 @@ def gcc_scalp_observe(
     _save_scalp_state(state)
 
     logger.info(
-        "[GCC-SCALP] %s ENTRY %s [%s] @ $%.4f (limit=$%.4f) RSI=%.1f TP=$%.4f SL=$%.4f qty=%.2f",
+        "[B3][BTC-SCALP] %s ENTRY %s [%s] @ $%.4f (limit=$%.4f) RSI=%.1f TP=$%.4f SL=$%.4f qty=%.2f",
         symbol, signal, entry_strategy, current_price, limit_price, rsi,
         tp_price, sl_price, quantity,
     )
@@ -4160,7 +4160,7 @@ def _scalp_write_pending(symbol: str, action: str, price: float,
             try:
                 _existing = json.loads(pending_path.read_text(encoding="utf-8"))
                 if not _existing.get("consumed", True):
-                    logger.warning("[GCC-SCALP] pending_order未消费, 跳过写入: %s %s (existing: %s %s)",
+                    logger.warning("[B3][BTC-SCALP] pending_order未消费, 跳过写入: %s %s (existing: %s %s)",
                                    action, symbol, _existing.get("action"), _existing.get("ts"))
                     return
             except Exception:
@@ -4168,10 +4168,10 @@ def _scalp_write_pending(symbol: str, action: str, price: float,
         pending_path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(pending_path,
                       json.dumps(order, ensure_ascii=False, indent=2))
-        logger.info("[GCC-SCALP] pending_order: %s %s @ $%.4f qty=%.2f (%s)",
+        logger.info("[B3][BTC-SCALP] pending_order: %s %s @ $%.4f qty=%.2f (%s)",
                     action, symbol, price, quantity, reason)
     except Exception as e:
-        logger.warning("[GCC-SCALP] write pending: %s", e)
+        logger.warning("[B3][BTC-SCALP] write pending: %s", e)
 
 
 # ══════════════════════════════════════════════════════════════
