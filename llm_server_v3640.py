@@ -26149,6 +26149,8 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
     }
 
     # v3.560 P2-4: 3次重试+指数退避
+    _safe_payload = {k: v for k, v in payload.items() if k != "secret"}
+    log_to_server(f"[3Commas] {symbol} {final_action} sending: {_safe_payload}")
     for attempt in range(3):
         try:
             resp = requests.post(THREECOMMAS_WEBHOOK_URL, json=payload, timeout=5)
@@ -26157,15 +26159,18 @@ def send_3commas_signal(final_action: str, last_close: float, symbol: str, signa
             log_to_server(f"[3Commas] {symbol} HTTP status={resp.status_code}")
 
             ok_logic = True
+            resp_body = ""
             try:
                 data = resp.json()
+                resp_body = str(data)[:300]
                 if isinstance(data, dict) and (
                     data.get("error")
                     or str(data.get("status", "")).lower() == "error"
                 ):
                     ok_logic = False
             except Exception:
-                pass
+                resp_body = resp.text[:300] if resp.text else "(empty)"
+            log_to_server(f"[3Commas] {symbol} {final_action} response: {resp_body}")
 
             if ok_http and ok_logic:
                 state["last_3c_request_id"] = request_id
