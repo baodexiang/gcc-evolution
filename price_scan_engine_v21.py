@@ -10365,6 +10365,41 @@ class PriceScanEngine:
                         _gcc_lookback = 180  # GCC-0261: 加密Wyckoff需1个月4H≈180根
                         _gcc_bars_raw = _phase_bars or YFinanceDataFetcher.get_ohlcv(symbol, _tf_min, _gcc_lookback)
                         _gcc_bars = _verify_and_get_4h(main_symbol, _gcc_bars_raw, _gcc_lookback)
+
+                        # [MODIFIED 2026-03-15] GCC-0021 S4: Donchian突破4H — 与BrooksVision同频
+                        if _gcc_bars and len(_gcc_bars) >= 25:
+                            try:
+                                from gcc_trading_module import gcc_push_signal as _dc_push
+                                import numpy as _dc_np
+                                _dc_completed = _gcc_bars[:-1]  # 排除未完成4H K线
+                                _dc_highs = [float(b.get("high", b.get("h", 0))) for b in _dc_completed]
+                                _dc_lows = [float(b.get("low", b.get("l", 0))) for b in _dc_completed]
+                                _dc_closes = [float(b.get("close", b.get("c", 0))) for b in _dc_completed]
+                                if len(_dc_closes) >= 21:
+                                    _dc_high = max(_dc_highs[-20:])
+                                    _dc_low = min(_dc_lows[-20:])
+                                    _dc_cur = _dc_closes[-1]
+                                    # ATR(14) + ATR均值(20)
+                                    _dc_tr = []
+                                    for _di in range(1, len(_dc_closes)):
+                                        _dc_tr.append(max(
+                                            _dc_highs[_di] - _dc_lows[_di],
+                                            abs(_dc_highs[_di] - _dc_closes[_di-1]),
+                                            abs(_dc_lows[_di] - _dc_closes[_di-1])
+                                        ))
+                                    _dc_atr_cur = float(_dc_np.mean(_dc_tr[-14:])) if len(_dc_tr) >= 14 else 0
+                                    _dc_atr_avg = float(_dc_np.mean(_dc_tr[-20:])) if len(_dc_tr) >= 20 else _dc_atr_cur
+                                    _dc_atr_expand = _dc_atr_cur > _dc_atr_avg * 1.2 if _dc_atr_avg > 0 else False
+
+                                    if _dc_cur > _dc_high and _dc_atr_expand:
+                                        _dc_push(main_symbol, "Donchian_Break", "BUY", 0.70)
+                                        logger.info(f"[B1][Donchian] {main_symbol} 4H突破上轨 dc_high={_dc_high:.2f} atr={_dc_atr_cur:.2f} conf=0.70")
+                                    elif _dc_cur < _dc_low and _dc_atr_expand:
+                                        _dc_push(main_symbol, "Donchian_Break", "SELL", 0.70)
+                                        logger.info(f"[B1][Donchian] {main_symbol} 4H跌破下轨 dc_low={_dc_low:.2f} atr={_dc_atr_cur:.2f} conf=0.70")
+                            except Exception as _dc_e:
+                                logger.debug(f"[B1][Donchian] {main_symbol} error: {_dc_e}")
+
                         if _gcc_bars and len(_gcc_bars) >= 5:
                             _gcc_observe_round(
                                 main_symbol, _gcc_bars,
@@ -10501,6 +10536,39 @@ class PriceScanEngine:
                         _gcc_lookback_s = 450  # GCC-0261: 美股Wyckoff需3个月4H≈450根
                         _gcc_bars_s_raw = _phase_bars_s or YFinanceDataFetcher.get_ohlcv(symbol, _tf_min_s, _gcc_lookback_s)
                         _gcc_bars_s = _verify_and_get_4h(symbol, _gcc_bars_s_raw, _gcc_lookback_s)
+
+                        # [MODIFIED 2026-03-15] GCC-0021 S4: Donchian突破4H — 美股
+                        if _gcc_bars_s and len(_gcc_bars_s) >= 25:
+                            try:
+                                from gcc_trading_module import gcc_push_signal as _dc_push_s
+                                import numpy as _dc_np_s
+                                _dc_comp_s = _gcc_bars_s[:-1]
+                                _dc_h_s = [float(b.get("high", b.get("h", 0))) for b in _dc_comp_s]
+                                _dc_l_s = [float(b.get("low", b.get("l", 0))) for b in _dc_comp_s]
+                                _dc_c_s = [float(b.get("close", b.get("c", 0))) for b in _dc_comp_s]
+                                if len(_dc_c_s) >= 21:
+                                    _dc_hi_s = max(_dc_h_s[-20:])
+                                    _dc_lo_s = min(_dc_l_s[-20:])
+                                    _dc_cur_s = _dc_c_s[-1]
+                                    _dc_tr_s = []
+                                    for _di_s in range(1, len(_dc_c_s)):
+                                        _dc_tr_s.append(max(
+                                            _dc_h_s[_di_s] - _dc_l_s[_di_s],
+                                            abs(_dc_h_s[_di_s] - _dc_c_s[_di_s-1]),
+                                            abs(_dc_l_s[_di_s] - _dc_c_s[_di_s-1])
+                                        ))
+                                    _dc_atr_s = float(_dc_np_s.mean(_dc_tr_s[-14:])) if len(_dc_tr_s) >= 14 else 0
+                                    _dc_atr_avg_s = float(_dc_np_s.mean(_dc_tr_s[-20:])) if len(_dc_tr_s) >= 20 else _dc_atr_s
+                                    _dc_exp_s = _dc_atr_s > _dc_atr_avg_s * 1.2 if _dc_atr_avg_s > 0 else False
+                                    if _dc_cur_s > _dc_hi_s and _dc_exp_s:
+                                        _dc_push_s(symbol, "Donchian_Break", "BUY", 0.70)
+                                        logger.info(f"[B1][Donchian] {symbol} 4H突破上轨 dc_high={_dc_hi_s:.2f} conf=0.70")
+                                    elif _dc_cur_s < _dc_lo_s and _dc_exp_s:
+                                        _dc_push_s(symbol, "Donchian_Break", "SELL", 0.70)
+                                        logger.info(f"[B1][Donchian] {symbol} 4H跌破下轨 dc_low={_dc_lo_s:.2f} conf=0.70")
+                            except Exception as _dc_e_s:
+                                logger.debug(f"[B1][Donchian] {symbol} stock error: {_dc_e_s}")
+
                         if _gcc_bars_s and len(_gcc_bars_s) >= 5:
                             _gcc_observe_round(
                                 symbol, _gcc_bars_s,
