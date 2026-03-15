@@ -3690,8 +3690,9 @@ _SCALP_RSI_EXIT_LOW = 30          # SELL出场RSI
 _SCALP_ATR_PERIOD = 14             # ATR(14)与RSI周期一致
 _SCALP_MAX_HOLD_BARS = 12         # 最多持仓12根(15min×12=3小时)
 _SCALP_COOLDOWN_BARS = 4          # 冷却4根(15min×4=1小时)
-# v3.660: OPUSDC暂停(现货SELL被拦截), 切换BTC BB均值回归
-_SCALP_SYMBOLS = frozenset({"BTCUSDC"})  # 剥头皮白名单
+# v3.660: B3独立通道已删除, BB均值回归改为外挂(S3)接入B1
+# gcc_scalp_observe代码保留但白名单清空(不再有独立剥头皮品种)
+_SCALP_SYMBOLS = frozenset()  # 空 — B3已合并入B1
 _SCALP_BB_PERIOD = 20              # 布林带周期
 _SCALP_BB_STD = 2.0                # 布林带标准差倍数
 _SCALP_BB_RSI_THRESHOLD = 30      # BB+RSI复合: 价格≤下轨且RSI<30

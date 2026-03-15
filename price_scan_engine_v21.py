@@ -10279,9 +10279,49 @@ class PriceScanEngine:
                     pushed += 1
                     logger.info(f"[GCC-0259] {symbol} MACD柱状图翻负 → SELL")
 
-                # S4: BB — v0.3禁用(均值回归信号, 与趋势跟随系统矛盾)
-                # if cur_close <= bb_lower: _gcc_push_15m("BB_15m", "BUY")
-                # elif cur_close >= bb_upper: _gcc_push_15m("BB_15m", "SELL")
+                # ── S3: BB(20,2) 均值回归 — 30min K线 ──
+                # v3.660: 启用BB外挂(左侧交易), 用30min数据更稳定
+                # 原B3独立通道合并入B1, 由GCC-TM统一决策
+                try:
+                    _bb_bars = None
+                    if market_type == "crypto":
+                        from coinbase_data_provider import get_candles as _cb_get
+                        _bb_bars_raw = _cb_get(main_symbol, granularity="THIRTY_MINUTE", limit=40)
+                        if _bb_bars_raw and len(_bb_bars_raw) >= 25:
+                            _bb_bars_raw.sort(key=lambda x: x.get("start", "0"))
+                            _bb_bars = _bb_bars_raw
+                    if _bb_bars is None:
+                        # 美股/fallback: 用15min合成30min
+                        if n >= 50:
+                            _bb_closes_30m = [(closes[j] + closes[j+1]) / 2 for j in range(0, n-1, 2)]
+                        else:
+                            _bb_closes_30m = None
+                    else:
+                        _bb_closes_30m = [float(b.get("close", 0)) for b in _bb_bars]
+
+                    if _bb_closes_30m and len(_bb_closes_30m) >= 25:
+                        _bb_arr = np.array(_bb_closes_30m)
+                        _bb_window = _bb_arr[-20:]
+                        _bb_mid = float(np.mean(_bb_window))
+                        _bb_std = float(np.std(_bb_window, ddof=1))
+                        _bb_lower = _bb_mid - 2.0 * _bb_std
+                        _bb_upper = _bb_mid + 2.0 * _bb_std
+                        _bb_cur = float(_bb_closes_30m[-1])
+
+                        # RSI(14) on 30min
+                        _bb_delta = np.diff(_bb_arr[-(15):])
+                        _bb_gain = np.where(_bb_delta > 0, _bb_delta, 0)
+                        _bb_loss = np.where(_bb_delta < 0, -_bb_delta, 0)
+                        _bb_ag = float(np.mean(_bb_gain)) if len(_bb_gain) > 0 else 0
+                        _bb_al = float(np.mean(_bb_loss)) if len(_bb_loss) > 0 else 0
+                        _bb_rsi = 100 - (100 / (1 + _bb_ag / _bb_al)) if _bb_al > 0 else (100 if _bb_ag > 0 else 50)
+
+                        if _bb_cur <= _bb_lower and _bb_rsi < 30:
+                            _gcc_push_15m(main_symbol, "BB_MeanRev_30m", "BUY", 0.65)
+                            pushed += 1
+                            logger.info(f"[S3][BB] {symbol} 30m BB下轨+RSI={_bb_rsi:.0f}<30 → BUY (price={_bb_cur:.0f} lower={_bb_lower:.0f} mid={_bb_mid:.0f})")
+                except Exception as _bb_e:
+                    logger.debug(f"[S3][BB] {symbol} BB_30m error: {_bb_e}")
 
         except Exception as _ind_e:
             logger.debug(f"[GCC-0259] {symbol} 技术指标信号异常: {_ind_e}")
@@ -10381,35 +10421,7 @@ class PriceScanEngine:
                 else:
                     logger.debug(f"[v21.7] {symbol} 外挂扫描跳过(TF={_sym_tf}min, 间隔{_scan_interval_tf}s未到)")
 
-                # v3.660: BTC BB均值回归 15min调度 (OPUSDC暂停)
-                try:
-                    from gcc_trading_module import gcc_scalp_observe as _gcc_scalp
-                    from coinbase_data_provider import get_candles as _cb_candles
-                    _SCALP_INTERVAL = 900  # 15min
-                    _scalp_last_key = "_scalp_btc_last_ts"
-                    _scalp_last = getattr(self, _scalp_last_key, 0)
-                    if time.time() - _scalp_last >= _SCALP_INTERVAL:
-                        setattr(self, _scalp_last_key, time.time())
-                        _btc_bars = _cb_candles("BTCUSDC", granularity="FIFTEEN_MINUTE", limit=40)
-                        if _btc_bars and len(_btc_bars) >= 20:
-                            _btc_bars.sort(key=lambda x: x.get("start", "0"))
-                            _scalp_res = _gcc_scalp("BTCUSDC", _btc_bars)
-                            if _scalp_res:
-                                logger.info(f"[B3][BTC-SCALP] BTC: {_scalp_res}")
-                            else:
-                                _hb_key = "_scalp_hb_ts"
-                                _hb_last = getattr(self, _hb_key, 0)
-                                if time.time() - _hb_last >= 1800:
-                                    setattr(self, _hb_key, time.time())
-                                    _closes = [float(b.get("close", 0)) for b in _btc_bars]
-                                    from gcc_trading_module import _scalp_calc_rsi as _hb_rsi_fn, _scalp_calc_bb as _hb_bb_fn
-                                    _hb_rsi = _hb_rsi_fn(_closes, 14)
-                                    _hb_bb_l, _hb_bb_m, _hb_bb_u = _hb_bb_fn(_closes)
-                                    logger.info(f"[B3][BTC-SCALP] BTC alive: RSI={_hb_rsi:.1f} BB=[{_hb_bb_l:.0f}/{_hb_bb_m:.0f}/{_hb_bb_u:.0f}] price=${_closes[-1]:.0f}")
-                except ImportError:
-                    pass
-                except Exception as _scalp_err:
-                    logger.warning(f"[B3][BTC-SCALP] BTC error: {_scalp_err}")
+                # v3.660: B3独立通道已删除, BB均值回归改为外挂(S3)接入B1 GCC-TM
 
                 # 获取当前价格 (用于P0-Open和P0-Tracking)
                 # GCC-0141: 价格拉取计时
