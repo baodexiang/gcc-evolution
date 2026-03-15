@@ -440,13 +440,22 @@ class OFFilter:
                      "updated_ts"):
             entry[key] = result.get(key)
 
-        # 原子写入
+        # 原子写入 (Windows/OneDrive: 重试3次应对短暂文件锁)
         tmp_file = _STATE_FILE.with_suffix(".tmp.json")
         tmp_file.write_text(
             json.dumps(existing, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        os.replace(str(tmp_file), str(_STATE_FILE))
+        for _attempt in range(3):
+            try:
+                os.replace(str(tmp_file), str(_STATE_FILE))
+                break
+            except OSError:
+                if _attempt < 2:
+                    import time as _t; _t.sleep(0.5)
+                else:
+                    logger.warning("[OF-FILTER] os.replace failed after 3 attempts: %s", _STATE_FILE)
+                    raise
 
     # ══════════════════════════════════════════════════════════
     # Volume Profile — POC / VAL / VAH / LVN / HVN
