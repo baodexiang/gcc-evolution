@@ -10392,10 +10392,10 @@ class PriceScanEngine:
                                     _dc_atr_expand = _dc_atr_cur > _dc_atr_avg * 1.2 if _dc_atr_avg > 0 else False
 
                                     if _dc_cur > _dc_high and _dc_atr_expand:
-                                        _dc_push(main_symbol, "Donchian_Break", "BUY", 0.70)
+                                        _dc_push(main_symbol, "Donchian_Break", "BUY", 0.70, persistent=True)
                                         logger.info(f"[B1][Donchian] {main_symbol} 4H突破上轨 dc_high={_dc_high:.2f} atr={_dc_atr_cur:.2f} conf=0.70")
                                     elif _dc_cur < _dc_low and _dc_atr_expand:
-                                        _dc_push(main_symbol, "Donchian_Break", "SELL", 0.70)
+                                        _dc_push(main_symbol, "Donchian_Break", "SELL", 0.70, persistent=True)
                                         logger.info(f"[B1][Donchian] {main_symbol} 4H跌破下轨 dc_low={_dc_low:.2f} atr={_dc_atr_cur:.2f} conf=0.70")
                             except Exception as _dc_e:
                                 logger.debug(f"[B1][Donchian] {main_symbol} error: {_dc_e}")
@@ -10561,10 +10561,10 @@ class PriceScanEngine:
                                     _dc_atr_avg_s = float(_dc_np_s.mean(_dc_tr_s[-20:])) if len(_dc_tr_s) >= 20 else _dc_atr_s
                                     _dc_exp_s = _dc_atr_s > _dc_atr_avg_s * 1.2 if _dc_atr_avg_s > 0 else False
                                     if _dc_cur_s > _dc_hi_s and _dc_exp_s:
-                                        _dc_push_s(symbol, "Donchian_Break", "BUY", 0.70)
+                                        _dc_push_s(symbol, "Donchian_Break", "BUY", 0.70, persistent=True)
                                         logger.info(f"[B1][Donchian] {symbol} 4H突破上轨 dc_high={_dc_hi_s:.2f} atr={_dc_atr_s:.2f} conf=0.70")
                                     elif _dc_cur_s < _dc_lo_s and _dc_exp_s:
-                                        _dc_push_s(symbol, "Donchian_Break", "SELL", 0.70)
+                                        _dc_push_s(symbol, "Donchian_Break", "SELL", 0.70, persistent=True)
                                         logger.info(f"[B1][Donchian] {symbol} 4H跌破下轨 dc_low={_dc_lo_s:.2f} atr={_dc_atr_s:.2f} conf=0.70")
                             except Exception as _dc_e_s:
                                 logger.debug(f"[B1][Donchian] {symbol} stock error: {_dc_e_s}")
