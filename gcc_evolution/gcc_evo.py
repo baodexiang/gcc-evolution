@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gcc-evo v5.430 — GCC Evolution Engine with Visual Dashboard"""
+"""gcc-evo v5.440 — GCC Evolution Engine with Visual Dashboard"""
 from __future__ import annotations
 
 import json
@@ -35,7 +35,7 @@ if _PROJECT_ROOT not in sys.path:
 
 KEYS_FILE = Path(".gcc/keys.yaml")
 
-HELP_TEXT = """  GCC v5.430 — Active Evolution Engine
+HELP_TEXT = """  GCC v5.440 — Active Evolution Engine
   ═══════════════════════════════════════════════════
 
   Daily Use:
@@ -2523,6 +2523,16 @@ def main():
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+    # subprocess.run(text=True) 在Windows/Python3.14默认用cp1252解码,
+    # git commit消息含中文→UnicodeDecodeError. 全局patch让text=True默认UTF-8.
+    import subprocess as _sp
+    _orig_run = _sp.run
+    def _utf8_run(*args, **kwargs):
+        if kwargs.get("text") and "encoding" not in kwargs:
+            kwargs["encoding"] = "utf-8"
+            kwargs.setdefault("errors", "replace")
+        return _orig_run(*args, **kwargs)
+    _sp.run = _utf8_run
     cli(standalone_mode=True)
 
 
@@ -3338,31 +3348,21 @@ def cmd_dashboard(export, out, serve, port):
         except Exception:
             pass
 
-    # Scan skill/cards/ directories for knowledge cards (JSON only)
+    # Scan skill/cards/ directories for knowledge cards (supplemental)
     _skill_cards_dir = _gcc / "skill" / "cards"
     _card_dirs_seen = set()
     if _skill_cards_dir.exists():
-        for _json_file in _skill_cards_dir.rglob("*.json"):
-            _cat = _json_file.parent.name
-            _card_id = f"sk_{_json_file.stem[:40]}"
+        for _md_file in _skill_cards_dir.rglob("*.md"):
+            _cat = _md_file.parent.name
+            _card_id = f"sk_{_md_file.stem[:40]}"
             if _card_id not in _card_dirs_seen:
                 _card_dirs_seen.add(_card_id)
-                try:
-                    import json as _jl
-                    _jdata = _jl.loads(_json_file.read_text(encoding="utf-8"))
-                    _cards_out.append({
-                        "key_id": _cat,
-                        "title": _jdata.get("title", _json_file.stem.replace("_", " ")),
-                        "card_type": _jdata.get("type", "knowledge"),
-                        "layer_priority": 2,
-                    })
-                except Exception:
-                    _cards_out.append({
-                        "key_id": _cat,
-                        "title": _json_file.stem.replace("_", " "),
-                        "card_type": "knowledge",
-                        "layer_priority": 2,
-                    })
+                _cards_out.append({
+                    "key_id": _cat,
+                    "title": _md_file.stem.replace("_", " "),
+                    "card_type": "knowledge",
+                    "layer_priority": 2,
+                })
         # Generate skill entries from card categories
         _cat_counts = {}
         for c in _cards_out:
@@ -5420,12 +5420,12 @@ def db_sessions(limit):
 
 
 # ── knn (KEY-007) ─────────────────────────────────────────────
-# GCC-0199: 切换到 modules/knn 五层架构 (原 vision_pre_filter 已废弃)
+# GCC-0199: 切换到 modules/knn K1-K5架构 (原 vision_pre_filter 已废弃)
 
 @cli.group("knn", invoke_without_command=True)
 @click.pass_context
 def cmd_knn(ctx):
-    """KEY-007 KNN进化引擎 — 五层架构完整闭环
+    """KEY-007 KNN进化引擎 — K1-K5架构完整闭环
 
     直接运行 gcc-evo knn 执行完整进化流程:
       ① status    — 库状态概览 (plugin×symbol粒度)
@@ -5434,7 +5434,7 @@ def cmd_knn(ctx):
     """
     if ctx.invoked_subcommand is None:
         click.echo("\n  ╔══════════════════════════════════════════╗")
-        click.echo("  ║  KNN 五层架构进化引擎 (modules/knn)     ║")
+        click.echo("  ║  KNN K1-K5 进化引擎 (modules/knn)       ║")
         click.echo("  ╚══════════════════════════════════════════╝")
         click.echo()
         click.echo("  Step 1/3: 库状态")
@@ -5485,7 +5485,7 @@ def knn_status():
     import time as _t
     hist_file = Path("state/plugin_knn_history.npz")
     age_h = (_t.time() - hist_file.stat().st_mtime) / 3600 if hist_file.exists() else -1
-    click.echo(f"\n  KNN五层架构历史库 — {len(plugins)}外挂 × {len(symbols)}品种 = {len(all_keys)}组合")
+    click.echo(f"\n  KNN(K1-K5)历史库 — {len(plugins)}外挂 × {len(symbols)}品种 = {len(all_keys)}组合")
     click.echo(f"  总样本: {total_samples:,}  待回填: {pending_count}  更新: {age_h:.1f}h前")
     click.echo(f"  {'─'*65}")
     click.echo(f"  {'外挂':<18} {'品种数':>6} {'总样本':>8} {'平均胜率':>8}")
@@ -5512,8 +5512,8 @@ def knn_status():
         skew_warn = "⚠偏斜" if wr > 0.7 or wr < 0.3 else "✓"
         click.echo(f"  {key:<25} {s['samples']:>6} {wr:>5.0%} {skew_warn:>6}")
 
-    # L5 alignment状态
-    click.echo(f"\n  L5 gcc-evo对齐状态:")
+    # K5 alignment状态
+    click.echo(f"\n  K5 gcc-evo对齐状态:")
     evo_tune = Path("state/knn_evo_tune.json")
     if evo_tune.exists():
         try:
@@ -5524,7 +5524,7 @@ def knn_status():
         except Exception:
             click.echo(f"  调参文件: 读取失败")
     else:
-        click.echo(f"  调参文件: 尚未生成 (L5未执行过)")
+        click.echo(f"  调参文件: 尚未生成 (K5未执行过)")
 
     drift_log = Path("state/knn_drift_log.jsonl")
     if drift_log.exists():
@@ -5758,8 +5758,8 @@ def _knn_smart_prune_v2(db, key, target_keep_ratio=0.7):
 def knn_evolve(days, prune):
     """进化闭环: 库统计→准确率分析→漂移检测→反思→淘汰
 
-    基于 modules/knn 五层架构:
-      L2 store统计 → L3 漂移检测 → L4 准确率 → L5 gcc-evo闭环
+    基于 modules/knn K1-K5架构:
+      K2 store统计 → K3 漂移检测 → K4 准确率 → K5 gcc-evo闭环
     """
     import numpy as np
     sys.path.insert(0, str(Path.cwd()))
@@ -5897,8 +5897,8 @@ def knn_evolve(days, prune):
                 ))
             click.echo(f"  已为{len(bad_keys)}个低准确率组合生成约束")
 
-    # ── Phase 3: L3 漂移检测 ──
-    click.echo(f"\n  Phase 3: L3漂移检测")
+    # ── Phase 3: K3 漂移检测 ──
+    click.echo(f"\n  Phase 3: K3漂移检测")
     click.echo(f"  {'─'*70}")
     drift_count = 0
     for key in sorted(all_stats.keys()):
@@ -5945,8 +5945,8 @@ def knn_evolve(days, prune):
         else:
             click.echo(f"  无需淘汰")
 
-    # ── Phase 5: L5 gcc-evo闭环 ──
-    click.echo(f"\n  Phase 5: L5 gcc-evo闭环")
+    # ── Phase 5: K5 gcc-evo闭环 ──
+    click.echo(f"\n  Phase 5: K5 gcc-evo闭环")
     click.echo(f"  {'─'*70}")
     try:
         if acc_map and any(isinstance(v, dict) for k, v in acc_map.items() if not k.startswith("_")):
@@ -5957,11 +5957,11 @@ def knn_evolve(days, prune):
             check_accuracy_drift(acc_map)
             click.echo(f"  ✓ 准确率偏离检测完成")
         else:
-            click.echo(f"  △ 跳过L5 (plugin_knn_accuracy.json无per-key数据)")
+            click.echo(f"  △ 跳过K5 (plugin_knn_accuracy.json无per-key数据)")
         sync_evo_tuning()
         click.echo(f"  ✓ gcc-evo→KNN反向调参")
     except Exception as e:
-        click.echo(f"  ⚠ L5执行异常(非致命): {e}")
+        click.echo(f"  ⚠ K5执行异常(非致命): {e}")
 
     # ── 保存进化记录 ──
     from datetime import datetime
@@ -6230,25 +6230,12 @@ def card_knn_precompute(top_k):
 @cmd_card.command("knn-status")
 def card_knn_status():
     """Show prefetch index preload status."""
-    import json as _js
-    from pathlib import Path as _P
-    _idx_path = _P(".gcc") / ".." / "state" / "prefetch_index.json"
-    # Try common locations
-    for candidate in [_P("state/prefetch_index.json"), _P(".gcc/../state/prefetch_index.json")]:
-        if candidate.exists():
-            _idx_path = candidate
-            break
-    meta = {}
-    if _idx_path.exists():
-        try:
-            data = _js.loads(_idx_path.read_text(encoding="utf-8"))
-            meta = data.get("meta", {})
-        except Exception:
-            pass
+    from gcc_evolution.card_bridge import CardBridge
+    b = CardBridge()
+    meta = (b._prefetch_index or {}).get("meta", {})
     click.echo(
-        f"\n  ✦ prefetch backend={meta.get('backend', 'none')} loaded={meta.get('loaded', False)} "
-        f"cards={meta.get('cards', 0)} top_k={meta.get('top_k', 0)} "
-        f"path={meta.get('path', 'state/prefetch_index.json')}\n"
+        f"\n  ✦ prefetch backend={meta.get('backend')} loaded={meta.get('loaded', False)} "
+        f"path=state/prefetch_index.pkl\n"
     )
 
 
@@ -6326,56 +6313,6 @@ def card_distill():
             if v["status"] == "flagged":
                 click.echo(f"      {cid}: {v['title'][:35]} rate={v['correct_rate']:.0%}")
     click.echo()
-
-
-@cmd_card.command("prune")
-def card_prune():
-    """GCC-0270: 淘汰低正确率卡片 (<30%且样本>=5)。"""
-    from gcc_evolution.card_bridge import CardBridge
-    bridge = CardBridge()
-    bridge.load_index()
-    result = bridge.prune_deprecated()
-    click.echo(f"\n  ✦ Prune complete: checked={result['total_checked']} deprecated={result['deprecated']}")
-    for d in result.get("details", []):
-        click.echo(f"    ❌ {d['card_id']}: rate={d['correct_rate']:.0%} samples={d['samples']}")
-    click.echo()
-
-
-@cmd_card.command("skills")
-def card_skills():
-    """GCC-0270: 高分卡蒸馏为可复用skill (>60%且样本>=10)。"""
-    from gcc_evolution.card_bridge import CardBridge
-    bridge = CardBridge()
-    bridge.load_index()
-    result = bridge.distill_to_skills()
-    click.echo(f"\n  ✦ Skill distillation: new={result.get('new_skills', 0)} distilled_cards={result.get('distilled_cards', 0)}")
-    for sk in result.get("skills", []):
-        click.echo(f"    ⭐ {sk.get('skill_id', '')}: {sk.get('name', '')[:40]} rate={sk.get('correct_rate', 0):.0%}")
-    click.echo()
-
-
-@cmd_card.command("lifecycle")
-def card_lifecycle():
-    """GCC-0270: 完整生命周期一键执行 (distill → prune → skills)。"""
-    from gcc_evolution.card_bridge import CardBridge
-    bridge = CardBridge()
-    bridge.load_index()
-    click.echo(f"\n  ✦ Card Lifecycle — {len(bridge._cards)} cards")
-
-    # Step 1: distill
-    report = bridge.distill()
-    validated = sum(1 for v in report.values() if v["status"] == "validated")
-    flagged = sum(1 for v in report.values() if v["status"] == "flagged")
-    click.echo(f"    [1/3] Distill: validated={validated} flagged={flagged}")
-
-    # Step 2: prune
-    prune_r = bridge.prune_deprecated()
-    click.echo(f"    [2/3] Prune: deprecated={prune_r['deprecated']}")
-
-    # Step 3: skills
-    skill_r = bridge.distill_to_skills()
-    click.echo(f"    [3/3] Skills: new={skill_r.get('new_skills', 0)}")
-    click.echo(f"\n  ✦ Lifecycle complete.\n")
 
 
 @cmd_card.command("sync")
