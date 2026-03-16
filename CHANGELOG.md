@@ -4,6 +4,21 @@
 
 ---
 
+## [5.440] - 2026-03-15
+
+### Added
+
+- KEY-007-S12: KNN匹配算法对齐设计哲学 (4项改善)
+  - T1: `adaptive_k()` 按regime动态调K (sideways×1.5降噪, bull/bear×0.7提精度)
+  - T2: `PluginKNNResult` 输出补全 — 新增 `down_rate/avg_up/avg_down/median_bars` 涨跌分布字段
+  - T3: indicator维度方向>幅度 — `sign(x)×log1p(|x|)` 压缩幅度保留方向
+  - T4: 多窗口时间弹性匹配 — price_shape段3种时间缩放(0.8x/1.0x/1.2x)取最优
+
+### Changed
+
+- KNN内部层号从 L1-L5 改为 K1-K5，避免与gcc-evo L0-L6混淆 (10个文件)
+- 版本号统一升级到 `5.440`
+
 ## [5.420] - 2026-03-15
 
 ### Added
